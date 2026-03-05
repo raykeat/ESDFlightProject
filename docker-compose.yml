@@ -1,0 +1,56 @@
+
+services:
+  # ========== YOUR SERVICE ==========
+  booking-service:
+    build: ./booking-microservice                 # Builds from YOUR Dockerfile
+    container_name: booking-app
+    ports:
+      - "3002:3000"                           # Access at localhost:3002
+    environment:
+      - DB_HOST=booking-db
+      - DB_USER=root
+      - DB_PASSWORD=rootpassword
+      - DB_NAME=bookingdb
+    depends_on:
+      booking-db:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  booking-db:
+    image: mysql:8.0 #pulls sql from docker registry
+    container_name: booking-db
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpassword
+      - MYSQL_DATABASE=bookingdb
+    volumes:
+      - booking-data:/var/lib/mysql
+      - ./booking-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ========== FLIGHT SERVICE ==========
+  
+
+  # ========== PAYMENT SERVICE ==========
+  
+
+  # ========== NOTIFICATION SERVICE ==========
+
+
+  # ========== RABBITMQ ==========
+  
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  booking-data:
+  flight-data:
+  payment-data:
