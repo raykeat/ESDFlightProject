@@ -18,6 +18,7 @@ app.get('/health', (req, res) => {
 });
 
 // Create a booking
+// [POST] /bookings
 app.post('/bookings', (req, res) => {
   const { passengerID, flightID, amount, seatNumber } = req.body;
   
@@ -39,6 +40,7 @@ app.post('/bookings', (req, res) => {
 });
 
 // Get bookings by flight
+// [GET] /bookings?flightID={flightID}
 app.get('/bookings', (req, res) => {
   const { flightID } = req.query;
   
@@ -56,6 +58,7 @@ app.get('/bookings', (req, res) => {
 });
 
 // Update booking status
+// [PUT] /bookings/{bookingID}/status
 app.put('/bookings/:bookingID/status', (req, res) => {
   const { bookingID } = req.params;
   const { status } = req.body;
@@ -74,6 +77,7 @@ app.put('/bookings/:bookingID/status', (req, res) => {
 });
 
 // Get booking by ID
+// [GET] /bookings/{bookingID}
 app.get('/bookings/:bookingID', (req, res) => {
   const { bookingID } = req.params;
   
