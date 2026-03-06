@@ -124,9 +124,8 @@ def validate_fields(data, required_fields):
     return None
 
 def generate_idempotency_key(booking_id, passenger_id, amount, prefix="pay"):
-    """Auto-generate idempotency key — client does not need to send anything.
-    prefix 'pay' for payments, 'ref' for refunds so they never clash."""
-    raw = f"{prefix}-{booking_id}-{passenger_id}-{amount}"
+    today = get_sgt_now().strftime("%Y%m%d")
+    raw = f"{prefix}-{booking_id}-{passenger_id}-{amount}-{today}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 def to_stripe_cents(amount):
