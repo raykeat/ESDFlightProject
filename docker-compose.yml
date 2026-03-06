@@ -1,6 +1,6 @@
 
 services:
-  # ========== YOUR SERVICE ==========
+  # ========== BOOKING MICROSERVICE ==========
   booking-service:
     build: ./booking-microservice                 # Builds from YOUR Dockerfile
     container_name: booking-app
@@ -33,6 +33,25 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+  
+  # ========== BOOKING COMPOSITE SERVICE ==========
+  booking-composite-service:
+    build: ./booking-composite-service
+    container_name: booking-composite-app
+    ports:
+      - "3010:3001"  # Access at localhost:3010
+    environment:
+      - PORT=3001
+      - BOOKING_SERVICE_URL=http://booking-service:3000
+      - PASSENGER_SERVICE_URL=http://passenger-service:3000
+      - FLIGHT_SERVICE_URL=http://flight-service:3000
+      - PAYMENT_SERVICE_URL=http://payment-service:3000
+      - NOTIFICATION_SERVICE_URL=http://notification-service:3000
+    depends_on:
+      - booking-service
+    networks:
+      - app-network
+    restart: unless-stopped
 
   # ========== FLIGHT SERVICE ==========
   
