@@ -38,7 +38,40 @@ services:
   
 
   # ========== PAYMENT SERVICE ==========
-  
+  payment-service:
+    build: ./payment-microservice                 
+    container_name: payment-app
+    ports:
+      - "5001:5000"                               # Access at localhost:5001
+    environment:
+      - DB_HOST=payment-db
+      - DB_USER=root
+      - DB_PASSWORD=rootpassword
+      - DB_NAME=paymentdb
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+    depends_on:
+      payment-db:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  payment-db:
+    image: mysql:8.0 
+    container_name: payment-db
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpassword
+      - MYSQL_DATABASE=paymentdb
+      - TZ=Asia/Singapore
+    volumes:
+      - payment-data:/var/lib/mysql
+      - ./payment-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # ========== NOTIFICATION SERVICE ==========
 
