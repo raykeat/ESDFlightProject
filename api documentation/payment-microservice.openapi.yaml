@@ -1,0 +1,365 @@
+openapi: 3.0.3
+info:
+  title: Payment Microservice API
+  version: 1.0.0
+  description: API documentation for payment and refund operations.
+servers:
+  - url: http://localhost:5001
+    description: Docker host mapping from docker-compose
+  - url: http://localhost:5000
+    description: Direct service port (non-docker local run)
+tags:
+  - name: Payments
+  - name: Refunds
+
+paths:
+  /payment:
+    get:
+      tags: [Payments]
+      summary: Get all payments
+      responses:
+        '200':
+          description: Payments returned
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PaymentRecord'
+
+    post:
+      tags: [Payments]
+      summary: Process a new payment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentRequest'
+      responses:
+        '201':
+          description: Payment completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatePaymentResponse'
+        '200':
+          description: Idempotent retry returned existing completed payment
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaymentRecord'
+                  - type: object
+                    properties:
+                      message:
+                        type: string
+                        example: Payment already completed. No duplicate charge was made.
+        '400':
+          description: Invalid request payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '402':
+          description: Stripe/card declined
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Duplicate payment for booking
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorEnvelope'
+                  - type: object
+                    properties:
+                      paymentID:
+                        type: integer
+                        example: 18
+        '503':
+          description: Circuit breaker open for Stripe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /payment/{paymentID}:
+    get:
+      tags: [Payments]
+      summary: Get payment by payment ID
+      parameters:
+        - in: path
+          name: paymentID
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Payment found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentRecord'
+        '404':
+          description: Payment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /payment/refund:
+    post:
+      tags: [Refunds]
+      summary: Process full or partial refund
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRefundRequest'
+      responses:
+        '200':
+          description: Refund completed or idempotent retry returned existing refund
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/CreateRefundResponse'
+                  - type: object
+                    properties:
+                      refundID:
+                        type: string
+                        example: re_3QhABxKXe2tR
+                      status:
+                        type: string
+                        example: Refunded
+                      message:
+                        type: string
+                        example: Refund already completed. No duplicate refund was made.
+        '400':
+          description: Invalid request payload or refund business rule failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Passenger mismatch with original payment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Original payment or Stripe charge not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Duplicate refund for booking
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorEnvelope'
+                  - type: object
+                    properties:
+                      refundID:
+                        type: string
+                        example: re_3QhABxKXe2tR
+        '502':
+          description: Stripe gateway error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Circuit breaker open for Stripe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /payment/refund/{refundID}:
+    get:
+      tags: [Refunds]
+      summary: Get refund record by refund ID
+      parameters:
+        - in: path
+          name: refundID
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Refund found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentRecord'
+        '404':
+          description: Refund not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+components:
+  schemas:
+    CreatePaymentRequest:
+      type: object
+      required: [bookingID, passengerID, amount]
+      properties:
+        bookingID:
+          type: integer
+          example: 12
+        passengerID:
+          type: integer
+          example: 101
+        amount:
+          type: number
+          format: double
+          example: 299.99
+        stripeToken:
+          type: string
+          description: Stripe source token. Defaults to tok_visa if omitted.
+          example: tok_visa
+        flightNumber:
+          type: string
+          example: SQ318
+
+    CreatePaymentResponse:
+      type: object
+      properties:
+        paymentID:
+          type: integer
+          example: 25
+        stripeChargeID:
+          type: string
+          example: ch_3Qh9v0KXe2tR
+        status:
+          type: string
+          example: Completed
+
+    CreateRefundRequest:
+      type: object
+      required: [bookingID, passengerID, amount]
+      properties:
+        bookingID:
+          type: integer
+          example: 12
+        passengerID:
+          type: integer
+          example: 101
+        amount:
+          type: number
+          format: double
+          description: Original payment amount used by service-side validations.
+          example: 299.99
+        reason:
+          type: string
+          description: Cancellation reason.
+          example: FlightCancelled
+        refundType:
+          type: string
+          enum: [full, partial]
+          default: full
+        refundAmount:
+          type: number
+          format: double
+          description: Required if refundType is partial.
+          example: 120.00
+
+    CreateRefundResponse:
+      type: object
+      properties:
+        refundID:
+          type: string
+          example: re_3QhABxKXe2tR
+        status:
+          type: string
+          example: Refunded
+        bookingID:
+          type: integer
+          example: 12
+        passengerID:
+          type: integer
+          example: 101
+        amount:
+          type: number
+          format: double
+          example: 299.99
+        refundType:
+          type: string
+          example: full
+        cancellationReason:
+          type: string
+          example: FlightCancelled
+        refundedAt:
+          type: string
+          example: '2026-03-11 18:30:05 SGT'
+        stripeStatus:
+          type: string
+          example: succeeded
+
+    PaymentRecord:
+      type: object
+      properties:
+        paymentID:
+          type: integer
+          example: 25
+        bookingID:
+          type: integer
+          example: 12
+        passengerID:
+          type: integer
+          example: 101
+        amount:
+          type: number
+          format: double
+          example: 299.99
+        status:
+          type: string
+          example: Completed
+        stripeChargeID:
+          type: string
+          nullable: true
+          example: ch_3Qh9v0KXe2tR
+        refundID:
+          type: string
+          nullable: true
+          example: re_3QhABxKXe2tR
+        idempotencyKey:
+          type: string
+          nullable: true
+          example: 48ebf4041f6f0e8ff89b3e4c18bcf9a4
+        cancellationReason:
+          type: string
+          nullable: true
+          example: FlightCancelled
+        chargedAt:
+          type: string
+          nullable: true
+          example: '2026-03-11 18:10:01'
+        refundedAt:
+          type: string
+          nullable: true
+          example: '2026-03-11 18:30:05'
+        createdAt:
+          type: string
+          example: '2026-03-11 18:10:01'
+
+    ErrorEnvelope:
+      type: object
+      properties:
+        error:
+          type: string
+          example: Bad Request
+        code:
+          type: string
+          example: MISSING_FIELDS
+        message:
+          type: string
+          example: 'Missing required fields: bookingID, passengerID, amount'
