@@ -6,3 +6,15 @@ Thereafter, modify the docker-compose.yml file so that your own microservice can
 1. To start up all the microservices, run docker-compose up -d
 2. To stop all the microservices, run docker-compose down
 3. To stop all the microservices and delete database data locally, run docker-compose down -v
+
+To use the frontend,
+1. cd into frontend
+2. npm install
+3. npm run dev
+
+Under the api documentation folder lies the YAML files of the microservices (currenly only have booking and payment microservice). to view the api documents,
+1. Open https://editor.swagger.io
+2. Copy-paste the YAML of the microservice you want to see
+
+FYI, this is the api document for passenger service (since its created on outsystems):
+https://personal-4whagfbm.outsystemscloud.com/Passenger_Srv/rest/PassengerAPI/#/

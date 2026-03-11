@@ -1,0 +1,258 @@
+openapi: 3.0.3
+info:
+  title: Booking Microservice API
+  version: 1.0.0
+  description: API documentation for the booking microservice.
+servers:
+  - url: http://localhost:3002
+    description: Docker host mapping from docker-compose
+  - url: http://localhost:3000
+    description: Direct service port (non-docker local run)
+tags:
+  - name: Health
+  - name: Bookings
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: OK
+                  service:
+                    type: string
+                    example: booking-service
+
+  /bookings:
+    post:
+      tags: [Bookings]
+      summary: Create a booking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBookingRequest'
+      responses:
+        '201':
+          description: Booking created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateBookingResponse'
+        '500':
+          description: Database or server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+    get:
+      tags: [Bookings]
+      summary: Get bookings by flight ID
+      parameters:
+        - in: query
+          name: flightID
+          required: true
+          schema:
+            type: integer
+          description: Flight ID used to filter booking records.
+      responses:
+        '200':
+          description: Booking list for the given flight
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Booking'
+        '500':
+          description: Database or server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /bookings/{bookingID}:
+    get:
+      tags: [Bookings]
+      summary: Get booking by booking ID
+      parameters:
+        - in: path
+          name: bookingID
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Booking found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '404':
+          description: Booking not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '500':
+          description: Database or server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /bookings/{bookingID}/status:
+    put:
+      tags: [Bookings]
+      summary: Update booking status
+      parameters:
+        - in: path
+          name: bookingID
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBookingStatusRequest'
+      responses:
+        '200':
+          description: Status updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '500':
+          description: Database or server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /booking/{bookingID}:
+    delete:
+      tags: [Bookings]
+      summary: Delete booking by booking ID
+      parameters:
+        - in: path
+          name: bookingID
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Booking deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '404':
+          description: Booking not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '500':
+          description: Database or server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+components:
+  schemas:
+    Booking:
+      type: object
+      properties:
+        bookingID:
+          type: integer
+          example: 1
+        passengerID:
+          type: integer
+          example: 101
+        flightID:
+          type: integer
+          example: 201
+        status:
+          type: string
+          example: Confirmed
+        amount:
+          type: number
+          format: double
+          example: 299.99
+        seatNumber:
+          type: string
+          nullable: true
+          example: 12A
+        refundID:
+          type: string
+          nullable: true
+          example: re_123456789
+        createdAt:
+          type: string
+          example: '2026-03-11 16:25:01'
+
+    CreateBookingRequest:
+      type: object
+      required: [passengerID, flightID, amount]
+      properties:
+        passengerID:
+          type: integer
+          example: 101
+        flightID:
+          type: integer
+          example: 201
+        amount:
+          type: number
+          format: double
+          example: 299.99
+        seatNumber:
+          type: string
+          example: 12A
+
+    CreateBookingResponse:
+      type: object
+      properties:
+        bookingID:
+          type: integer
+          example: 12
+        status:
+          type: string
+          example: Pending
+        message:
+          type: string
+          example: Booking created successfully
+
+    UpdateBookingStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: Confirmed
+
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Booking status updated successfully
+
+    SimpleError:
+      type: object
+      properties:
+        error:
+          type: string
+          example: Booking not found
