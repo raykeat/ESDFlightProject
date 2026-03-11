@@ -45,7 +45,7 @@ services:
       - BOOKING_SERVICE_URL=http://booking-service:3000
       - PASSENGER_SERVICE_URL=http://passenger-service:3000
       - FLIGHT_SERVICE_URL=http://flight-service:3000
-      - PAYMENT_SERVICE_URL=http://payment-service:3000
+      - PAYMENT_SERVICE_URL=http://payment-service:5000
       - NOTIFICATION_SERVICE_URL=http://notification-service:3000
     depends_on:
       - booking-service

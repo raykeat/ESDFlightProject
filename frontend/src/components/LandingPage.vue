@@ -2,6 +2,9 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { usePassengerSession } from '../composables/usePassengerSession'
+import { useRouter } from 'vue-router'
+
+const router = useRouter() 
 
 const booking = ref({
   departingCountry: '',
@@ -39,6 +42,25 @@ const displayName = computed(() => {
 
 function submitSearch() {
   console.log('Search submitted', booking.value)
+
+  // Validate required fields
+  if (!booking.value.departingCountry || !booking.value.arrivingCountry || !booking.value.departureDate) {
+    alert('Please fill in all required fields')
+    return
+  }
+  
+  // Navigate to search results with query params
+  router.push({
+    path: '/search-results',
+    query: {
+      departingCountry: booking.value.departingCountry,
+      arrivingCountry: booking.value.arrivingCountry,
+      departureDate: booking.value.departureDate,
+      returnDate: booking.value.returnDate || '',
+      passengers: booking.value.passengers,
+      cabin: booking.value.cabin
+    }
+  })
 }
 
 function handleLogout() {
