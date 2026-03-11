@@ -6,3 +6,8 @@ Thereafter, modify the docker-compose.yml file so that your own microservice can
 1. To start up all the microservices, run docker-compose up -d
 2. To stop all the microservices, run docker-compose down
 3. To stop all the microservices and delete database data locally, run docker-compose down -v
+
+To use the frontend,
+1. cd into frontend
+2. npm install
+3. npm run dev
