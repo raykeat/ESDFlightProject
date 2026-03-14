@@ -163,16 +163,6 @@ def get_payment(paymentID):
 # POST /payment
 # Process a new payment
 # Used in: Scenario 1 - Book Flight
-#
-# Edge cases handled:
-#   - Missing / empty fields
-#   - Wrong field types
-#   - Amount below Stripe minimum ($0.50 SGD)
-#   - Amount above maximum ($10,000 SGD)
-#   - Float precision bug (299.99 * 100 = 29998.9...)
-#   - Duplicate payment for same booking
-#   - Idempotency — auto-generated, no retry double-charge
-#   - Circuit breaker — Stripe down after 3 failures
 # ==========================================
 @app.route('/payment', methods=['POST'])
 @limiter.limit("10 per minute")
@@ -181,7 +171,7 @@ def process_payment():
         data = request.get_json()
 
         # Validate required fields — also catches empty strings
-        error = validate_fields(data, ['bookingID', 'passengerID', 'amount'])
+        error = validate_fields(data, ['bookingID', 'passengerID', 'amount', 'flightNumber'])
         if error:
             return jsonify({
                 "error":   "Bad Request",
@@ -334,20 +324,6 @@ def process_payment():
 # Process a full or partial refund
 # Used in: Scenario 2 Path B - No Alternative Flight
 #          Scenario 3 - Passenger rejects offer (partial)
-#
-# Edge cases handled:
-#   - Missing / empty fields
-#   - Wrong field types
-#   - Amount must be above zero (no minimum — refund whatever was paid)
-#   - Amount too large (cap at original payment amount)
-#   - Partial refund exceeds original amount
-#   - Float precision bug
-#   - Passenger ID mismatch (wrong passenger trying to refund)
-#   - Duplicate refund for same booking
-#   - Idempotency — auto-generated, no retry double-refund
-#   - Refund window expired (Stripe only allows refunds within 180 days)
-#   - Concurrent requests race condition (DB row lock)
-#   - Circuit breaker — Stripe down after 3 failures
 # ==========================================
 @app.route('/payment/refund', methods=['POST'])
 @limiter.limit("10 per minute")
@@ -356,7 +332,7 @@ def process_refund():
         data = request.get_json()
 
         # Validate required fields
-        error = validate_fields(data, ['bookingID', 'passengerID', 'amount'])
+        error = validate_fields(data, ['bookingID', 'passengerID', 'amount', 'flightNumber'])
         if error:
             return jsonify({
                 "error":   "Bad Request",
