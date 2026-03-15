@@ -106,13 +106,20 @@ function bookFlight() {
     return
   }
   
-  // Proceed to booking
+  // Proceed to booking — pass search params so Back button works correctly
   router.push({
     path: '/booking-confirmation',
     query: {
-      flightID: selectedFlight.value.flightID,
-      seatNumber: selectedSeat.value,
-      amount: selectedFlight.value.price
+      flightID:         selectedFlight.value.flightID,
+      seatNumber:       selectedSeat.value,
+      amount:           selectedFlight.value.price,
+      flightNumber:     selectedFlight.value.flightNumber,
+      departingCountry: searchParams.value.departingCountry,
+      arrivingCountry:  searchParams.value.arrivingCountry,
+      departureDate:    searchParams.value.departureDate,
+      returnDate:       searchParams.value.returnDate,
+      passengers:       searchParams.value.passengers,
+      cabin:            searchParams.value.cabin,
     }
   })
 }
@@ -132,12 +139,22 @@ function bookFlight() {
             • {{ searchParams.cabin }}
           </p>
         </div>
-        <RouterLink
-          to="/"
-          class="rounded-full border border-black/10 bg-white px-5 py-2 text-sm font-medium text-[#1d1d1f] transition hover:border-[#e63946]/30"
-        >
-          Modify Search
-        </RouterLink>
+        <div style="display:flex; gap:10px; align-items:center;">
+          <RouterLink
+            to="/"
+            class="rounded-full border border-black/10 bg-white px-5 py-2 text-sm font-medium text-[#1d1d1f] transition hover:border-[#e63946]/30"
+            style="display:flex; align-items:center; gap:6px;"
+          >
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7"/></svg>
+            Back to Home
+          </RouterLink>
+          <RouterLink
+            to="/"
+            class="rounded-full border border-black/10 bg-white px-5 py-2 text-sm font-medium text-[#1d1d1f] transition hover:border-[#e63946]/30"
+          >
+            Modify Search
+          </RouterLink>
+        </div>
       </div>
 
       <!-- Loading state -->

@@ -5,6 +5,8 @@ import ProfilePage from '../pages/ProfilePage.vue'
 import SearchResults from '../pages/SearchResults.vue' 
 import BookingConfirmation from '../pages/BookingConfirmation.vue'  
 import BookingSuccess from '../pages/BookingSuccess.vue'
+import MyBookings from '../pages/MyBookings.vue'
+import RebookingOffer from '../pages/RebookingOffer.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -38,6 +40,16 @@ const router = createRouter({
       path: '/booking-success/:bookingID',
       name: 'booking-success',
       component: BookingSuccess
+    },
+    {
+      path: '/my-bookings',
+      name: 'my-bookings',
+      component: MyBookings
+    },
+    {
+      path: '/rebooking-offer',
+      name: 'rebooking-offer',
+      component: RebookingOffer
     }
   ],
 })

@@ -218,6 +218,41 @@ app.post('/api/bookings', async (req, res) => {
  
 
 // ==========================================
+// GET /api/bookings/:bookingID
+// Get a single booking by ID
+// Called by BookingSuccess.vue after payment
+// ==========================================
+app.get('/api/bookings/:bookingID', async (req, res) => {
+  const { bookingID } = req.params;
+  try {
+    const response = await axios.get(`${BOOKING_SERVICE_URL}/bookings/${bookingID}`);
+    res.json(response.data);
+  } catch (error) {
+    if (error.response?.status === 404) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    console.error('Error fetching booking:', error.message);
+    res.status(500).json({ error: 'Failed to fetch booking', message: error.message });
+  }
+});
+
+// ==========================================
+// GET /api/bookings/passenger/:passengerID
+// Get all bookings for a passenger
+// Called by MyBookings.vue
+// ==========================================
+app.get('/api/bookings/passenger/:passengerID', async (req, res) => {
+  const { passengerID } = req.params;
+  try {
+    const response = await axios.get(`${BOOKING_SERVICE_URL}/bookings/passenger/${passengerID}`);
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error fetching bookings for passenger:', error.message);
+    res.status(500).json({ error: 'Failed to fetch bookings', message: error.message });
+  }
+});
+
+// ==========================================
 // TODO: Scenario 2
 // ==========================================
 
