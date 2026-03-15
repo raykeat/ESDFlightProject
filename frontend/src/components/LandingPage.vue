@@ -136,6 +136,14 @@ onBeforeUnmount(() => {
             >
               View Profile
             </RouterLink>
+            <RouterLink
+              to="/my-bookings"
+              class="block px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#1d1d1f] transition hover:bg-[#f5f5f7]"
+              @click="profileMenuOpen = false"
+            >
+              My Bookings
+            </RouterLink>
+            <div class="mx-4 my-1 border-t border-black/8"></div>
             <button
               class="block w-full px-4 py-2 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73] transition hover:bg-[#f5f5f7] hover:text-[#1d1d1f]"
               @click="handleLogout"
