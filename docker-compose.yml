@@ -1,11 +1,10 @@
-
 services:
   # ========== BOOKING MICROSERVICE ==========
   booking-service:
-    build: ./booking-microservice                 # Builds from YOUR Dockerfile
+    build: ./booking-microservice
     container_name: booking-app
     ports:
-      - "3002:3000"                           # Access at localhost:3002
+      - "3002:3000"                               # Access at localhost:3002
     environment:
       - DB_HOST=booking-db
       - DB_USER=root
@@ -18,11 +17,12 @@ services:
       - app-network
 
   booking-db:
-    image: mysql:8.0 #pulls sql from docker registry
+    image: mysql:8.0
     container_name: booking-db
     environment:
       - MYSQL_ROOT_PASSWORD=rootpassword
       - MYSQL_DATABASE=bookingdb
+      - TZ=Asia/Singapore
     volumes:
       - booking-data:/var/lib/mysql
       - ./booking-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -33,20 +33,20 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-  
+
   # ========== BOOKING COMPOSITE SERVICE ==========
   booking-composite-service:
     build: ./booking-composite-service
     container_name: booking-composite-app
     ports:
-      - "3010:3001"  # Access at localhost:3010
+      - "3010:3001"                               # Access at localhost:3010
     environment:
       - PORT=3001
       - BOOKING_SERVICE_URL=http://booking-service:3000
       - PASSENGER_SERVICE_URL=http://passenger-service:3000
       - FLIGHT_SERVICE_URL=http://flight-service:3000
       - PAYMENT_SERVICE_URL=http://payment-service:5000
-      - NOTIFICATION_SERVICE_URL=http://notification-service:3000
+      - NOTIFICATION_SERVICE_URL=http://notification-composite:3000
     depends_on:
       - booking-service
     networks:
@@ -54,11 +54,11 @@ services:
     restart: unless-stopped
 
   # ========== FLIGHT SERVICE ==========
-  
+  # TODO: add when ready
 
   # ========== PAYMENT SERVICE ==========
   payment-service:
-    build: ./payment-microservice                 
+    build: ./payment-microservice
     container_name: payment-app
     ports:
       - "5001:5000"                               # Access at localhost:5001
@@ -75,7 +75,7 @@ services:
       - app-network
 
   payment-db:
-    image: mysql:8.0 
+    image: mysql:8.0
     container_name: payment-db
     environment:
       - MYSQL_ROOT_PASSWORD=rootpassword
@@ -92,11 +92,83 @@ services:
       timeout: 5s
       retries: 5
 
-  # ========== NOTIFICATION SERVICE ==========
+  # ========== OFFER MICROSERVICE ==========
+  offer-service:
+    build: ./offer-microservice
+    container_name: offer-app
+    restart: unless-stopped
+    ports:
+      - "5002:5000"                               # Access at localhost:5002
+    environment:
+      - DB_HOST=offer-db
+      - DB_USER=root
+      - DB_PASSWORD=rootpassword
+      - DB_NAME=offerdb
+    depends_on:
+      offer-db:
+        condition: service_healthy
+    networks:
+      - app-network
 
+  offer-db:
+    image: mysql:8.0
+    container_name: offer-db
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpassword
+      - MYSQL_DATABASE=offerdb
+      - TZ=Asia/Singapore
+    volumes:
+      - offer-data:/var/lib/mysql
+      - ./offer-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # ========== RABBITMQ ==========
-  
+  # ========== NOTIFICATION COMPOSITE ==========
+  # TODO: add when ready
+
+  # ========== EMAIL SERVICE ==========
+  # TODO: add when ready
+
+  # ========== FLIGHT CANCELLATION COMPOSITE ==========
+  # TODO: add when ready
+
+  # ========== REBOOKING COMPOSITE ==========
+  # TODO: add when ready
+
+  # ========== FLIGHT SEARCH COMPOSITE ==========
+  # TODO: add when ready
+
+  # ========== KAFKA ==========
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - app-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    ports:
+      - "9092:9092"                               # Access at localhost:9092
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    depends_on:
+      - zookeeper
+    networks:
+      - app-network
 
 networks:
   app-network:
@@ -106,3 +178,4 @@ volumes:
   booking-data:
   flight-data:
   payment-data:
+  offer-data:

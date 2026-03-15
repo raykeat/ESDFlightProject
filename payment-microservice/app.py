@@ -26,10 +26,10 @@ def log_event(event, **kwargs):
 
 stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
 
-db_user     = os.environ.get('DB_USER', 'root')
+db_user     = os.environ.get('DB_USER',     'root')
 db_password = os.environ.get('DB_PASSWORD', 'rootpassword')
-db_host     = os.environ.get('DB_HOST', 'localhost')
-db_name     = os.environ.get('DB_NAME', 'paymentdb')
+db_host     = os.environ.get('DB_HOST',     'localhost')
+db_name     = os.environ.get('DB_NAME',     'paymentdb')
 
 app.config['SQLALCHEMY_DATABASE_URI'] = (
     f"mysql+mysqlconnector://{db_user}:{db_password}@{db_host}:3306/{db_name}"
@@ -52,13 +52,24 @@ stripe_breaker = pybreaker.CircuitBreaker(
 )
 
 @stripe_breaker
-def stripe_create_charge(amount, currency, source, description, metadata, idempotency_key=None):
-    """Wrapper around Stripe charge — protected by circuit breaker"""
-    kwargs = dict(amount=amount, currency=currency, source=source,
-                  description=description, metadata=metadata)
+def stripe_create_checkout_session(line_items, metadata, success_url, cancel_url, idempotency_key=None):
+    """Wrapper around Stripe Checkout Session creation — protected by circuit breaker"""
+    kwargs = dict(
+        payment_method_types=['card'],
+        line_items=line_items,
+        mode='payment',
+        success_url=success_url,
+        cancel_url=cancel_url,
+        metadata=metadata
+    )
     if idempotency_key:
         kwargs['idempotency_key'] = idempotency_key
-    return stripe.Charge.create(**kwargs)
+    return stripe.checkout.Session.create(**kwargs)
+
+@stripe_breaker
+def stripe_retrieve_session(session_id):
+    """Retrieve a Stripe Checkout Session — protected by circuit breaker"""
+    return stripe.checkout.Session.retrieve(session_id)
 
 @stripe_breaker
 def stripe_create_refund(charge, amount, reason, metadata, idempotency_key=None):
@@ -73,25 +84,29 @@ sgt_tz = timezone(timedelta(hours=8))
 def get_sgt_now():
     return datetime.now(sgt_tz)
 
-STRIPE_MIN_AMOUNT = 0.50    # Stripe minimum charge - SGD $0.50
-MAX_AMOUNT        = 10000   # Maximum single transaction — SGD $10,000
-REFUND_WINDOW     = 180     # Stripe only allows refunds within 180 days
+STRIPE_MIN_AMOUNT = 0.50
+MAX_AMOUNT        = 10000
+REFUND_WINDOW     = 180
 
+# ==========================================
+# DATABASE MODEL
+# ==========================================
 class Payment(db.Model):
     __tablename__ = 'payment'
 
-    paymentID          = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    bookingID          = db.Column(db.Integer, nullable=False)
-    passengerID        = db.Column(db.Integer, nullable=False)
-    amount             = db.Column(db.Float, nullable=False)
-    status             = db.Column(db.String(50), nullable=False)  # 'Completed', 'Refunded', 'Failed'
-    stripeChargeID     = db.Column(db.String(100), nullable=True)
-    refundID           = db.Column(db.String(100), nullable=True)
+    paymentID          = db.Column(db.Integer,     primary_key=True, autoincrement=True)
+    bookingID          = db.Column(db.Integer,     nullable=False)
+    passengerID        = db.Column(db.Integer,     nullable=False)
+    amount             = db.Column(db.Float,       nullable=False)
+    status             = db.Column(db.String(50),  nullable=False)   # 'Pending', 'Completed', 'Refunded', 'Failed'
+    stripeSessionID    = db.Column(db.String(200), nullable=True)    # Stripe Checkout Session ID (cs_...)
+    stripeChargeID     = db.Column(db.String(100), nullable=True)    # Stripe Charge ID — populated after verify-session
+    refundID           = db.Column(db.String(100), nullable=True)    # Stripe Refund ID (re_...)
     idempotencyKey     = db.Column(db.String(100), nullable=True, unique=True)
     cancellationReason = db.Column(db.String(255), nullable=True)
-    chargedAt          = db.Column(db.DateTime, nullable=True)
-    refundedAt         = db.Column(db.DateTime, nullable=True)
-    createdAt          = db.Column(db.DateTime, default=get_sgt_now)
+    chargedAt          = db.Column(db.DateTime,    nullable=True)
+    refundedAt         = db.Column(db.DateTime,    nullable=True)
+    createdAt          = db.Column(db.DateTime,    default=get_sgt_now)
 
     def json(self):
         return {
@@ -100,11 +115,12 @@ class Payment(db.Model):
             "passengerID":        self.passengerID,
             "amount":             self.amount,
             "status":             self.status,
+            "stripeSessionID":    self.stripeSessionID,
             "stripeChargeID":     self.stripeChargeID,
             "refundID":           self.refundID,
             "idempotencyKey":     self.idempotencyKey,
             "cancellationReason": self.cancellationReason,
-            "chargedAt":          str(self.chargedAt) if self.chargedAt else None,
+            "chargedAt":          str(self.chargedAt)  if self.chargedAt  else None,
             "refundedAt":         str(self.refundedAt) if self.refundedAt else None,
             "createdAt":          str(self.createdAt),
         }
@@ -114,7 +130,8 @@ class Payment(db.Model):
 # HELPERS
 # ==========================================
 def validate_fields(data, required_fields):
-    """Check all required fields exist and are not None or empty string"""
+    if not data:
+        return "Request body is missing or not valid JSON"
     missing = [
         f for f in required_fields
         if f not in data or data[f] is None or data[f] == ""
@@ -124,14 +141,14 @@ def validate_fields(data, required_fields):
     return None
 
 def generate_idempotency_key(booking_id, passenger_id, amount, prefix="pay"):
-    today = get_sgt_now().strftime("%Y%m%d")
-    raw = f"{prefix}-{booking_id}-{passenger_id}-{amount}-{today}"
+    # Include seconds to avoid conflicts when retrying with same params on same day
+    now = get_sgt_now().strftime("%Y%m%d%H%M%S")
+    raw = f"{prefix}-{booking_id}-{passenger_id}-{amount}-{now}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 def to_stripe_cents(amount):
-    """Safely convert float amount to Stripe cents, avoiding float precision bugs.
-    e.g. 299.99 * 100 can give 29998.999... — round() fixes this."""
     return round(int(round(amount * 100)))
+
 
 # ==========================================
 # GET /payment
@@ -142,6 +159,7 @@ def to_stripe_cents(amount):
 def get_all_payments():
     payments = Payment.query.order_by(Payment.createdAt.desc()).all()
     return jsonify([p.json() for p in payments]), 200
+
 
 # ==========================================
 # GET /payment/<paymentID>
@@ -159,18 +177,27 @@ def get_payment(paymentID):
         }), 404
     return jsonify(payment.json()), 200
 
-# ==========================================
-# POST /payment
-# Process a new payment
-# Used in: Scenario 1 - Book Flight
-# ==========================================
-@app.route('/payment', methods=['POST'])
-@limiter.limit("10 per minute")
-def process_payment():
-    try:
-        data = request.get_json()
 
-        # Validate required fields — also catches empty strings
+# ==========================================
+# POST /payment/checkout
+# Create a Stripe Checkout Session
+# Used in: Scenario 1 - Book Flight
+#
+# Flow:
+#   1. Booking Composite calls this endpoint
+#   2. Payment Service creates a Stripe Checkout Session
+#   3. Returns sessionUrl to Composite → UI
+#   4. UI redirects passenger to Stripe's hosted payment page
+#   5. Passenger pays on Stripe, gets redirected to successUrl
+#   6. BookingSuccess page calls GET /payment/verify-session/<sessionID>
+#      to confirm payment and update status to Completed
+# ==========================================
+@app.route('/payment/checkout', methods=['POST'])
+@limiter.limit("10 per minute")
+def create_checkout_session():
+    try:
+        data = request.get_json(silent=True)
+
         error = validate_fields(data, ['bookingID', 'passengerID', 'amount', 'flightNumber'])
         if error:
             return jsonify({
@@ -179,12 +206,13 @@ def process_payment():
                 "message": error
             }), 400
 
-        booking_id   = data.get('bookingID')
-        passenger_id = data.get('passengerID')
-        amount       = data.get('amount')
-        stripe_token = data.get('stripeToken', 'tok_visa')
+        booking_id    = data.get('bookingID')
+        passenger_id  = data.get('passengerID')
+        amount        = data.get('amount')
+        flight_number = data.get('flightNumber')
+        success_url   = data.get('successUrl', f"http://localhost:5173/booking-success/{booking_id}?session_id={{CHECKOUT_SESSION_ID}}")
+        cancel_url    = data.get('cancelUrl',  "http://localhost:5173/booking-confirmation")
 
-        # Validate field types
         if not isinstance(booking_id, int) or not isinstance(passenger_id, int):
             return jsonify({
                 "error":   "Bad Request",
@@ -199,8 +227,6 @@ def process_payment():
                 "message": "amount must be a number"
             }), 400
 
-        # Validate amount range
-        # Edge case: amount must be above zero
         if amount <= 0:
             return jsonify({
                 "error":   "Bad Request",
@@ -208,7 +234,6 @@ def process_payment():
                 "message": "Amount must be greater than 0"
             }), 400
 
-        # Edge case: Stripe minimum charge is SGD $0.50
         if amount < STRIPE_MIN_AMOUNT:
             return jsonify({
                 "error":   "Bad Request",
@@ -216,7 +241,6 @@ def process_payment():
                 "message": f"Minimum charge amount is SGD ${STRIPE_MIN_AMOUNT:.2f}"
             }), 400
 
-        # Edge case: cap very large amounts to prevent mistakes
         if amount > MAX_AMOUNT:
             return jsonify({
                 "error":   "Bad Request",
@@ -224,19 +248,16 @@ def process_payment():
                 "message": f"Maximum charge amount is SGD ${MAX_AMOUNT:.2f}"
             }), 400
 
-        # Auto-generate idempotency key — client sends nothing extra
         idempotency_key = generate_idempotency_key(booking_id, passenger_id, amount, prefix="pay")
 
-        # Edge case: idempotency — same request retried, return original payment
         existing_by_key = Payment.query.filter_by(idempotencyKey=idempotency_key).first()
-        if existing_by_key:
+        if existing_by_key and existing_by_key.status == "Completed":
             log_event("idempotent_payment_returned", bookingID=booking_id)
             return jsonify({
                 **existing_by_key.json(),
                 "message": "Payment already completed. No duplicate charge was made."
             }), 200
 
-        # Edge case: prevent duplicate payments for same booking
         existing_payment = Payment.query.filter_by(
             bookingID=booking_id,
             status="Completed"
@@ -249,24 +270,28 @@ def process_payment():
                 "paymentID": existing_payment.paymentID
             }), 409
 
-        flight_number   = data.get('flightNumber', 'N/A')
-        charge_time_str = get_sgt_now().strftime("%Y-%m-%d %H:%M:%S SGT")
+        log_event("checkout_session_initiated", bookingID=booking_id, amount=amount)
 
-        log_event("payment_initiated", bookingID=booking_id, amount=amount)
-
-        # Circuit breaker - call Stripe through the breaker
         try:
-            stripe_charge = stripe_create_charge(
-                amount      = to_stripe_cents(amount),  # edge case: float precision fix
-                currency    = 'sgd',
-                source      = stripe_token,
-                description = f"Flight {flight_number} | Booking {booking_id} | {charge_time_str}",
-                metadata    = {
-                    "booking_id":    booking_id,
-                    "passenger_id":  passenger_id,
-                    "flight_number": flight_number,
-                    "charged_at":    charge_time_str
+            session = stripe_create_checkout_session(
+                line_items=[{
+                    'price_data': {
+                        'currency': 'sgd',
+                        'unit_amount': to_stripe_cents(amount),
+                        'product_data': {
+                            'name':        f'Flight {flight_number}',
+                            'description': f'Booking #{booking_id} — Seat included',
+                        },
+                    },
+                    'quantity': 1,
+                }],
+                metadata={
+                    'booking_id':    str(booking_id),
+                    'passenger_id':  str(passenger_id),
+                    'flight_number': flight_number,
                 },
+                success_url=success_url,
+                cancel_url=cancel_url,
                 idempotency_key=idempotency_key
             )
         except pybreaker.CircuitBreakerError:
@@ -277,41 +302,131 @@ def process_payment():
                 "message": "Payment service is temporarily unavailable. Please try again in 30 seconds."
             }), 503
 
-        # Save payment record
         new_payment = Payment(
-            bookingID      = booking_id,
-            passengerID    = passenger_id,
-            amount         = amount,
-            status         = "Completed",
-            stripeChargeID = stripe_charge.id,
-            idempotencyKey = idempotency_key,
-            chargedAt      = get_sgt_now()
+            bookingID       = booking_id,
+            passengerID     = passenger_id,
+            amount          = amount,
+            status          = "Pending",
+            stripeSessionID = session.id,
+            idempotencyKey  = idempotency_key,
         )
         db.session.add(new_payment)
         db.session.commit()
 
-        log_event("payment_completed",
+        log_event("checkout_session_created",
                   bookingID=booking_id,
                   paymentID=new_payment.paymentID,
-                  stripeChargeID=stripe_charge.id)
+                  stripeSessionID=session.id)
 
         return jsonify({
-            "paymentID":      new_payment.paymentID,
-            "stripeChargeID": stripe_charge.id,
-            "status":         "Completed"
+            "paymentID":       new_payment.paymentID,
+            "stripeSessionID": session.id,
+            "sessionUrl":      session.url,
+            "status":          "Pending"
         }), 201
 
     except stripe.error.StripeError as e:
         db.session.rollback()
-        log_event("payment_stripe_error", bookingID=data.get('bookingID'), error=str(e))
+        log_event("checkout_stripe_error", bookingID=data.get('bookingID'), error=str(e))
         return jsonify({
-            "error":   "Card Declined",
-            "code":    "CARD_DECLINED",
+            "error":   "Stripe Error",
+            "code":    "STRIPE_ERROR",
             "message": str(e)
-        }), 402
+        }), 502
     except Exception as e:
         db.session.rollback()
-        log_event("payment_error", error=str(e))
+        log_event("checkout_error", error=str(e))
+        return jsonify({
+            "error":   "Internal Server Error",
+            "code":    "INTERNAL_ERROR",
+            "message": str(e)
+        }), 500
+
+
+# ==========================================
+# GET /payment/verify-session/<sessionID>
+# Called by BookingSuccess page after Stripe redirects back.
+# Retrieves the Stripe session, confirms payment_status is 'paid',
+# then updates our payment record to Completed.
+# No webhook needed — passenger's browser triggers this directly.
+# ==========================================
+@app.route('/payment/verify-session/<string:sessionID>', methods=['GET'])
+@limiter.limit("30 per minute")
+def verify_session(sessionID):
+    try:
+        # Check our DB first — avoid unnecessary Stripe API calls
+        payment = Payment.query.filter_by(stripeSessionID=sessionID).first()
+        if not payment:
+            return jsonify({
+                "error":   "Not Found",
+                "code":    "PAYMENT_NOT_FOUND",
+                "message": f"No payment found for session {sessionID}"
+            }), 404
+
+        # Already confirmed — return immediately
+        if payment.status == "Completed":
+            log_event("verify_session_already_completed", stripeSessionID=sessionID)
+            return jsonify({
+                **payment.json(),
+                "message": "Payment already verified"
+            }), 200
+
+        # Ask Stripe for the current session status
+        try:
+            session = stripe_retrieve_session(sessionID)
+        except pybreaker.CircuitBreakerError:
+            log_event("circuit_breaker_open", service="stripe")
+            return jsonify({
+                "error":   "Service Unavailable",
+                "code":    "STRIPE_CIRCUIT_OPEN",
+                "message": "Payment verification temporarily unavailable. Please try again shortly."
+            }), 503
+
+        if session.payment_status != 'paid':
+            # Payment not completed yet — return current status
+            return jsonify({
+                "paymentID":      payment.paymentID,
+                "bookingID":      payment.bookingID,
+                "status":         "Pending",
+                "stripeStatus":   session.payment_status,
+                "message":        "Payment not yet completed"
+            }), 202
+
+        # Payment confirmed — get charge ID from payment intent
+        charge_id = None
+        if session.payment_intent:
+            try:
+                intent    = stripe.PaymentIntent.retrieve(session.payment_intent)
+                charge_id = intent.get('latest_charge')
+            except Exception:
+                pass  # Charge ID is nice-to-have, not critical
+
+        # Update payment record to Completed
+        payment.status         = "Completed"
+        payment.stripeChargeID = charge_id
+        payment.chargedAt      = get_sgt_now()
+        db.session.commit()
+
+        log_event("payment_verified_and_completed",
+                  bookingID=payment.bookingID,
+                  paymentID=payment.paymentID,
+                  stripeSessionID=sessionID)
+
+        return jsonify({
+            **payment.json(),
+            "message": "Payment verified and confirmed"
+        }), 200
+
+    except stripe.error.StripeError as e:
+        log_event("verify_session_stripe_error", stripeSessionID=sessionID, error=str(e))
+        return jsonify({
+            "error":   "Stripe Error",
+            "code":    "STRIPE_ERROR",
+            "message": str(e)
+        }), 502
+    except Exception as e:
+        db.session.rollback()
+        log_event("verify_session_error", stripeSessionID=sessionID, error=str(e))
         return jsonify({
             "error":   "Internal Server Error",
             "code":    "INTERNAL_ERROR",
@@ -323,15 +438,14 @@ def process_payment():
 # POST /payment/refund
 # Process a full or partial refund
 # Used in: Scenario 2 Path B - No Alternative Flight
-#          Scenario 3 - Passenger rejects offer (partial)
+#          Scenario 3 - Passenger rejects offer
 # ==========================================
 @app.route('/payment/refund', methods=['POST'])
 @limiter.limit("10 per minute")
 def process_refund():
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True)
 
-        # Validate required fields
         error = validate_fields(data, ['bookingID', 'passengerID', 'amount', 'flightNumber'])
         if error:
             return jsonify({
@@ -346,7 +460,6 @@ def process_refund():
         reason       = data.get('reason', 'FlightCancelled')
         refund_type  = data.get('refundType', 'full')
 
-        # Validate field types
         if not isinstance(booking_id, int) or not isinstance(passenger_id, int):
             return jsonify({
                 "error":   "Bad Request",
@@ -361,7 +474,6 @@ def process_refund():
                 "message": "amount must be a number"
             }), 400
 
-        # Validate amount - no minimum for refunds, only check above zero
         if amount <= 0:
             return jsonify({
                 "error":   "Bad Request",
@@ -369,7 +481,6 @@ def process_refund():
                 "message": "Refund amount must be greater than 0"
             }), 400
 
-        # Validate refund type
         if refund_type not in ['full', 'partial']:
             return jsonify({
                 "error":   "Bad Request",
@@ -377,7 +488,6 @@ def process_refund():
                 "message": "refundType must be 'full' or 'partial'"
             }), 400
 
-        # For partial refund, validate refundAmount
         if refund_type == 'partial':
             refund_amount = data.get('refundAmount')
             if refund_amount is None or refund_amount == "":
@@ -392,7 +502,6 @@ def process_refund():
                     "code":    "INVALID_REFUND_AMOUNT",
                     "message": "refundAmount must be a number greater than 0"
                 }), 400
-            # Edge case: partial refund cannot exceed what was originally paid
             if refund_amount > amount:
                 return jsonify({
                     "error":   "Bad Request",
@@ -402,20 +511,17 @@ def process_refund():
         else:
             refund_amount = amount
 
-        # Auto-generate idempotency key
         idempotency_key = generate_idempotency_key(booking_id, passenger_id, amount, prefix="ref")
 
-        # Edge case: idempotency — same refund request retried, return original
         existing_by_key = Payment.query.filter_by(idempotencyKey=idempotency_key).first()
         if existing_by_key and existing_by_key.status == "Refunded":
             log_event("idempotent_refund_returned", bookingID=booking_id)
             return jsonify({
                 "refundID": existing_by_key.refundID,
                 "status":   "Refunded",
-                "message": "Refund already completed. No duplicate refund was made."
+                "message":  "Refund already completed. No duplicate refund was made."
             }), 200
 
-        # Edge case: prevent double refunds
         already_refunded = Payment.query.filter_by(
             bookingID=booking_id,
             status="Refunded"
@@ -428,8 +534,6 @@ def process_refund():
                 "refundID": already_refunded.refundID
             }), 409
 
-        # Look up original payment - with row lock to prevent race conditions
-        # Edge case: concurrent requests both pass duplicate check before either commits
         original_payment = Payment.query.filter_by(
             bookingID=booking_id,
             status="Completed"
@@ -449,8 +553,6 @@ def process_refund():
                 "message": "No Stripe charge found for this booking"
             }), 404
 
-        # Edge case: passenger ID mismatch
-        # Ensure the passenger requesting the refund matches the original payment
         if original_payment.passengerID != passenger_id:
             log_event("passenger_mismatch",
                       bookingID=booking_id,
@@ -462,7 +564,6 @@ def process_refund():
                 "message": "passengerID does not match the original payment record"
             }), 403
 
-        # Edge case: amount mismatch - refund amount exceeds what was originally paid
         if refund_amount > original_payment.amount:
             return jsonify({
                 "error":   "Bad Request",
@@ -470,9 +571,8 @@ def process_refund():
                 "message": f"Refund amount ${refund_amount:.2f} exceeds original payment ${original_payment.amount:.2f}"
             }), 400
 
-        # Edge case: Stripe only allows refunds within 180 days of original charge
         if original_payment.chargedAt:
-            charged_at_aware = original_payment.chargedAt.replace(tzinfo=sgt_tz)
+            charged_at_aware  = original_payment.chargedAt.replace(tzinfo=sgt_tz)
             days_since_charge = (get_sgt_now() - charged_at_aware).days
             if days_since_charge > REFUND_WINDOW:
                 return jsonify({
@@ -482,25 +582,20 @@ def process_refund():
                 }), 400
 
         refund_time_str = get_sgt_now().strftime("%Y-%m-%d %H:%M:%S SGT")
+        log_event("refund_initiated", bookingID=booking_id, amount=refund_amount, refundType=refund_type)
 
-        log_event("refund_initiated",
-                  bookingID=booking_id,
-                  amount=refund_amount,
-                  refundType=refund_type)
-
-        # Circuit breaker - call Stripe through the breaker
         try:
             stripe_refund = stripe_create_refund(
-                charge   = original_payment.stripeChargeID,
-                amount   = to_stripe_cents(refund_amount),
-                reason   = 'requested_by_customer',
-                metadata = {
+                charge          = original_payment.stripeChargeID,
+                amount          = to_stripe_cents(refund_amount),
+                reason          = 'requested_by_customer',
+                metadata        = {
                     "cancellation_reason": reason,
                     "booking_id":          booking_id,
                     "refund_type":         refund_type,
                     "refunded_at":         refund_time_str
                 },
-                idempotency_key=idempotency_key
+                idempotency_key = idempotency_key
             )
         except pybreaker.CircuitBreakerError:
             log_event("circuit_breaker_open", service="stripe")
@@ -510,7 +605,6 @@ def process_refund():
                 "message": "Refund service is temporarily unavailable. Please try again in 30 seconds."
             }), 503
 
-        # Update original payment record
         original_payment.status             = "Refunded"
         original_payment.refundID           = stripe_refund.id
         original_payment.refundedAt         = get_sgt_now()
@@ -549,8 +643,11 @@ def process_refund():
             "message": str(e)
         }), 500
 
+
+# ==========================================
 # GET /payment/refund/<refundID>
 # Get refund details by refundID
+# ==========================================
 @app.route('/payment/refund/<string:refundID>', methods=['GET'])
 @limiter.limit("60 per minute")
 def get_refund(refundID):
@@ -563,7 +660,22 @@ def get_refund(refundID):
         }), 404
     return jsonify(refund.json()), 200
 
+
+import time
+
+def wait_for_db(retries=10, delay=3):
+    for i in range(retries):
+        try:
+            with app.app_context():
+                db.create_all()
+            print('✓ Connected to payment-db')
+            return
+        except Exception as e:
+            print(f'DB not ready, retrying in {delay}s... ({retries - i - 1} retries left)')
+            time.sleep(delay)
+    print('Could not connect to database after multiple retries. Exiting.')
+    exit(1)
+
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
+    wait_for_db()
     app.run(host='0.0.0.0', port=5000, debug=True)
