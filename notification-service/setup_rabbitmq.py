@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+
 """
 A standalone script to create exchanges and queues on RabbitMQ
 for the Notification Service.
