@@ -3,6 +3,7 @@ services:
   booking-service:
     build: ./booking-microservice
     container_name: booking-app
+    restart: unless-stopped
     ports:
       - "3002:3000"                               # Access at localhost:3002
     environment:
@@ -61,6 +62,7 @@ services:
   payment-service:
     build: ./payment-microservice
     container_name: payment-app
+    restart: unless-stopped
     ports:
       - "5001:5000"                               # Access at localhost:5001
     environment:
@@ -85,6 +87,42 @@ services:
     volumes:
       - payment-data:/var/lib/mysql
       - ./payment-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ========== OFFER MICROSERVICE ==========
+  offer-service:
+    build: ./offer-microservice
+    container_name: offer-app
+    restart: unless-stopped
+    ports:
+      - "5002:5000"                               # Access at localhost:5002
+    environment:
+      - DB_HOST=offer-db
+      - DB_USER=root
+      - DB_PASSWORD=rootpassword
+      - DB_NAME=offerdb
+    depends_on:
+      offer-db:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  offer-db:
+    image: mysql:8.0
+    container_name: offer-db
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpassword
+      - MYSQL_DATABASE=offerdb
+      - TZ=Asia/Singapore
+    volumes:
+      - offer-data:/var/lib/mysql
+      - ./offer-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - app-network
     healthcheck:
