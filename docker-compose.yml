@@ -49,6 +49,7 @@ services:
       - PAYMENT_SERVICE_URL=http://payment-service:5000
       - NOTIFICATION_SERVICE_URL=http://notification-service:3000
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - PASSENGER_SERVICE_URL=https://personal-4whagfbm.outsystemscloud.com/Passenger_Srv/rest/PassengerAPI/#/
     depends_on:
       - booking-service
     networks:
@@ -131,28 +132,48 @@ services:
       timeout: 5s
       retries: 5
 
+  # ========== NOTIFICATION SERVICE (Composite) ==========
+  # Consumes RabbitMQ/Kafka events and calls Email Service
   notification-service:
-    build: ./notification-service             # points to notification-service/Dockerfile
+    build: ./notification-service
     container_name: notification-service
     ports:
-      - "3004:3004"                           # Access at localhost:3004
+      - "3004:3004"
     environment:
       - FLASK_PORT=3004
       - FLASK_ENV=development
-      - RABBITMQ_HOST=rabbitmq                
+      - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_PORT=5672
       - RABBITMQ_USER=guest
       - RABBITMQ_PASSWORD=guest
       - RABBITMQ_VHOST=/
       - RABBITMQ_EXCHANGE=airline_events
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-      - SENDGRID_API_KEY=${SENDGRID_API_KEY}
-      - SENDGRID_FROM_EMAIL=${SENDGRID_FROM_EMAIL}
-      - SENDGRID_FROM_NAME=${SENDGRID_FROM_NAME}
-
+      - EMAIL_SERVICE_URL=http://email-service:3005   # calls email-service, NOT SendGrid directly
     depends_on:
       rabbitmq:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
+      email-service:                                   # wait for email-service to be ready
+        condition: service_started
+    networks:
+      - app-network
+    restart: unless-stopped
+ 
+  # ========== EMAIL SERVICE (Atomic) ==========
+  # Wrapper around SendGrid API — stateless, no DB
+  email-service:
+    build: ./email-service
+    container_name: email-service
+    ports:
+      - "3005:3005"
+    environment:
+      - FLASK_PORT=3005
+      - FLASK_ENV=development
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY}           # from .env at project root
+      - SENDGRID_FROM_EMAIL=${SENDGRID_FROM_EMAIL}
+      - SENDGRID_FROM_NAME=${SENDGRID_FROM_NAME}
     networks:
       - app-network
     restart: unless-stopped

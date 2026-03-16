@@ -39,24 +39,34 @@ logger = logging.getLogger(__name__)
 # =============================================================================
  
 def send_email(to_email, to_name, subject, html_content, plain_text):
-    """Sends an email via SendGrid."""
-    from sendgrid import SendGridAPIClient
-    from sendgrid.helpers.mail import Mail, From, To
+    """
+    Calls the Email Service (atomic) via HTTP POST.
+    Email Service is responsible for calling SendGrid.
+    """
+    import requests as http_requests
  
-    client = SendGridAPIClient(os.environ["SENDGRID_API_KEY"])
-    message = Mail(
-        from_email=From(os.environ["SENDGRID_FROM_EMAIL"], os.environ["SENDGRID_FROM_NAME"]),
-        to_emails=To(to_email, to_name),
-        subject=subject,
-        html_content=html_content,
-        plain_text_content=plain_text,
-    )
+    email_service_url = os.environ.get("EMAIL_SERVICE_URL", "http://email-service:3005")
+ 
     try:
-        response = client.send(message)
-        logger.info("Email sent to %s | status=%s", to_email, response.status_code)
-        return {"success": True, "message_id": response.headers.get("X-Message-Id", "")}
+        response = http_requests.post(
+            f"{email_service_url}/send-email",
+            json={
+                "to_email": to_email,
+                "to_name":  to_name,
+                "subject":  subject,
+                "html":     html_content,
+                "text":     plain_text,
+            },
+            timeout=10,
+        )
+        result = response.json()
+        if result.get("success"):
+            logger.info("Email sent to %s via Email Service | message_id=%s", to_email, result.get("message_id"))
+        else:
+            logger.error("Email Service failed for %s: %s", to_email, result.get("error"))
+        return result
     except Exception as e:
-        logger.error("SendGrid error for %s: %s", to_email, str(e))
+        logger.error("Failed to reach Email Service for %s: %s", to_email, str(e))
         return {"success": False, "error": str(e)}
  
  
@@ -236,24 +246,6 @@ def refund_confirmation_template(data: dict) -> dict:
     }
  
  
-# =============================================================================
-# NOTIFICATION HANDLERS (shared by HTTP routes and Kafka/RabbitMQ consumers)
-# =============================================================================
- 
-# to include API after making sender email on sendgrid
- 
-# from sendgrid import SendGridAPIClient
-#     from sendgrid.helpers.mail import Mail, From, To
-#     client = SendGridAPIClient(os.environ["SENDGRID_API_KEY"])
-#     message = Mail(
-#         from_email=From(os.environ["SENDGRID_FROM_EMAIL"], os.environ["SENDGRID_FROM_NAME"]),
-#         to_emails=To(to_email, to_name),
-#         subject=subject,
-#         html_content=html_content,
-#         plain_text_content=plain_text,
-#     )
-#     response = client.send(message)
-#     return {"success": True, "message_id": response.headers.get("X-Message-Id", "")}
  
 def notify_booking_confirmation(data: dict) -> dict:
     """Scenario 1 — triggered by RabbitMQ routing key: booking.confirmed"""
