@@ -92,14 +92,18 @@ app.post('/api/bookings', async (req, res) => {
  
   try {
     // Step 1: Validate passenger exists (mock for now)
+    // ── Declare variables at top so all steps can access them ──
+    let passenger = null;
+
+    // Step 1: Validate passenger exists
     console.log('Step 1: Validating passenger...');
-    // TODO: Call Passenger Service once coded
-    const passengerValid = true;
-    if (!passengerValid) {
+    const passengerResponse = await axios.get(`${PASSENGER_SERVICE_URL}/passengers/${passengerID}`);
+    passenger = passengerResponse.data;
+    if (!passenger) {
       throw new Error('Passenger not found');
     }
-    console.log('✓ Passenger validated');
- 
+    console.log('✓ Passenger validated:', passenger.FirstName, passenger.LastName);
+
     // Step 2: Check seat availability (mock for now)
     console.log('Step 2: Checking seat availability...');
     // TODO: Call Flight Service once coded
@@ -108,69 +112,71 @@ app.post('/api/bookings', async (req, res) => {
       throw new Error('Seat not available');
     }
     console.log('✓ Seat available');
- 
+
     // Step 3: Create pending booking in Booking Service
     console.log('Step 3: Creating pending booking...');
     const bookingResponse = await axios.post(`${BOOKING_SERVICE_URL}/bookings`, {
       passengerID,
       flightID,
-      amount: 299.99, // TODO: Get actual price from Flight Service once coded
+      amount: 299.99,
       seatNumber
     });
     const booking = bookingResponse.data;
     console.log(`✓ Pending booking created with ID: ${booking.bookingID}`);
- 
+
     // Step 4: Hold seat in Flight Service (mock for now)
     console.log('Step 4: Holding seat...');
     // TODO: Call Flight Service to hold seat once coded
     console.log('✓ Seat held');
- 
+
     // Step 5: Process payment (mock for now)
     console.log('Step 5: Processing payment...');
     // TODO: Call Payment Service once coded
-    const paymentSuccess = true; // Change to false to test failure path
- 
+    const paymentSuccess = true;
+
     if (paymentSuccess) {
       // ── SUCCESS PATH ──────────────────────────────────────
       console.log('✓ Payment successful');
- 
+
       // Step 6: Update booking to Confirmed
       console.log('Step 6: Updating booking to Confirmed...');
       await axios.put(`${BOOKING_SERVICE_URL}/bookings/${booking.bookingID}/status`, {
         status: 'Confirmed'
       });
       console.log('✓ Booking confirmed');
- 
+
       // Step 7: Mark seat as BOOKED in Flight Service (mock)
       console.log('Step 7: Marking seat as BOOKED...');
       // TODO: Call Flight Service to mark seat as BOOKED
       console.log('✓ Seat marked as BOOKED');
- 
-      // Step 8: Publish to RabbitMQ → Notification Service → SendGrid email
+
+      // Step 8: Publish to RabbitMQ → Notification Service → Email Service → SendGrid
       console.log('Step 8: Publishing booking confirmation to RabbitMQ...');
       await publishBookingConfirmed({
         booking_id:      booking.bookingID,
-        passenger_name:  'Test Passenger',                        // TODO: replace with Passenger Service
-        passenger_email: 'ay.choung.2024@computing.smu.edu.sg',  // TODO: replace with Passenger Service
-        flight_number:   'SQ123',                                 // TODO: replace with Flight Service
-        origin:          'Singapore (SIN)',                       // TODO: replace with Flight Service
-        destination:     'Tokyo (NRT)',                           // TODO: replace with Flight Service
-        departure_date:  '2025-06-15 10:30',                      // TODO: replace with Flight Service
+        passenger_name: `${FirstName} ${LastName}`,
+        passenger_email: Email,
+        // passenger_name:  `${passenger.firstName} ${passenger.lastName}`,  // ← real data
+        // passenger_email: `${passenger.email}`,                                  // ← real email
+        flight_number:   'SQ123',           // TODO: replace with Flight Service
+        origin:          'Singapore (SIN)', // TODO: replace with Flight Service
+        destination:     'Tokyo (NRT)',     // TODO: replace with Flight Service
+        departure_date:  '2025-06-15 10:30',// TODO: replace with Flight Service
         seat_number:     seatNumber,
-        amount_paid:     299.99                                    // TODO: replace with Payment Service
-      });
- 
-      // Return success response
+        amount_paid:     299.99             // TODO: replace with Payment Service
+        });
+
       return res.status(201).json({
-        success: true,
-        message: 'Booking confirmed successfully',
+        success:   true,
+        message:   'Booking confirmed successfully',
         bookingID: booking.bookingID,
-        status: 'Confirmed',
+        status:    'Confirmed',
         passengerID,
         flightID,
         seatNumber
       });
- 
+  
+  
     } else {
       // ── FAILURE PATH ──────────────────────────────────────
       console.log('✗ Payment failed');
