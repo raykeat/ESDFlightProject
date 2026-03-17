@@ -3,6 +3,7 @@ import LandingPage from '../components/LandingPage.vue'
 import AuthPage from '../pages/AuthPage.vue'
 import ProfilePage from '../pages/ProfilePage.vue'
 import SearchResults from '../pages/SearchResults.vue' 
+import SeatSelection from '../pages/SeatSelection.vue'
 import BookingConfirmation from '../pages/BookingConfirmation.vue'  
 import BookingSuccess from '../pages/BookingSuccess.vue'
 import MyBookings from '../pages/MyBookings.vue'
@@ -30,6 +31,11 @@ const router = createRouter({
       path: '/search-results',
       name: 'search-results',
       component: SearchResults
+    },
+    {
+      path: '/seat-selection',
+      name: 'seat-selection',
+      component: SeatSelection
     },
     {
       path: '/booking-confirmation',
