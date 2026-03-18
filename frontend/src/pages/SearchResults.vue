@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePassengerSession } from '../composables/usePassengerSession'
+import SeatSelector from '../pages/SeatSelector.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -209,20 +210,10 @@ function bookFlight() {
 
           <!-- Seat selection (shown when flight is selected) -->
           <div v-if="selectedFlight?.flightID === flight.flightID" class="mt-6 border-t border-black/10 pt-6">
-            <p class="mb-3 text-sm font-semibold uppercase tracking-[0.1em] text-[#6e6e73]">Select Your Seat</p>
-            <div class="flex flex-wrap gap-2">
-              <button
-                v-for="seat in ['12A', '12B', '12C', '12D', '14A', '14B', '14C', '14D']"
-                :key="seat"
-                class="h-10 w-10 rounded-lg border text-sm font-medium transition"
-                :class="selectedSeat === seat 
-                  ? 'border-[#e63946] bg-[#e63946] text-white' 
-                  : 'border-black/10 bg-[#f5f5f7] text-[#1d1d1f] hover:border-[#e63946]/30'"
-                @click.stop="selectedSeat = seat"
-              >
-                {{ seat }}
-              </button>
-            </div>
+            <SeatSelector
+              :flight-id="flight.flightID"
+              @seat-selected="(seatId) => selectedSeat = seatId"
+            />
           </div>
         </article>
 
