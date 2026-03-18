@@ -59,6 +59,22 @@ services:
   # ========== FLIGHT SERVICE ==========
   # TODO: add when ready
 
+  # ========== SEATS SERVICE ==========
+  seats-service:
+    build: ./seats-microservice
+    ports:
+      - "5003:5000"
+    depends_on:
+      - seats-db
+
+  seats-db:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: seats
+    ports:
+      - "3309:3306"
+
   # ========== PAYMENT SERVICE ==========
   payment-service:
     build: ./payment-microservice
