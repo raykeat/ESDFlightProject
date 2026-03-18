@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
-  title: Booking Microservice API
+  title: Record Microservice API
   version: 1.0.0
-  description: API documentation for the booking microservice.
+  description: API documentation for the record microservice.
 servers:
   - url: http://localhost:3002
     description: Docker host mapping from docker-compose
@@ -29,7 +29,7 @@ paths:
                     example: OK
                   service:
                     type: string
-                    example: booking-service
+                    example: record-service
 
   /bookings:
     post:

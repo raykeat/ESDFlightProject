@@ -17,7 +17,7 @@ app.use(cors({
 app.use(express.json());
 
 // Configuration - service URLs from environment variables
-const BOOKING_SERVICE_URL = process.env.BOOKING_SERVICE_URL || 'http://booking-service:3000';
+const RECORD_SERVICE_URL = process.env.RECORD_SERVICE_URL || 'http://record-service:3000';
 const PASSENGER_SERVICE_URL = process.env.PASSENGER_SERVICE_URL || 'http://passenger-service:3000';
 const FLIGHT_SERVICE_URL = process.env.FLIGHT_SERVICE_URL || 'http://flight-service:3000';
 const PAYMENT_SERVICE_URL = process.env.PAYMENT_SERVICE_URL || 'http://payment-service:5000';
@@ -115,7 +115,7 @@ app.post('/api/bookings', async (req, res) => {
 
     // Step 3: Create pending booking in Booking Service
     console.log('Step 3: Creating pending booking...');
-    const bookingResponse = await axios.post(`${BOOKING_SERVICE_URL}/bookings`, {
+    const bookingResponse = await axios.post(`${RECORD_SERVICE_URL}/bookings`, {
       passengerID,
       flightID,
       amount: 299.99,
@@ -140,7 +140,7 @@ app.post('/api/bookings', async (req, res) => {
 
       // Step 6: Update booking to Confirmed
       console.log('Step 6: Updating booking to Confirmed...');
-      await axios.put(`${BOOKING_SERVICE_URL}/bookings/${booking.bookingID}/status`, {
+      await axios.put(`${RECORD_SERVICE_URL}/bookings/${booking.bookingID}/status`, {
         status: 'Confirmed'
       });
       console.log('✓ Booking confirmed');
@@ -183,7 +183,7 @@ app.post('/api/bookings', async (req, res) => {
  
       // Step 6: Update booking to Failed
       console.log('Step 6: Updating booking to Failed...');
-      await axios.put(`${BOOKING_SERVICE_URL}/bookings/${booking.bookingID}/status`, {
+      await axios.put(`${RECORD_SERVICE_URL}/bookings/${booking.bookingID}/status`, {
         status: 'Failed'
       });
       console.log('✓ Booking marked as Failed');
@@ -210,7 +210,7 @@ app.post('/api/bookings', async (req, res) => {
  
     if (error.bookingID) {
       try {
-        await axios.delete(`${BOOKING_SERVICE_URL}/booking/${error.bookingID}`);
+        await axios.delete(`${RECORD_SERVICE_URL}/booking/${error.bookingID}`);
         console.log('✓ Cleaned up pending booking');
       } catch (cleanupError) {
         console.error('Cleanup failed:', cleanupError.message);
@@ -234,7 +234,7 @@ app.post('/api/bookings', async (req, res) => {
 app.get('/api/bookings/:bookingID', async (req, res) => {
   const { bookingID } = req.params;
   try {
-    const response = await axios.get(`${BOOKING_SERVICE_URL}/bookings/${bookingID}`);
+    const response = await axios.get(`${RECORD_SERVICE_URL}/bookings/${bookingID}`);
     res.json(response.data);
   } catch (error) {
     if (error.response?.status === 404) {
@@ -253,7 +253,7 @@ app.get('/api/bookings/:bookingID', async (req, res) => {
 app.get('/api/bookings/passenger/:passengerID', async (req, res) => {
   const { passengerID } = req.params;
   try {
-    const response = await axios.get(`${BOOKING_SERVICE_URL}/bookings/passenger/${passengerID}`);
+    const response = await axios.get(`${RECORD_SERVICE_URL}/bookings/passenger/${passengerID}`);
     res.json(response.data);
   } catch (error) {
     console.error('Error fetching bookings for passenger:', error.message);
@@ -274,5 +274,5 @@ app.get('/api/bookings/passenger/:passengerID', async (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Booking Composite Service running on port ${PORT}`);
-  console.log(`Using Booking Service at: ${BOOKING_SERVICE_URL}`);
+  console.log(`Using Record Service at: ${RECORD_SERVICE_URL}`);
 });
