@@ -13,7 +13,7 @@ const pool = mysql.createPool({
   host:               process.env.DB_HOST     || 'localhost',
   user:               process.env.DB_USER     || 'root',
   password:           process.env.DB_PASSWORD || 'rootpassword',
-  database:           process.env.DB_NAME     || 'bookingdb',
+  database:           process.env.DB_NAME     || 'recorddb',
   waitForConnections: true,
   connectionLimit:    10,
   queueLimit:         0
@@ -30,7 +30,7 @@ function waitForDB(retries = 10, delay = 3000) {
       console.log(`Database not ready, retrying in ${delay/1000}s... (${retries} retries left)`);
       setTimeout(() => waitForDB(retries - 1, delay), delay);
     } else {
-      console.log('✓ Connected to booking-db');
+      console.log('✓ Connected to record-db');
       connection.release();
     }
   });
@@ -42,7 +42,7 @@ waitForDB();
 // GET /health
 // ==========================================
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', service: 'booking-service' });
+  res.json({ status: 'OK', service: 'record-service' });
 });
 
 // ==========================================
@@ -178,5 +178,5 @@ app.delete('/booking/:bookingID', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Booking service running on port ${PORT}`);
+  console.log(`Record service running on port ${PORT}`);
 });

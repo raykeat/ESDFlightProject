@@ -1,32 +1,32 @@
 services:
-  # ========== BOOKING MICROSERVICE ==========
-  booking-service:
-    build: ./booking-microservice
-    container_name: booking-app
+  # ========== RECORD MICROSERVICE ==========
+  record-service:
+    build: ./record-microservice
+    container_name: record-app
     restart: unless-stopped
     ports:
       - "3002:3000"                               # Access at localhost:3002
     environment:
-      - DB_HOST=booking-db
+      - DB_HOST=record-db
       - DB_USER=root
       - DB_PASSWORD=rootpassword
-      - DB_NAME=bookingdb
+      - DB_NAME=recorddb
     depends_on:
-      booking-db:
+      record-db:
         condition: service_healthy
     networks:
       - app-network
 
-  booking-db:
+  record-db:
     image: mysql:8.0
-    container_name: booking-db
+    container_name: record-db
     environment:
       - MYSQL_ROOT_PASSWORD=rootpassword
-      - MYSQL_DATABASE=bookingdb
+      - MYSQL_DATABASE=recorddb
       - TZ=Asia/Singapore
     volumes:
-      - booking-data:/var/lib/mysql
-      - ./booking-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - record-data:/var/lib/mysql
+      - ./record-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - app-network
     healthcheck:
@@ -43,7 +43,7 @@ services:
       - "3010:3001"                               # Access at localhost:3010
     environment:
       - PORT=3001
-      - BOOKING_SERVICE_URL=http://booking-service:3000
+      - RECORD_SERVICE_URL=http://record-service:3000
       - PASSENGER_SERVICE_URL=http://passenger-service:3000
       - FLIGHT_SERVICE_URL=http://flight-service:3000
       - PAYMENT_SERVICE_URL=http://payment-service:5000
@@ -51,7 +51,7 @@ services:
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
       - PASSENGER_SERVICE_URL=https://personal-4whagfbm.outsystemscloud.com/Passenger_Srv/rest/PassengerAPI/#/
     depends_on:
-      - booking-service
+      - record-service
     networks:
       - app-network
     restart: unless-stopped
@@ -124,6 +124,42 @@ services:
     volumes:
       - offer-data:/var/lib/mysql
       - ./offer-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ========== COUPON MICROSERVICE ==========
+  coupon-service:
+    build: ./coupon-microservice
+    container_name: coupon-app
+    restart: unless-stopped
+    ports:
+      - "5003:5000"                               # Access at localhost:5003
+    environment:
+      - DB_HOST=coupon-db
+      - DB_USER=root
+      - DB_PASSWORD=rootpassword
+      - DB_NAME=coupondb
+    depends_on:
+      coupon-db:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  coupon-db:
+    image: mysql:8.0
+    container_name: coupon-db
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpassword
+      - MYSQL_DATABASE=coupondb
+      - TZ=Asia/Singapore
+    volumes:
+      - coupon-data:/var/lib/mysql
+      - ./coupon-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - app-network
     healthcheck:
@@ -243,7 +279,8 @@ networks:
     driver: bridge
 
 volumes:
-  booking-data:
+  record-data:
   flight-data:
   payment-data:
   offer-data:
+  coupon-data:

@@ -1,0 +1,218 @@
+openapi: 3.0.3
+info:
+  title: Coupon Microservice API
+  version: 1.0.0
+  description: API documentation for Blaze Air coupon generation and redemption.
+servers:
+  - url: http://localhost:5003
+    description: Docker host mapping from docker-compose
+  - url: http://localhost:5000
+    description: Direct service port (non-docker local run)
+tags:
+  - name: Health
+  - name: Coupons
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /coupons:
+    post:
+      tags: [Coupons]
+      summary: Create a compensation coupon
+      description: |
+        Creates a coupon for affected passengers using tier logic based on
+        flightPrice and hoursUntilDeparture.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCouponRequest'
+      responses:
+        '201':
+          description: Coupon created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Coupon'
+        '400':
+          description: Validation error (missing/invalid fields)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Coupon code generation failure or internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Database unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /coupons/{coupon_code}:
+    get:
+      tags: [Coupons]
+      summary: Retrieve coupon details by coupon code
+      parameters:
+        - in: path
+          name: coupon_code
+          required: true
+          schema:
+            type: string
+          description: Coupon code in format BLAZE-XXXXXX.
+      responses:
+        '200':
+          description: Coupon found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Coupon'
+        '404':
+          description: Coupon not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Database unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /coupons/{coupon_code}/redeem:
+    put:
+      tags: [Coupons]
+      summary: Mark a coupon as redeemed
+      parameters:
+        - in: path
+          name: coupon_code
+          required: true
+          schema:
+            type: string
+          description: Coupon code in format BLAZE-XXXXXX.
+      responses:
+        '200':
+          description: Coupon redeemed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Coupon'
+        '400':
+          description: Coupon expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Coupon not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Coupon already used
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Database unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: OK
+        service:
+          type: string
+          example: coupon-service
+
+    CreateCouponRequest:
+      type: object
+      required: [flightPrice, hoursUntilDeparture]
+      properties:
+        flightPrice:
+          type: number
+          format: double
+          example: 420.50
+          description: Original price of the cancelled flight.
+        hoursUntilDeparture:
+          type: number
+          format: double
+          example: 18
+          description: Hours from compensation issuance until scheduled departure.
+
+    Coupon:
+      type: object
+      properties:
+        CouponID:
+          type: integer
+          example: 12
+        CouponCode:
+          type: string
+          example: BLAZE-A1B2C3
+        DiscountAmount:
+          type: number
+          format: double
+          example: 84.10
+        IsUsed:
+          type: boolean
+          example: false
+        UsedAt:
+          type: string
+          nullable: true
+          example: '2026-03-18T10:43:22+08:00'
+        ExpiryDate:
+          type: string
+          example: '2028-03-18T10:43:22+08:00'
+        CreatedTime:
+          type: string
+          example: '2026-03-18T10:43:22+08:00'
+
+    ErrorEnvelope:
+      type: object
+      properties:
+        error:
+          type: string
+          example: Bad Request
+        code:
+          type: string
+          example: INVALID_FIELD_TYPE
+        message:
+          type: string
+          example: flightPrice must be a number
