@@ -5,7 +5,7 @@ services:
     container_name: record-app
     restart: unless-stopped
     ports:
-      - "3002:3000"                               # Access at localhost:3002
+      - "3002:3000" # Access at localhost:3002
     environment:
       - DB_HOST=record-db
       - DB_USER=root
@@ -30,7 +30,7 @@ services:
     networks:
       - app-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -40,7 +40,7 @@ services:
     build: ./booking-composite-service
     container_name: booking-composite-app
     ports:
-      - "3010:3001"                               # Access at localhost:3010
+      - "3010:3001" # Access at localhost:3010
     environment:
       - PORT=3001
       - RECORD_SERVICE_URL=http://record-service:3000
@@ -57,23 +57,72 @@ services:
     restart: unless-stopped
 
   # ========== FLIGHT SERVICE ==========
-  # TODO: add when ready
+  flight-service:
+    build: ./flight-microservice
+    container_name: flight-app
+    restart: unless-stopped
+    ports:
+      - "3003:3000"
+    environment:
+      - DB_HOST=flight-db
+      - DB_USER=root
+      - DB_PASSWORD=rootpassword
+      - DB_NAME=flightdb
+    depends_on:
+      flight-db:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  flight-db:
+    image: mysql:8.0
+    container_name: flight-db
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpassword
+      - MYSQL_DATABASE=flightdb
+      - TZ=Asia/Singapore
+    volumes:
+      - flight-data:/var/lib/mysql
+      - ./flight-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - app-network
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # ========== SEATS SERVICE ==========
   seats-service:
     build: ./seats-microservice
+    container_name: seats-app
     ports:
-      - "5003:5000"
+      - "5003:5003"
     depends_on:
-      - seats-db
+      seats-db:
+        condition: service_healthy
+    networks:
+      - app-network
 
   seats-db:
-    image: mysql:8
+    image: mysql:8.0
+    container_name: seats-db
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: seats
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=seats
+      - TZ=Asia/Singapore
     ports:
       - "3309:3306"
+    volumes:
+      - seats-data:/var/lib/mysql
+      - ./seats-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - app-network
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # ========== PAYMENT SERVICE ==========
   payment-service:
@@ -81,7 +130,7 @@ services:
     container_name: payment-app
     restart: unless-stopped
     ports:
-      - "5001:5000"                               # Access at localhost:5001
+      - "5001:5000" # Access at localhost:5001
     environment:
       - DB_HOST=payment-db
       - DB_USER=root
@@ -107,7 +156,7 @@ services:
     networks:
       - app-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -118,7 +167,7 @@ services:
     container_name: offer-app
     restart: unless-stopped
     ports:
-      - "5002:5000"                               # Access at localhost:5002
+      - "5002:5000" # Access at localhost:5002
     environment:
       - DB_HOST=offer-db
       - DB_USER=root
@@ -143,7 +192,7 @@ services:
     networks:
       - app-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -154,7 +203,7 @@ services:
     container_name: coupon-app
     restart: unless-stopped
     ports:
-      - "5003:5000"                               # Access at localhost:5003
+      - "5004:5000" # Access at localhost:50044
     environment:
       - DB_HOST=coupon-db
       - DB_USER=root
@@ -179,7 +228,7 @@ services:
     networks:
       - app-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -201,18 +250,19 @@ services:
       - RABBITMQ_VHOST=/
       - RABBITMQ_EXCHANGE=airline_events
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-      - EMAIL_SERVICE_URL=http://email-service:3005   # calls email-service, NOT SendGrid directly
+      - EMAIL_SERVICE_URL=http://email-service:3005 # calls email-service, NOT SendGrid directly
     depends_on:
       rabbitmq:
         condition: service_healthy
       kafka:
         condition: service_healthy
-      email-service:                                   # wait for email-service to be ready
+      email-service:
+        # wait for email-service to be ready
         condition: service_started
     networks:
       - app-network
     restart: unless-stopped
- 
+
   # ========== EMAIL SERVICE (Atomic) ==========
   # Wrapper around SendGrid API — stateless, no DB
   email-service:
@@ -223,33 +273,33 @@ services:
     environment:
       - FLASK_PORT=3005
       - FLASK_ENV=development
-      - SENDGRID_API_KEY=${SENDGRID_API_KEY}           # from .env at project root
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY} # from .env at project root
       - SENDGRID_FROM_EMAIL=${SENDGRID_FROM_EMAIL}
       - SENDGRID_FROM_NAME=${SENDGRID_FROM_NAME}
     networks:
       - app-network
     restart: unless-stopped
- 
+
   # ========== RABBITMQ ==========
   rabbitmq:
     image: rabbitmq:3-management
     container_name: rabbitmq
     ports:
-      - "5672:5672"                           # AMQP — used by services
-      - "15672:15672"                         # Management UI → http://localhost:15672
+      - "5672:5672" # AMQP — used by services
+      - "15672:15672" # Management UI → http://localhost:15672
     environment:
       - RABBITMQ_DEFAULT_USER=guest
       - RABBITMQ_DEFAULT_PASS=guest
     networks:
       - app-network
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      test: [ "CMD", "rabbitmq-diagnostics", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
 
-# ========== ZOOKEEPER (required by Kafka) ==========
+  # ========== ZOOKEEPER (required by Kafka) ==========
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
     container_name: zookeeper
@@ -259,7 +309,7 @@ services:
     networks:
       - app-network
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      test: [ "CMD", "nc", "-z", "localhost", "2181" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -284,7 +334,7 @@ services:
     networks:
       - app-network
     healthcheck:
-      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      test: [ "CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list" ]
       interval: 15s
       timeout: 10s
       retries: 5
@@ -300,3 +350,4 @@ volumes:
   payment-data:
   offer-data:
   coupon-data:
+  seats-data:
