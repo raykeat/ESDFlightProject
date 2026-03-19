@@ -7,6 +7,8 @@ import BookingConfirmation from '../pages/BookingConfirmation.vue'
 import BookingSuccess from '../pages/BookingSuccess.vue'
 import MyBookings from '../pages/MyBookings.vue'
 import RebookingOffer from '../pages/RebookingOffer.vue'
+import StaffAuth    from '../pages/StaffAuth.vue'
+import StaffFlights from '../pages/StaffFlights.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -50,6 +52,16 @@ const router = createRouter({
       path: '/rebooking-offer',
       name: 'rebooking-offer',
       component: RebookingOffer
+    },
+    {
+      path: '/staff/login',
+      name: 'staff-login',
+      component: StaffAuth
+    },
+    {
+      path: '/staff/flights',
+      name: 'staff-flights',
+      component: StaffFlights
     }
   ],
 })

@@ -7,58 +7,31 @@ import { usePassengerSession } from '../composables/usePassengerSession'
 const router = useRouter()
 const { setPassenger } = usePassengerSession()
 
-const activeTab = ref('signin')
-const busy = ref(false)
+const activeTab    = ref('signin')
+const busy         = ref(false)
 const errorMessage = ref('')
 
-const signInForm = ref({
-  email: '',
-  password: '',
-})
-
-const createForm = ref({
-  firstName: '',
-  lastName: '',
-  passportNumber: '',
-  email: '',
-  password: '',
-  nationality: '',
-})
+const signInForm = ref({ email: '', password: '' })
+const createForm = ref({ firstName: '', lastName: '', passportNumber: '', email: '', password: '', nationality: '' })
 
 function parsePassportNumber(rawValue) {
-  if (!/^\d+$/.test(rawValue)) {
-    return null
-  }
-
+  if (!/^\d+$/.test(rawValue)) return null
   const numeric = Number(rawValue)
-  if (!Number.isSafeInteger(numeric) || numeric <= 0) {
-    return null
-  }
-
+  if (!Number.isSafeInteger(numeric) || numeric <= 0) return null
   return numeric
 }
 
 async function handleSignIn() {
   errorMessage.value = ''
   busy.value = true
-
   try {
-    const email = signInForm.value.email.trim()
+    const email    = signInForm.value.email.trim()
     const password = signInForm.value.password.trim()
-
-    if (!email) {
-      throw new Error('Please enter your email.')
-    }
-    if (!password) {
-      throw new Error('Please enter your password.')
-    }
-
+    if (!email)    throw new Error('Please enter your email.')
+    if (!password) throw new Error('Please enter your password.')
     const loginResult = await loginPassenger(email, password)
     const passengerId = loginResult.passenger_id
-    if (!passengerId) {
-      throw new Error('Login failed: no passenger ID returned.')
-    }
-
+    if (!passengerId) throw new Error('Login failed: no passenger ID returned.')
     const fullPassengerData = await getPassengerById(passengerId)
     setPassenger(fullPassengerData)
     router.push('/')
@@ -72,27 +45,19 @@ async function handleSignIn() {
 async function handleCreateAccount() {
   errorMessage.value = ''
   busy.value = true
-
   try {
     const passportNumber = parsePassportNumber(createForm.value.passportNumber.trim())
-    if (!passportNumber) {
-      throw new Error('Use a numeric passport number within JavaScript safe integer range.')
-    }
-
+    if (!passportNumber) throw new Error('Use a numeric passport number within JavaScript safe integer range.')
     const password = createForm.value.password.trim()
-    if (!password) {
-      throw new Error('Please enter a password.')
-    }
-
+    if (!password) throw new Error('Please enter a password.')
     const payload = {
-      FirstName: createForm.value.firstName.trim(),
-      LastName: createForm.value.lastName.trim(),
+      FirstName:      createForm.value.firstName.trim(),
+      LastName:       createForm.value.lastName.trim(),
       PassportNumber: passportNumber,
-      Email: createForm.value.email.trim(),
-      Password: password,
-      Nationality: createForm.value.nationality.trim(),
+      Email:          createForm.value.email.trim(),
+      Password:       password,
+      Nationality:    createForm.value.nationality.trim(),
     }
-
     const createdPassenger = await createPassengerAccount(payload)
     setPassenger(createdPassenger)
     router.push('/')
@@ -105,139 +70,124 @@ async function handleCreateAccount() {
 </script>
 
 <template>
-  <main class="min-h-screen px-6 py-8 md:px-10 lg:px-16">
-    <section class="mx-auto max-w-[980px]">
-      <header class="animate__animated animate__fadeInDown flex items-center justify-between rounded-[28px] border border-black/5 bg-white/80 px-5 py-3 backdrop-blur-xl md:px-7">
-        <RouterLink to="/" class="text-sm font-semibold tracking-[0.18em] text-[#1d1d1f]">BLAZE AIR</RouterLink>
-        <span class="text-xs font-semibold uppercase tracking-[0.15em] text-[#6e6e73]">Passenger Access</span>
+  <main style="min-height:100vh; background:radial-gradient(circle at 12% 6%, #ffffff 0%, #f5f5f7 48%, #ececf1 100%); padding:32px 24px;">
+    <div style="max-width:960px; margin:0 auto;">
+
+      <!-- Nav -->
+      <header style="display:flex; align-items:center; justify-content:space-between; background:rgba(255,255,255,0.8); backdrop-filter:blur(20px); border:1px solid rgba(0,0,0,0.06); border-radius:28px; padding:12px 28px; margin-bottom:40px;">
+        <RouterLink to="/" style="font-size:13px; font-weight:700; letter-spacing:0.18em; color:#1d1d1f; text-decoration:none;">BLAZE AIR</RouterLink>
+        <span style="font-size:12px; font-weight:600; letter-spacing:0.15em; text-transform:uppercase; color:#6e6e73;">Passenger Access</span>
       </header>
 
-      <section class="animate__animated animate__fadeInUp mt-10 rounded-[34px] border border-black/5 bg-white/90 p-6 shadow-[0_22px_52px_rgba(15,23,42,0.08)] backdrop-blur-2xl md:p-8">
-        <h1 class="text-4xl font-semibold tracking-[-0.03em] text-[#1d1d1f] md:text-5xl">Welcome aboard</h1>
-        <p class="mt-3 max-w-2xl text-sm text-[#6e6e73] md:text-base">Sign in or create your passenger account using your email and password.</p>
+      <!-- Auth card -->
+      <div style="background:rgba(255,255,255,0.92); backdrop-filter:blur(24px); border:1px solid rgba(0,0,0,0.06); border-radius:34px; padding:40px 48px; box-shadow:0 22px 52px rgba(15,23,42,0.08);">
 
-        <div class="mt-6 inline-flex rounded-full border border-black/10 bg-[#f5f5f7] p-1">
+        <h1 style="font-size:44px; font-weight:700; letter-spacing:-0.03em; color:#1d1d1f; margin:0 0 10px;">Welcome aboard</h1>
+        <p style="font-size:15px; color:#6e6e73; margin:0 0 28px;">Sign in or create your passenger account using your email and password.</p>
+
+        <!-- Tab switcher -->
+        <div style="display:inline-flex; background:#f5f5f7; border:1px solid rgba(0,0,0,0.08); border-radius:100px; padding:4px; margin-bottom:32px;">
           <button
-            class="rounded-full px-5 py-2 text-xs font-semibold uppercase tracking-[0.12em] transition"
-            :class="activeTab === 'signin' ? 'bg-[#1d1d1f] text-white' : 'text-[#6e6e73] hover:text-[#1d1d1f]'"
-            @click="activeTab = 'signin'"
-          >
-            Sign In
-          </button>
+            @click="activeTab = 'signin'; errorMessage = ''"
+            :style="{
+              padding: '8px 22px', borderRadius: '100px', border: 'none',
+              fontSize: '12px', fontWeight: '700', letterSpacing: '0.1em', textTransform: 'uppercase',
+              cursor: 'pointer', transition: 'all 0.2s',
+              background: activeTab === 'signin' ? '#1d1d1f' : 'transparent',
+              color: activeTab === 'signin' ? 'white' : '#6e6e73',
+            }"
+          >Sign In</button>
           <button
-            class="rounded-full px-5 py-2 text-xs font-semibold uppercase tracking-[0.12em] transition"
-            :class="activeTab === 'create' ? 'bg-[#1d1d1f] text-white' : 'text-[#6e6e73] hover:text-[#1d1d1f]'"
-            @click="activeTab = 'create'"
-          >
-            Create Account
-          </button>
+            @click="activeTab = 'create'; errorMessage = ''"
+            :style="{
+              padding: '8px 22px', borderRadius: '100px', border: 'none',
+              fontSize: '12px', fontWeight: '700', letterSpacing: '0.1em', textTransform: 'uppercase',
+              cursor: 'pointer', transition: 'all 0.2s',
+              background: activeTab === 'create' ? '#1d1d1f' : 'transparent',
+              color: activeTab === 'create' ? 'white' : '#6e6e73',
+            }"
+          >Create Account</button>
         </div>
 
-        <form v-if="activeTab === 'signin'" class="mt-8 grid gap-4 md:grid-cols-2" @submit.prevent="handleSignIn">
-          <label>
-            <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">Email</span>
-            <input
-              v-model="signInForm.email"
-              required
-              type="email"
-              placeholder="name@example.com"
-              class="w-full rounded-2xl border border-black/10 bg-[#f5f5f7] px-4 py-3 text-sm text-[#1d1d1f] outline-none transition focus:border-[#e63946]/65 focus:ring-2 focus:ring-[#e63946]/20"
+        <!-- Sign In form -->
+        <form v-if="activeTab === 'signin'" @submit.prevent="handleSignIn" style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+          <label style="display:flex; flex-direction:column; gap:6px;">
+            <span style="font-size:11px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; color:#6e6e73;">Email</span>
+            <input v-model="signInForm.email" type="email" required placeholder="name@example.com"
+              style="padding:12px 16px; border:1.5px solid rgba(0,0,0,0.1); border-radius:14px; font-size:14px; outline:none; background:#f9fafb; transition:border 0.2s;"
+              onfocus="this.style.borderColor='#1d1d1f'; this.style.background='white'"
+              onblur="this.style.borderColor='rgba(0,0,0,0.1)'; this.style.background='#f9fafb'"
             />
           </label>
-          <label>
-            <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">Password</span>
-            <input
-              v-model="signInForm.password"
-              required
-              type="password"
-              placeholder="Enter your password"
-              class="w-full rounded-2xl border border-black/10 bg-[#f5f5f7] px-4 py-3 text-sm text-[#1d1d1f] outline-none transition focus:border-[#e63946]/65 focus:ring-2 focus:ring-[#e63946]/20"
+          <label style="display:flex; flex-direction:column; gap:6px;">
+            <span style="font-size:11px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; color:#6e6e73;">Password</span>
+            <input v-model="signInForm.password" type="password" required placeholder="Enter your password"
+              style="padding:12px 16px; border:1.5px solid rgba(0,0,0,0.1); border-radius:14px; font-size:14px; outline:none; background:#f9fafb; transition:border 0.2s;"
+              onfocus="this.style.borderColor='#1d1d1f'; this.style.background='white'"
+              onblur="this.style.borderColor='rgba(0,0,0,0.1)'; this.style.background='#f9fafb'"
             />
           </label>
-
-          <button
-            type="submit"
-            :disabled="busy"
-            class="md:col-span-2 mt-2 w-full rounded-2xl bg-[#1d1d1f] px-5 py-3 text-sm font-semibold uppercase tracking-[0.14em] text-white transition hover:bg-black hover:shadow-[0_8px_24px_rgba(29,29,31,0.35)] disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            {{ busy ? 'Signing in...' : 'Sign In' }}
-          </button>
+          <button type="submit" :disabled="busy"
+            style="grid-column:1/-1; margin-top:8px; padding:14px; background:#1d1d1f; color:white; border:none; border-radius:16px; font-size:13px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; cursor:pointer; transition:all 0.2s;"
+            onmouseover="this.style.background='#000'; this.style.boxShadow='0 8px 24px rgba(29,29,31,0.35)'"
+            onmouseout="this.style.background='#1d1d1f'; this.style.boxShadow='none'"
+          >{{ busy ? 'Signing in...' : 'Sign In' }}</button>
         </form>
 
-        <form v-else class="mt-8 grid gap-4 md:grid-cols-2 lg:grid-cols-3" @submit.prevent="handleCreateAccount">
-          <label>
-            <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">First Name</span>
+        <!-- Create Account form -->
+        <form v-else @submit.prevent="handleCreateAccount" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px;">
+          <label v-for="(field, key) in {firstName:'First Name', lastName:'Last Name', passportNumber:'Passport Number', email:'Email', nationality:'Nationality', password:'Password'}" :key="key" style="display:flex; flex-direction:column; gap:6px;">
+            <span style="font-size:11px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; color:#6e6e73;">{{ field }}</span>
             <input
-              v-model="createForm.firstName"
+              v-model="createForm[key]"
+              :type="key === 'password' ? 'password' : key === 'email' ? 'email' : key === 'passportNumber' ? 'text' : 'text'"
+              :inputmode="key === 'passportNumber' ? 'numeric' : undefined"
               required
-              type="text"
-              placeholder="Avery"
-              class="w-full rounded-2xl border border-black/10 bg-[#f5f5f7] px-4 py-3 text-sm text-[#1d1d1f] outline-none transition focus:border-[#e63946]/65 focus:ring-2 focus:ring-[#e63946]/20"
+              :placeholder="key === 'firstName' ? 'Avery' : key === 'lastName' ? 'Morgan' : key === 'passportNumber' ? '987654321' : key === 'email' ? 'name@example.com' : key === 'nationality' ? 'Singapore' : 'Create a password'"
+              style="padding:12px 16px; border:1.5px solid rgba(0,0,0,0.1); border-radius:14px; font-size:14px; outline:none; background:#f9fafb; transition:border 0.2s;"
+              onfocus="this.style.borderColor='#1d1d1f'; this.style.background='white'"
+              onblur="this.style.borderColor='rgba(0,0,0,0.1)'; this.style.background='#f9fafb'"
             />
           </label>
-          <label>
-            <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">Last Name</span>
-            <input
-              v-model="createForm.lastName"
-              required
-              type="text"
-              placeholder="Morgan"
-              class="w-full rounded-2xl border border-black/10 bg-[#f5f5f7] px-4 py-3 text-sm text-[#1d1d1f] outline-none transition focus:border-[#e63946]/65 focus:ring-2 focus:ring-[#e63946]/20"
-            />
-          </label>
-          <label>
-            <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">Passport Number</span>
-            <input
-              v-model="createForm.passportNumber"
-              required
-              type="text"
-              inputmode="numeric"
-              placeholder="987654321123456"
-              class="w-full rounded-2xl border border-black/10 bg-[#f5f5f7] px-4 py-3 text-sm text-[#1d1d1f] outline-none transition focus:border-[#e63946]/65 focus:ring-2 focus:ring-[#e63946]/20"
-            />
-          </label>
-          <label>
-            <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">Email</span>
-            <input
-              v-model="createForm.email"
-              required
-              type="email"
-              placeholder="name@example.com"
-              class="w-full rounded-2xl border border-black/10 bg-[#f5f5f7] px-4 py-3 text-sm text-[#1d1d1f] outline-none transition focus:border-[#e63946]/65 focus:ring-2 focus:ring-[#e63946]/20"
-            />
-          </label>
-          <label>
-            <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">Nationality</span>
-            <input
-              v-model="createForm.nationality"
-              required
-              type="text"
-              placeholder="Philippines"
-              class="w-full rounded-2xl border border-black/10 bg-[#f5f5f7] px-4 py-3 text-sm text-[#1d1d1f] outline-none transition focus:border-[#e63946]/65 focus:ring-2 focus:ring-[#e63946]/20"
-            />
-          </label>
-          <label>
-            <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">Password</span>
-            <input
-              v-model="createForm.password"
-              required
-              type="password"
-              placeholder="Create a password"
-              class="w-full rounded-2xl border border-black/10 bg-[#f5f5f7] px-4 py-3 text-sm text-[#1d1d1f] outline-none transition focus:border-[#e63946]/65 focus:ring-2 focus:ring-[#e63946]/20"
-            />
-          </label>
-
-          <button
-            type="submit"
-            :disabled="busy"
-            class="md:col-span-2 lg:col-span-3 mt-2 w-full rounded-2xl bg-[#1d1d1f] px-5 py-3 text-sm font-semibold uppercase tracking-[0.14em] text-white transition hover:bg-black hover:shadow-[0_8px_24px_rgba(29,29,31,0.35)] disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            {{ busy ? 'Creating account...' : 'Create Account' }}
-          </button>
+          <button type="submit" :disabled="busy"
+            style="grid-column:1/-1; margin-top:8px; padding:14px; background:#1d1d1f; color:white; border:none; border-radius:16px; font-size:13px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; cursor:pointer; transition:all 0.2s;"
+            onmouseover="this.style.background='#000'; this.style.boxShadow='0 8px 24px rgba(29,29,31,0.35)'"
+            onmouseout="this.style.background='#1d1d1f'; this.style.boxShadow='none'"
+          >{{ busy ? 'Creating account...' : 'Create Account' }}</button>
         </form>
 
-        <p v-if="errorMessage" class="mt-4 text-sm font-medium text-red-600">{{ errorMessage }}</p>
-      </section>
-    </section>
+        <!-- Error -->
+        <div v-if="errorMessage"
+          style="margin-top:16px; background:#fef2f2; border:1px solid #fecaca; border-radius:12px; padding:12px 16px; font-size:13px; color:#dc2626;">
+          {{ errorMessage }}
+        </div>
+
+      </div>
+
+      <!-- Staff portal CTA -->
+      <RouterLink to="/staff/login" style="display:block; margin-top:20px; text-decoration:none;">
+        <div
+          style="display:flex; align-items:center; justify-content:space-between; background:white; border:1.5px solid rgba(0,0,0,0.08); border-radius:20px; padding:18px 24px; box-shadow:0 2px 12px rgba(0,0,0,0.04); transition:all 0.2s; cursor:pointer;"
+          onmouseover="this.style.borderColor='#1d1d1f'; this.style.boxShadow='0 8px 28px rgba(0,0,0,0.1)'; this.style.transform='translateY(-1px)'"
+          onmouseout="this.style.borderColor='rgba(0,0,0,0.08)'; this.style.boxShadow='0 2px 12px rgba(0,0,0,0.04)'; this.style.transform='translateY(0)'"
+        >
+          <div style="display:flex; align-items:center; gap:14px;">
+            <div style="width:40px; height:40px; background:#f5f5f7; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+              <svg width="18" height="18" fill="none" stroke="#1d1d1f" stroke-width="2" viewBox="0 0 24 24">
+                <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+              </svg>
+            </div>
+            <div>
+              <p style="font-size:14px; font-weight:700; color:#1d1d1f; margin:0 0 2px;">Airline Staff?</p>
+              <p style="font-size:12px; color:#6e6e73; margin:0;">Access the Staff Portal to manage flights</p>
+            </div>
+          </div>
+          <svg width="16" height="16" fill="none" stroke="#6e6e73" stroke-width="2" viewBox="0 0 24 24">
+            <path d="M9 18l6-6-6-6"/>
+          </svg>
+        </div>
+      </RouterLink>
+
+    </div>
   </main>
 </template>
