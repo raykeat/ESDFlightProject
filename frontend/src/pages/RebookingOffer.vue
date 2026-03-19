@@ -55,36 +55,29 @@ async function loadOffer() {
       return
     }
 
-    // Step 2: Load flight details (mock until Flight Service is ready)
-    // TODO: Replace with actual Flight Service calls when available
-    // const [origRes, newRes] = await Promise.all([
-    //   axios.get(`http://localhost:XXXX/flights/${offer.value.origFlightID}`),
-    //   axios.get(`http://localhost:XXXX/flights/${offer.value.newFlightID}`)
-    // ])
-    // origFlight.value = origRes.data
-    // newFlight.value  = newRes.data
+    // Step 2: Load flight details from Flight Service
+    const [origRes, newRes] = await Promise.all([
+      axios.get(`http://localhost:3003/flight/${offer.value.origFlightID}`),
+      axios.get(`http://localhost:3003/flight/${offer.value.newFlightID}`)
+    ])
+    
+    // Map response exactly to frontend UI expectations
+    const mapFlight = (f) => {
+      const [day, month, year] = f.Date.split('/')
+      return {
+        flightID:      f.FlightID,
+        flightNumber:  f.FlightNumber,
+        origin:        f.Origin,
+        destination:   f.Destination,
+        date:          `${year}-${month}-${day}`, // For formatDate() parser
+        departureTime: f.DepartureTime,
+        arrivalTime:   f.ArrivalTime,
+        status:        f.Status
+      }
+    }
 
-    // Mock flight data for now
-    origFlight.value = {
-      flightID:      offer.value.origFlightID,
-      flightNumber:  'SQ123',
-      origin:        'Singapore (SIN)',
-      destination:   'Tokyo (NRT)',
-      date:          '2026-03-20',
-      departureTime: '08:30',
-      arrivalTime:   '16:30',
-      status:        'Cancelled'
-    }
-    newFlight.value = {
-      flightID:      offer.value.newFlightID,
-      flightNumber:  'SQ125',
-      origin:        'Singapore (SIN)',
-      destination:   'Tokyo (NRT)',
-      date:          '2026-03-21',
-      departureTime: '10:00',
-      arrivalTime:   '18:00',
-      status:        'Available'
-    }
+    origFlight.value = mapFlight(origRes.data)
+    newFlight.value  = mapFlight(newRes.data)
 
   } catch (err) {
     console.error('Error loading offer:', err)
