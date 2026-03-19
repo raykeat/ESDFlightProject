@@ -9,10 +9,10 @@ app.use(cors());
 const PORT = 5003;
 
 const db = mysql.createConnection({
-    host: "seats-db",
-    user: "root",
-    password: "root",
-    database: "seats"
+    host:     process.env.DB_HOST     || "seats-db",
+    user:     process.env.DB_USER     || "root",
+    password: process.env.DB_PASSWORD || "rootpassword",
+    database: process.env.DB_NAME     || "seats"
 });
 
 db.connect(err => {
@@ -102,6 +102,39 @@ app.post("/seats/release", (req, res) => {
         } else {
             res.json({ message: "Seat released" });
         }
+
+    });
+
+});
+
+
+// ==========================================
+// PUT /seats/release/:flightID
+// Bulk release ALL seats on a cancelled flight
+// Called by: Flight Cancellation Composite (Scenario 2 Phase 1)
+// Sets all seats for the flight to available and clears PassengerID
+// ==========================================
+app.put('/seats/release/:flightID', (req, res) => {
+
+    const flightID = req.params.flightID;
+
+    const query =
+        `UPDATE seats SET Status="available", PassengerID=NULL WHERE FlightID=?`;
+
+    db.query(query, [flightID], (err, result) => {
+
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ message: `No seats found for flight ${flightID}` });
+        }
+
+        res.json({
+            message: `All seats released for flight ${flightID}`,
+            seatsReleased: result.affectedRows
+        });
 
     });
 
