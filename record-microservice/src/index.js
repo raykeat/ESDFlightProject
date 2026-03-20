@@ -46,10 +46,10 @@ app.get('/health', (req, res) => {
 });
 
 // ==========================================
-// POST /bookings
+// POST /records
 // Create a booking record (status: Pending)
 // ==========================================
-app.post('/bookings', (req, res) => {
+app.post('/records', (req, res) => {
   const { passengerID, flightID, amount, seatNumber } = req.body;
 
   pool.query(
@@ -63,17 +63,17 @@ app.post('/bookings', (req, res) => {
       res.status(201).json({
         bookingID: result.insertId,
         status:    'Pending',
-        message:   'Booking created successfully'
+        message:   'Booking Record created successfully'
       });
     }
   );
 });
 
 // ==========================================
-// GET /bookings?flightID={flightID}
-// Get bookings by flight
+// GET /records?flightID={flightID}
+// Get booking records by flight
 // ==========================================
-app.get('/bookings', (req, res) => {
+app.get('/records', (req, res) => {
   const { flightID } = req.query;
 
   pool.query(
@@ -90,10 +90,10 @@ app.get('/bookings', (req, res) => {
 });
 
 // ==========================================
-// GET /bookings/passenger/:passengerID
-// Get all bookings for a passenger
+// GET /records/passenger/:passengerID
+// Get all booking records for a passenger
 // ==========================================
-app.get('/bookings/passenger/:passengerID', (req, res) => {
+app.get('/records/passenger/:passengerID', (req, res) => {
   const { passengerID } = req.params;
 
   pool.query(
@@ -110,10 +110,10 @@ app.get('/bookings/passenger/:passengerID', (req, res) => {
 });
 
 // ==========================================
-// GET /bookings/:bookingID
-// Get booking by ID
+// GET /records/:bookingID
+// Get booking records by ID
 // ==========================================
-app.get('/bookings/:bookingID', (req, res) => {
+app.get('/records/:bookingID', (req, res) => {
   const { bookingID } = req.params;
 
   pool.query(
@@ -133,10 +133,10 @@ app.get('/bookings/:bookingID', (req, res) => {
 });
 
 // ==========================================
-// PUT /bookings/:bookingID/status
-// Update booking status
+// PUT /records/:bookingID/status
+// Update booking record status
 // ==========================================
-app.put('/bookings/:bookingID/status', (req, res) => {
+app.put('/records/:bookingID/status', (req, res) => {
   const { bookingID } = req.params;
   const { status }    = req.body;
 
@@ -154,10 +154,10 @@ app.put('/bookings/:bookingID/status', (req, res) => {
 });
 
 // ==========================================
-// DELETE /booking/:bookingID
-// Delete a booking
+// DELETE /record/:bookingID
+// Delete a booking record
 // ==========================================
-app.delete('/booking/:bookingID', (req, res) => {
+app.delete('/record/:bookingID', (req, res) => {
   const { bookingID } = req.params;
 
   pool.query(
