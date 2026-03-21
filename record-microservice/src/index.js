@@ -50,11 +50,14 @@ app.get('/health', (req, res) => {
 // Create a booking record (status: Pending)
 // ==========================================
 app.post('/records', (req, res) => {
-  const { passengerID, flightID, amount, seatNumber } = req.body;
+  const { passengerID, flightID, amount, amountPaid, seatID, seatNumber } = req.body;
+  const normalizedAmount = amountPaid ?? amount;
+  const parsedSeatID = Number.parseInt(seatID ?? seatNumber, 10);
+  const normalizedSeatID = Number.isNaN(parsedSeatID) ? null : parsedSeatID;
 
   pool.query(
-    'INSERT INTO booking (passengerID, flightID, status, amount, seatNumber) VALUES (?, ?, "Pending", ?, ?)',
-    [passengerID, flightID, amount, seatNumber],
+    'INSERT INTO booking (PassengerID, FlightID, SeatID, AmountPaid, bookingstatus) VALUES (?, ?, ?, ?, "Pending")',
+    [passengerID, flightID, normalizedSeatID, normalizedAmount],
     (err, result) => {
       if (err) {
         console.error(err);
@@ -62,7 +65,7 @@ app.post('/records', (req, res) => {
       }
       res.status(201).json({
         bookingID: result.insertId,
-        status:    'Pending',
+        status: 'Pending',
         message:   'Booking Record created successfully'
       });
     }
@@ -77,7 +80,20 @@ app.get('/records', (req, res) => {
   const { flightID } = req.query;
 
   pool.query(
-    'SELECT * FROM booking WHERE flightID = ?',
+    `SELECT
+      BookingID AS bookingID,
+      FlightID AS flightID,
+      SeatID AS seatID,
+      SeatID AS seatNumber,
+      PassengerID AS passengerID,
+      AmountPaid AS amount,
+      AmountPaid AS amountPaid,
+      bookingstatus AS status,
+      bookingstatus AS bookingstatus,
+      CreatedTime AS createdAt,
+      CreatedTime AS createdTime
+    FROM booking
+    WHERE FlightID = ?`,
     [flightID],
     (err, results) => {
       if (err) {
@@ -97,7 +113,21 @@ app.get('/records/passenger/:passengerID', (req, res) => {
   const { passengerID } = req.params;
 
   pool.query(
-    'SELECT * FROM booking WHERE passengerID = ? ORDER BY createdAt DESC',
+    `SELECT
+      BookingID AS bookingID,
+      FlightID AS flightID,
+      SeatID AS seatID,
+      SeatID AS seatNumber,
+      PassengerID AS passengerID,
+      AmountPaid AS amount,
+      AmountPaid AS amountPaid,
+      bookingstatus AS status,
+      bookingstatus AS bookingstatus,
+      CreatedTime AS createdAt,
+      CreatedTime AS createdTime
+    FROM booking
+    WHERE PassengerID = ?
+    ORDER BY CreatedTime DESC`,
     [passengerID],
     (err, results) => {
       if (err) {
@@ -117,7 +147,20 @@ app.get('/records/:bookingID', (req, res) => {
   const { bookingID } = req.params;
 
   pool.query(
-    'SELECT * FROM booking WHERE bookingID = ?',
+    `SELECT
+      BookingID AS bookingID,
+      FlightID AS flightID,
+      SeatID AS seatID,
+      SeatID AS seatNumber,
+      PassengerID AS passengerID,
+      AmountPaid AS amount,
+      AmountPaid AS amountPaid,
+      bookingstatus AS status,
+      bookingstatus AS bookingstatus,
+      CreatedTime AS createdAt,
+      CreatedTime AS createdTime
+    FROM booking
+    WHERE BookingID = ?`,
     [bookingID],
     (err, results) => {
       if (err) {
@@ -141,7 +184,7 @@ app.put('/records/:bookingID/status', (req, res) => {
   const { status }    = req.body;
 
   pool.query(
-    'UPDATE booking SET status = ? WHERE bookingID = ?',
+    'UPDATE booking SET bookingstatus = ? WHERE BookingID = ?',
     [status, bookingID],
     (err) => {
       if (err) {
@@ -161,7 +204,7 @@ app.delete('/record/:bookingID', (req, res) => {
   const { bookingID } = req.params;
 
   pool.query(
-    'DELETE FROM booking WHERE bookingID = ?',
+    'DELETE FROM booking WHERE BookingID = ?',
     [bookingID],
     (err, result) => {
       if (err) {
