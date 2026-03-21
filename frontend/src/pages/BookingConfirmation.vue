@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { usePassengerSession } from '../composables/usePassengerSession'
@@ -11,6 +11,7 @@ const { currentPassenger } = usePassengerSession()
 const loading     = ref(false)
 const error       = ref(null)
 const sessionUrl  = ref(route.query.sessionUrl || null)  // reuse session if returning from Stripe
+const cancelCleanupDone = ref(false)
 
 const isRoundTrip = !!route.query.outboundFlightID
 
@@ -56,6 +57,22 @@ function goBack() {
   router.push({ path: '/search-results', query: searchParams })
 }
 
+async function cleanupCancelledPendingBooking() {
+  if (cancelCleanupDone.value) return
+  const bookingID = route.query.bookingID
+  if (!bookingID) return
+
+  try {
+    await axios.post('http://localhost:3010/api/bookings/cancel-pending', {
+      bookingID: Number(bookingID),
+      returnBookingID: route.query.returnBookingID ? Number(route.query.returnBookingID) : null,
+    })
+    cancelCleanupDone.value = true
+  } catch (e) {
+    console.warn('Pending booking cleanup failed:', e)
+  }
+}
+
 // ── Confirm booking & redirect to Stripe Checkout ───────────
 async function confirmBooking() {
   if (!currentPassenger.value) {
@@ -77,19 +94,17 @@ async function confirmBooking() {
         flightID:    isRoundTrip ? bookingDetails.value.outboundFlightID : bookingDetails.value.flightID,
         seatNumber:  isRoundTrip ? bookingDetails.value.outboundSeat : bookingDetails.value.seatNumber,
         amount:      Number(bookingDetails.value.amount),
+        flightNumber: displayFlightNumber.value,
+        frontendBaseUrl: window.location.origin,
       }
 
       if (isRoundTrip) {
         payload.returnFlightID   = bookingDetails.value.flightID
         payload.returnSeatNumber = bookingDetails.value.seatNumber
+        payload.outboundAmount   = Number(bookingDetails.value.outboundPrice || 0)
+        payload.returnAmount     = Number(bookingDetails.value.amount || 0)
       }
 
-      const bookingResponse = await axios.post('http://localhost:3010/api/bookings', payload)
-
-      const { bookingID, userBookingCount } = bookingResponse.data
-      console.log(`Booking created with ID ${bookingID}. User-specific count: ${userBookingCount}`);
-
-      // Build cancel URL with sessionUrl so we can reuse the session if user comes back
       const cancelUrl = new URL('http://localhost:5173/booking-confirmation')
       cancelUrl.searchParams.set('flightID',         bookingDetails.value.flightID)
       cancelUrl.searchParams.set('seatNumber',       bookingDetails.value.seatNumber)
@@ -107,21 +122,16 @@ async function confirmBooking() {
       cancelUrl.searchParams.set('returnDate',       searchParams.returnDate       || '')
       cancelUrl.searchParams.set('passengers',       searchParams.passengers       || '')
       cancelUrl.searchParams.set('cabin',            searchParams.cabin            || '')
-      cancelUrl.searchParams.set('sessionUrl',       finalSessionUrl || '')
       cancelUrl.searchParams.set('cancelled',        'true')
+      payload.cancelUrl = cancelUrl.toString()
 
-      // Step 2: Call Payment Service to create a Stripe Checkout Session
-      const paymentResponse = await axios.post('http://localhost:5001/payment/checkout', {
-        bookingID:    bookingID,
-        userBookingCount: userBookingCount,
-        passengerID:  currentPassenger.value.passenger_id,
-        amount:       totalAmount.value,
-        flightNumber: displayFlightNumber.value,
-        successUrl:   `http://localhost:5173/booking-success/${bookingID}?session_id={CHECKOUT_SESSION_ID}`,
-        cancelUrl:    cancelUrl.toString()
-      })
+      const bookingResponse = await axios.post('http://localhost:3010/api/bookings', payload)
 
-      finalSessionUrl = paymentResponse.data.sessionUrl
+      const { bookingID, returnBookingID } = bookingResponse.data
+      console.log(`Booking created with ID ${bookingID}${returnBookingID ? ` and return booking ${returnBookingID}` : ''}.`);
+
+      // Step 2: Booking Composite orchestrates payment session creation
+      finalSessionUrl = bookingResponse.data.sessionUrl
 
       // Store sessionUrl in URL so returning from Stripe reuses same session
       const currentUrl = new URL(window.location.href)
@@ -141,6 +151,12 @@ async function confirmBooking() {
 
 // Show cancelled message if redirected back from Stripe cancel
 const wasCancelled = route.query.cancelled === 'true'
+
+onMounted(async () => {
+  if (wasCancelled) {
+    await cleanupCancelledPendingBooking()
+  }
+})
 </script>
 
 <template>

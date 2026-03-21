@@ -1,6 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
-import axios from 'axios'
+import { ref, watch } from 'vue'
 
 const props = defineProps({
   flightId: {
@@ -10,6 +9,10 @@ const props = defineProps({
   maxSeats: {
     type: Number,
     default: 1
+  },
+  seatsData: {
+    type: Array,
+    default: () => []
   }
 })
 
@@ -19,37 +22,31 @@ const seats = ref([])
 const loading = ref(true)
 const selectedSeats = ref([])
 
-onMounted(async () => {
-  loading.value = true
-  try {
-    // Fetch live seats from seats-microservice
-    const response = await axios.get(`http://localhost:5003/seats/${props.flightId}`)
-    const seatData = response.data
+function mapSeats(seatData) {
+  if (!Array.isArray(seatData) || seatData.length === 0) return []
 
-    if (seatData && seatData.length > 0) {
-      seats.value = seatData.map(seat => {
-        // Parse row number from SeatNumber (e.g., '12A' -> row: 12, col: 'A')
-        const rowStr = seat.SeatNumber.match(/\d+/)[0];
-        const colStr = seat.SeatNumber.match(/[A-Za-z]+/)[0];
-        
-        return {
-          id: seat.SeatNumber,
-          row: parseInt(rowStr),
-          col: colStr,
-          isAvailable: seat.Status === 'available'
-        }
-      })
-    } else {
-      // Fallback if no seats found for this flight ID
-      console.warn("No seats populated for this flight yet.")
-      seats.value = []
+  return seatData.map(seat => {
+    const seatNumber = seat.SeatNumber || seat.seatNumber || ''
+    const rowMatch = seatNumber.match(/\d+/)
+    const colMatch = seatNumber.match(/[A-Za-z]+/)
+
+    return {
+      id: seatNumber,
+      row: rowMatch ? parseInt(rowMatch[0]) : 0,
+      col: colMatch ? colMatch[0] : '',
+      isAvailable: String(seat.Status || seat.status || '').toLowerCase() === 'available'
     }
-  } catch (error) {
-    console.error("Failed to load seats:", error)
-  } finally {
+  }).filter(seat => seat.id)
+}
+
+watch(
+  () => props.seatsData,
+  (newSeatData) => {
+    seats.value = mapSeats(newSeatData)
     loading.value = false
-  }
-})
+  },
+  { immediate: true }
+)
 
 function selectSeat(seat) {
   if (!seat.isAvailable) return
@@ -61,9 +58,11 @@ function selectSeat(seat) {
     if (selectedSeats.value.length < props.maxSeats) {
       selectedSeats.value.push(seat.id) // Select
     } else {
-      // If they already reached max, maybe replace the last one chosen?
-      // For simplicity, let's just alert them or do nothing.
-      return
+      if (props.maxSeats === 1) {
+        selectedSeats.value = [seat.id]
+      } else {
+        return
+      }
     }
   }
   

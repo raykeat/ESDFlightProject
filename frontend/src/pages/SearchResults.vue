@@ -142,38 +142,39 @@ function selectReturn(flight) {
   selectedReturn.value = flight
 }
 
+async function openFlightDetailWithComposite(flight, query) {
+  try {
+    const response = await axios.get(`http://localhost:5011/flight-search/${flight.flightID}`)
+    sessionStorage.setItem(`flightSearchComposite:${flight.flightID}`, JSON.stringify(response.data))
+  } catch (e) {
+    console.error('Error prefetching flight composite:', e)
+  }
+
+  router.push({
+    path: '/flight-detail',
+    query,
+  })
+}
+
 // Called when user confirms their outbound flight selection
 async function confirmOutbound() {
+  const detailQuery = {
+    flightID:         selectedOutbound.value.flightID,
+    isReturn:         'false',
+    tripType:         isRoundTrip.value ? searchParams.value.tripType : 'one-way',
+    departingCountry: searchParams.value.departingCountry,
+    arrivingCountry:  searchParams.value.arrivingCountry,
+    departureDate:    searchParams.value.departureDate,
+    returnDate:       searchParams.value.returnDate,
+    passengers:       searchParams.value.passengers,
+  }
+
   if (isRoundTrip.value) {
     // For round trip: go to FlightDetail for outbound seat selection first
-    router.push({
-      path: '/flight-detail',
-      query: {
-        flightID:         selectedOutbound.value.flightID,
-        isReturn:         'false',
-        // Pass round-trip context so FlightDetail can bounce back to search-results
-        tripType:         searchParams.value.tripType,
-        departingCountry: searchParams.value.departingCountry,
-        arrivingCountry:  searchParams.value.arrivingCountry,
-        departureDate:    searchParams.value.departureDate,
-        returnDate:       searchParams.value.returnDate,
-        passengers:       searchParams.value.passengers,
-      },
-    })
+    await openFlightDetailWithComposite(selectedOutbound.value, detailQuery)
   } else {
     // One-way: go directly to FlightDetail for seat selection
-    router.push({
-      path: '/flight-detail',
-      query: {
-        flightID:         selectedOutbound.value.flightID,
-        isReturn:         'false',
-        tripType:         'one-way',
-        departingCountry: searchParams.value.departingCountry,
-        arrivingCountry:  searchParams.value.arrivingCountry,
-        departureDate:    searchParams.value.departureDate,
-        passengers:       searchParams.value.passengers,
-      },
-    })
+    await openFlightDetailWithComposite(selectedOutbound.value, detailQuery)
   }
 }
 
@@ -185,22 +186,19 @@ function proceedToBooking() {
   }
 
   // Navigate to FlightDetail for the return flight seat selection
-  router.push({
-    path: '/flight-detail',
-    query: {
-      flightID:             selectedReturn.value.flightID,
-      isReturn:             'true',
-      outboundFlightID:     selectedOutbound.value.flightID,
-      outboundFlightNumber: selectedOutbound.value.flightNumber,
-      outboundSeat:         selectedOutboundSeat.value,
-      outboundPrice:        selectedOutbound.value.price,
-      tripType:             searchParams.value.tripType,
-      departingCountry:     searchParams.value.departingCountry,
-      arrivingCountry:      searchParams.value.arrivingCountry,
-      departureDate:        searchParams.value.departureDate,
-      returnDate:           searchParams.value.returnDate,
-      passengers:           searchParams.value.passengers,
-    },
+  openFlightDetailWithComposite(selectedReturn.value, {
+    flightID:             selectedReturn.value.flightID,
+    isReturn:             'true',
+    outboundFlightID:     selectedOutbound.value.flightID,
+    outboundFlightNumber: selectedOutbound.value.flightNumber,
+    outboundSeat:         selectedOutboundSeat.value,
+    outboundPrice:        selectedOutbound.value.price,
+    tripType:             searchParams.value.tripType,
+    departingCountry:     searchParams.value.departingCountry,
+    arrivingCountry:      searchParams.value.arrivingCountry,
+    departureDate:        searchParams.value.departureDate,
+    returnDate:           searchParams.value.returnDate,
+    passengers:           searchParams.value.passengers,
   })
 }
 </script>

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 
@@ -8,27 +8,105 @@ const router = useRouter()
 
 const bookingID = route.params.bookingID
 const sessionID = route.query.session_id   // Stripe appends this to the successUrl
+const returnBookingID = route.query.returnBookingID || null
 
-const booking    = ref(null)
-const payment    = ref(null)
-const loading    = ref(true)
-const error      = ref(null)
+const booking = ref(null)
+const returnBooking = ref(null)
+const outboundFlight = ref(null)
+const returnFlight = ref(null)
+const payment = ref(null)
+const loading = ref(true)
+const error = ref(null)
+
+const isRoundTrip = computed(() => !!returnBooking.value)
+
+const totalPaid = computed(() => {
+  const outboundAmount = Number(booking.value?.amount || 0)
+  const returnAmount = Number(returnBooking.value?.amount || 0)
+  return outboundAmount + returnAmount
+})
+
+function formatAmount(value) {
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return '0.00'
+  return amount.toFixed(2)
+}
+
+function formatDate(value) {
+  if (!value) return '--'
+  const [day, month, year] = String(value).split('/')
+  if (!day || !month || !year) return String(value)
+  return new Date(`${year}-${month}-${day}`).toLocaleDateString('en-US', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
+function formatTime(value) {
+  if (!value) return '--'
+  const [hStr, mStr = '00'] = String(value).slice(0, 5).split(':')
+  const h = Number(hStr)
+  const m = Number(mStr)
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return String(value)
+  const period = h >= 12 ? 'PM' : 'AM'
+  const hour12 = h % 12 || 12
+  return `${hour12}:${String(m).padStart(2, '0')} ${period}`
+}
+
+async function fetchFlightDetails(flightID) {
+  if (!flightID) return null
+  try {
+    const response = await axios.get(`http://localhost:3003/flight/${flightID}`)
+    return response.data
+  } catch {
+    return null
+  }
+}
 
 onMounted(async () => {
   try {
-    // Step 1: Verify the Stripe session and update payment to Completed
-    if (sessionID) {
-      const paymentResponse = await axios.get(
-        `http://localhost:5001/payment/verify-session/${sessionID}`
-      )
-      payment.value = paymentResponse.data
+    // Step 1: Finalize booking through Booking Composite
+    if (!sessionID) {
+      throw new Error('Missing payment session id.')
     }
 
-    // Step 2: Fetch booking details from Booking Composite
+    const finalizePayload = {
+      bookingID: Number(bookingID),
+      sessionID,
+      flightID: Number(route.query.flightID),
+      seatNumber: route.query.seatNumber,
+      returnBookingID: route.query.returnBookingID ? Number(route.query.returnBookingID) : null,
+      returnFlightID: route.query.returnFlightID ? Number(route.query.returnFlightID) : null,
+      returnSeatNumber: route.query.returnSeatNumber || null,
+    }
+
+    const finalizeResponse = await axios.post(
+      'http://localhost:3010/api/bookings/finalize',
+      finalizePayload
+    )
+    payment.value = finalizeResponse.data.payment
+
+    // Step 2: Fetch outbound booking details from Booking Composite
     const bookingResponse = await axios.get(
       `http://localhost:3010/api/bookings/${bookingID}`
     )
     booking.value = bookingResponse.data
+
+    // Step 3: Fetch return booking if exists
+    if (returnBookingID) {
+      const returnBookingResponse = await axios.get(
+        `http://localhost:3010/api/bookings/${returnBookingID}`
+      )
+      returnBooking.value = returnBookingResponse.data
+    }
+
+    // Step 4: Fetch flight details for display blocks
+    outboundFlight.value = await fetchFlightDetails(booking.value?.flightID)
+    if (returnBooking.value?.flightID) {
+      returnFlight.value = await fetchFlightDetails(returnBooking.value.flightID)
+    }
 
   } catch (err) {
     console.error('Error confirming booking:', err)
@@ -84,32 +162,66 @@ onMounted(async () => {
         <h1 class="text-3xl font-semibold tracking-[-0.02em] text-[#1d1d1f]">Booking Confirmed!</h1>
         <p class="mt-2 text-[#6e6e73]">Your flight has been successfully booked and payment received.</p>
 
-        <!-- Booking details -->
+        <!-- Booking summary -->
         <div class="mt-8 rounded-2xl bg-[#f5f5f7] p-6 text-left">
-          <div class="space-y-3">
+          <div class="space-y-5">
             <div class="flex justify-between">
               <span class="text-[#6e6e73] text-sm">Booking Reference</span>
               <span class="font-mono font-medium text-[#1d1d1f]">#{{ bookingID }}</span>
             </div>
 
-            <template v-if="booking">
-              <div class="flex justify-between">
-                <span class="text-[#6e6e73] text-sm">Flight</span>
-                <span class="font-medium text-[#1d1d1f]">#{{ booking.flightID }}</span>
+            <div v-if="returnBookingID" class="flex justify-between">
+              <span class="text-[#6e6e73] text-sm">Return Booking Ref</span>
+              <span class="font-mono font-medium text-[#1d1d1f]">#{{ returnBookingID }}</span>
+            </div>
+
+            <!-- Leg 1 -->
+            <div v-if="booking" class="rounded-xl border border-black/10 bg-white px-4 py-3">
+              <p class="text-[11px] font-bold uppercase tracking-[0.12em] text-[#6e6e73]">Flight 1</p>
+              <div class="mt-2 grid grid-cols-2 gap-2 text-sm">
+                <span class="text-[#6e6e73]">Flight</span>
+                <span class="text-right font-medium text-[#1d1d1f]">{{ outboundFlight?.FlightNumber || ('#' + booking.flightID) }}</span>
+                <span class="text-[#6e6e73]">Route</span>
+                <span class="text-right font-medium text-[#1d1d1f]">{{ outboundFlight?.Origin || '--' }} → {{ outboundFlight?.Destination || '--' }}</span>
+                <span class="text-[#6e6e73]">Date</span>
+                <span class="text-right font-medium text-[#1d1d1f]">{{ formatDate(outboundFlight?.Date) }}</span>
+                <span class="text-[#6e6e73]">Time</span>
+                <span class="text-right font-medium text-[#1d1d1f]">{{ formatTime(outboundFlight?.DepartureTime) }} - {{ formatTime(outboundFlight?.ArrivalTime) }}</span>
+                <span class="text-[#6e6e73]">Seat</span>
+                <span class="text-right font-medium text-[#1d1d1f]">{{ booking.seatNumber }}</span>
+                <span class="text-[#6e6e73]">Fare</span>
+                <span class="text-right font-medium text-[#1d1d1f]">${{ formatAmount(booking.amount) }}</span>
               </div>
-              <div class="flex justify-between">
-                <span class="text-[#6e6e73] text-sm">Seat</span>
-                <span class="font-medium text-[#1d1d1f]">{{ booking.seatNumber }}</span>
+            </div>
+
+            <!-- Leg 2 -->
+            <div v-if="returnBooking" class="rounded-xl border border-black/10 bg-white px-4 py-3">
+              <p class="text-[11px] font-bold uppercase tracking-[0.12em] text-[#6e6e73]">Flight 2</p>
+              <div class="mt-2 grid grid-cols-2 gap-2 text-sm">
+                <span class="text-[#6e6e73]">Flight</span>
+                <span class="text-right font-medium text-[#1d1d1f]">{{ returnFlight?.FlightNumber || ('#' + returnBooking.flightID) }}</span>
+                <span class="text-[#6e6e73]">Route</span>
+                <span class="text-right font-medium text-[#1d1d1f]">{{ returnFlight?.Origin || '--' }} → {{ returnFlight?.Destination || '--' }}</span>
+                <span class="text-[#6e6e73]">Date</span>
+                <span class="text-right font-medium text-[#1d1d1f]">{{ formatDate(returnFlight?.Date) }}</span>
+                <span class="text-[#6e6e73]">Time</span>
+                <span class="text-right font-medium text-[#1d1d1f]">{{ formatTime(returnFlight?.DepartureTime) }} - {{ formatTime(returnFlight?.ArrivalTime) }}</span>
+                <span class="text-[#6e6e73]">Seat</span>
+                <span class="text-right font-medium text-[#1d1d1f]">{{ returnBooking.seatNumber }}</span>
+                <span class="text-[#6e6e73]">Fare</span>
+                <span class="text-right font-medium text-[#1d1d1f]">${{ formatAmount(returnBooking.amount) }}</span>
               </div>
-              <div class="flex justify-between">
-                <span class="text-[#6e6e73] text-sm">Status</span>
-                <span class="font-medium text-green-600">{{ booking.status }}</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-[#6e6e73] text-sm">Amount Paid</span>
-                <span class="font-medium text-[#1d1d1f]">${{ booking.amount?.toFixed(2) }}</span>
-              </div>
-            </template>
+            </div>
+
+            <div class="flex justify-between">
+              <span class="text-[#6e6e73] text-sm">Status</span>
+              <span class="font-medium text-green-600">{{ booking?.status || 'Confirmed' }}</span>
+            </div>
+
+            <div class="flex justify-between">
+              <span class="text-[#6e6e73] text-sm">Total Amount Paid</span>
+              <span class="font-medium text-[#1d1d1f]">${{ formatAmount(totalPaid) }}</span>
+            </div>
 
             <!-- Payment confirmation -->
             <template v-if="payment">

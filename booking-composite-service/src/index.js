@@ -56,23 +56,81 @@ app.get('/health', (req, res) => {
   res.json({ status: 'OK', service: 'booking-composite-service' });
 });
 
+function buildCancelUrl(baseCancelUrl, frontendOrigin, outboundBookingID, returnBookingID) {
+  try {
+    const cancel = new URL(baseCancelUrl || `${frontendOrigin}/booking-confirmation`);
+    cancel.searchParams.set('cancelled', 'true');
+    cancel.searchParams.set('bookingID', String(outboundBookingID));
+    if (returnBookingID) {
+      cancel.searchParams.set('returnBookingID', String(returnBookingID));
+    }
+    return cancel.toString();
+  } catch {
+    const fallback = new URL(`${frontendOrigin}/booking-confirmation`);
+    fallback.searchParams.set('cancelled', 'true');
+    fallback.searchParams.set('bookingID', String(outboundBookingID));
+    if (returnBookingID) {
+      fallback.searchParams.set('returnBookingID', String(returnBookingID));
+    }
+    return fallback.toString();
+  }
+}
+
 // ==========================================
 // BOOKING FLOW - Scenario 1
 // ==========================================
 app.post('/api/bookings', async (req, res) => {
-  const { passengerID, flightID, seatNumber, returnFlightID, returnSeatNumber, amount } = req.body;
+  const {
+    passengerID,
+    flightID,
+    seatNumber,
+    returnFlightID,
+    returnSeatNumber,
+    amount,
+    outboundAmount,
+    returnAmount,
+    flightNumber,
+    cancelUrl,
+    frontendBaseUrl,
+  } = req.body;
   
   if (!passengerID || !flightID || !seatNumber) {
     return res.status(400).json({ 
       error: 'Missing required fields: passengerID, flightID, seatNumber' 
     });
   }
+
+  if ((returnFlightID && !returnSeatNumber) || (!returnFlightID && returnSeatNumber)) {
+    return res.status(400).json({
+      error: 'Both returnFlightID and returnSeatNumber are required for round-trip bookings'
+    });
+  }
+
+  const isRoundTrip = Boolean(returnFlightID && returnSeatNumber);
+
+  const outboundFare = isRoundTrip
+    ? Number(outboundAmount ?? 0)
+    : Number(amount ?? 0);
+  const returnFare = isRoundTrip
+    ? Number(returnAmount ?? amount ?? 0)
+    : 0;
+
+  if (!Number.isFinite(outboundFare) || outboundFare < 0 || !Number.isFinite(returnFare) || returnFare < 0) {
+    return res.status(400).json({
+      error: 'Invalid fare amount. outboundAmount/returnAmount must be valid numbers for round-trip.'
+    });
+  }
+
+  let passenger = null;
+  let outboundBooking = null;
+  let returnBooking = null;
+  let outboundSeatHeld = false;
+  let returnSeatHeld = false;
+  let userBookingCount = 1;
  
   console.log(`Starting booking flow for passenger ${passengerID}, flight ${flightID}, seat ${seatNumber}, returnFlight ${returnFlightID || 'N/A'}, amount ${amount}`);
  
   try {
-    let passenger = null;
-
     // Step 1: Validate passenger exists (OutSystems External API)
     console.log('Step 1: Validating passenger...');
     // Correct endpoint from Swagger: /getpassenger/{passenger_id}/
@@ -83,15 +141,9 @@ app.post('/api/bookings', async (req, res) => {
     }
     console.log('✓ Passenger validated:', passenger.FirstName, passenger.LastName);
 
-    // Step 2: Create pending booking
-    console.log('Step 2: Creating pending booking...');
-
-    // Fetch existing bookings for this passenger to calculate relative booking number
-    let userBookingCount = 1;
+    // Step 2: Fetch existing bookings to calculate user-facing booking number
     try {
-      // Friend changed endpoint from /bookings to /records
       const existingBookingsResponse = await axios.get(`${RECORD_SERVICE_URL}/records/passenger/${passengerID}`);
-      // Only count actual CONFIRMED bookings for the user-specific number
       const confirmedBookings = existingBookingsResponse.data.filter(b => b.status === 'Confirmed');
       userBookingCount = confirmedBookings.length + 1;
       console.log(`✓ Passenger has ${confirmedBookings.length} previous confirmed bookings. This is Booking #${userBookingCount}`);
@@ -99,104 +151,198 @@ app.post('/api/bookings', async (req, res) => {
       console.warn('Could not fetch existing bookings for count, defaulting to 1', err.message);
     }
 
-    // Step 2: Create pending booking in Booking Service
-    console.log('Step 2: Creating pending booking...');
-    const bookingResponse = await axios.post(`${RECORD_SERVICE_URL}/records`, {
+    // Step 3: Create outbound pending booking in Record Service
+    console.log('Step 3: Creating outbound pending booking...');
+    const outboundBookingResponse = await axios.post(`${RECORD_SERVICE_URL}/records`, {
       passengerID,
       flightID,
-      amount: amount || 0,
+      amount: outboundFare,
       seatNumber,
-      returnFlightID,
-      returnSeatNumber
     });
-    const booking = bookingResponse.data;
-    console.log(`✓ Pending booking created with ID: ${booking.bookingID}`);
+    outboundBooking = outboundBookingResponse.data;
+    console.log(`✓ Outbound pending booking created with ID: ${outboundBooking.bookingID}`);
 
-    // Step 3: Hold seats in Seats Service
-    console.log('Step 3: Holding outbound seat(s)...');
+    // Step 4: Optional return pending booking in Record Service
+    if (isRoundTrip) {
+      console.log('Step 4: Creating return pending booking...');
+      const returnBookingResponse = await axios.post(`${RECORD_SERVICE_URL}/records`, {
+        passengerID,
+        flightID: returnFlightID,
+        amount: returnFare,
+        seatNumber: returnSeatNumber,
+      });
+      returnBooking = returnBookingResponse.data;
+      console.log(`✓ Return pending booking created with ID: ${returnBooking.bookingID}`);
+    }
+
+    // Step 5: Hold outbound seat(s)
+    console.log('Step 5: Holding outbound seat(s)...');
     await axios.post(`${SEATS_SERVICE_URL}/seats/hold`, {
       flightID,
       seatNumber,
       passengerID
     });
+    outboundSeatHeld = true;
 
-    if (returnFlightID && returnSeatNumber) {
-      console.log('Step 3b: Holding return seat(s)...');
+    // Step 6: Hold return seat(s) if needed
+    if (isRoundTrip) {
+      console.log('Step 6: Holding return seat(s)...');
       await axios.post(`${SEATS_SERVICE_URL}/seats/hold`, {
         flightID: returnFlightID,
         seatNumber: returnSeatNumber,
         passengerID
       });
+      returnSeatHeld = true;
     }
     console.log('✓ Seat(s) held successfully');
 
-    // Step 4: Process payment (Mocked success)
-    console.log('Step 4: Processing payment...');
-    const paymentSuccess = true;
-
-    if (paymentSuccess) {
-      console.log('✓ Payment successful');
-
-      // Step 5: Update booking to Confirmed
-      // Friend also likely updated the status update endpoint to use /records
-      await axios.put(`${RECORD_SERVICE_URL}/records/${booking.bookingID}/status`, {
-        status: 'Confirmed'
-      });
-
-      // Step 6: Mark seats as BOOKED
-      await axios.post(`${SEATS_SERVICE_URL}/seats/confirm`, { flightID, seatNumber });
-      if (returnFlightID && returnSeatNumber) {
-          await axios.post(`${SEATS_SERVICE_URL}/seats/confirm`, { flightID: returnFlightID, seatNumber: returnSeatNumber });
-      }
-
-      // Step 7: Notify via RabbitMQ
-      await publishBookingConfirmed({
-        booking_id:      booking.bookingID,
-        passenger_name:  `${passenger.FirstName} ${passenger.LastName}`,
-        passenger_email: passenger.Email,
-        flight_number:   'SQ' + flightID, 
-        origin:          'Origin', 
-        destination:     'Destination',
-        departure_date:  '2026-05-05',
-        seat_number:     seatNumber,
-        amount_paid:     amount
-      });
-
-      return res.status(201).json({
-        success:   true,
-        message:   'Booking confirmed successfully',
-        bookingID: booking.bookingID,
-        userBookingCount: userBookingCount,
-        status:    'Confirmed'
-      });
-    } else {
-      // ── FAILURE PATH ──────────────────────────────────────
-      console.log('✗ Payment failed');
- 
-      // Update booking to Failed
-      console.log('Step 6: Updating booking to Failed...');
-      await axios.put(`${RECORD_SERVICE_URL}/records/${booking.bookingID}/status`, {
-        status: 'Failed'
-      });
-      console.log('✓ Booking marked as Failed');
- 
-      // Return failure response
-      return res.status(400).json({
-        success: false,
-        message: 'Payment failed. Booking cancelled.',
-        bookingID: booking.bookingID,
-        status: 'Failed'
-      });
+    // Step 7: Create Stripe checkout session via Payment Service
+    console.log('Step 7: Creating checkout session in Payment Service...');
+    const frontendOrigin = (frontendBaseUrl || 'http://localhost:5173').replace(/\/$/, '');
+    let successUrl = `${frontendOrigin}/booking-success/${outboundBooking.bookingID}`
+      + `?session_id={CHECKOUT_SESSION_ID}`
+      + `&flightID=${encodeURIComponent(String(flightID))}`
+      + `&seatNumber=${encodeURIComponent(String(seatNumber))}`;
+    if (returnBooking) {
+      successUrl += `&returnBookingID=${encodeURIComponent(String(returnBooking.bookingID))}`;
+      successUrl += `&returnFlightID=${encodeURIComponent(String(returnFlightID))}`;
+      successUrl += `&returnSeatNumber=${encodeURIComponent(String(returnSeatNumber))}`;
     }
+
+    const totalAmount = outboundFare + returnFare;
+    const finalCancelUrl = buildCancelUrl(
+      cancelUrl,
+      frontendOrigin,
+      outboundBooking.bookingID,
+      returnBooking?.bookingID || null
+    );
+
+    const paymentPayload = {
+      bookingID: outboundBooking.bookingID,
+      userBookingCount,
+      passengerID,
+      amount: totalAmount,
+      flightNumber: flightNumber || (isRoundTrip ? `SQ${flightID} & SQ${returnFlightID}` : `SQ${flightID}`),
+      successUrl,
+      cancelUrl: finalCancelUrl,
+    };
+
+    const paymentResponse = await axios.post(`${PAYMENT_SERVICE_URL}/payment/checkout`, paymentPayload);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Pending booking created. Redirect to payment.',
+      status: 'PendingPayment',
+      bookingID: outboundBooking.bookingID,
+      returnBookingID: returnBooking?.bookingID || null,
+      bookingIDs: returnBooking
+        ? [outboundBooking.bookingID, returnBooking.bookingID]
+        : [outboundBooking.bookingID],
+      userBookingCount,
+      paymentID: paymentResponse.data.paymentID,
+      stripeSessionID: paymentResponse.data.stripeSessionID,
+      sessionUrl: paymentResponse.data.sessionUrl,
+    });
   } catch (error) {
     const errorMsg = error.response?.data?.message || error.message;
     console.error('Error in booking flow:', errorMsg);
 
-    // If we have a booking ID, we could attempt cleanup, but usually we just keep it as Failed
+    // Best-effort cleanup for partially created records/holds
+    try {
+      if (typeof outboundBooking !== 'undefined' && outboundBooking?.bookingID) {
+        await axios.put(`${RECORD_SERVICE_URL}/records/${outboundBooking.bookingID}/status`, { status: 'Failed' });
+      }
+      if (typeof returnBooking !== 'undefined' && returnBooking?.bookingID) {
+        await axios.put(`${RECORD_SERVICE_URL}/records/${returnBooking.bookingID}/status`, { status: 'Failed' });
+      }
+      if (typeof outboundSeatHeld !== 'undefined' && outboundSeatHeld) {
+        await axios.post(`${SEATS_SERVICE_URL}/seats/release`, { flightID, seatNumber });
+      }
+      if (typeof returnSeatHeld !== 'undefined' && returnSeatHeld) {
+        await axios.post(`${SEATS_SERVICE_URL}/seats/release`, { flightID: returnFlightID, seatNumber: returnSeatNumber });
+      }
+    } catch (cleanupErr) {
+      console.warn('Cleanup after booking flow failure was partial:', cleanupErr.message);
+    }
+
     return res.status(500).json({
       success: false,
       error: 'Booking failed',
       message: errorMsg
+    });
+  }
+});
+
+// ==========================================
+// FINALISE BOOKING AFTER PAYMENT SUCCESS
+// ==========================================
+app.post('/api/bookings/finalize', async (req, res) => {
+  const {
+    bookingID,
+    returnBookingID,
+    sessionID,
+    flightID,
+    seatNumber,
+    returnFlightID,
+    returnSeatNumber,
+  } = req.body;
+
+  if (!bookingID || !sessionID || !flightID || !seatNumber) {
+    return res.status(400).json({
+      error: 'Missing required fields: bookingID, sessionID, flightID, seatNumber'
+    });
+  }
+
+  try {
+    // 1) Verify payment through Payment Service
+    const paymentResponse = await axios.get(`${PAYMENT_SERVICE_URL}/payment/verify-session/${sessionID}`);
+    const payment = paymentResponse.data;
+
+    if (payment.bookingID && Number(payment.bookingID) !== Number(bookingID)) {
+      return res.status(400).json({
+        error: 'Payment booking mismatch',
+        message: `Payment belongs to booking ${payment.bookingID}, not ${bookingID}`
+      });
+    }
+
+    if (payment.status && payment.status !== 'Completed') {
+      return res.status(202).json({
+        success: false,
+        status: payment.status,
+        message: 'Payment not completed yet',
+        payment,
+      });
+    }
+
+    // 2) Confirm booking records
+    await axios.put(`${RECORD_SERVICE_URL}/records/${bookingID}/status`, { status: 'Confirmed' });
+    if (returnBookingID) {
+      await axios.put(`${RECORD_SERVICE_URL}/records/${returnBookingID}/status`, { status: 'Confirmed' });
+    }
+
+    // 3) Confirm seats
+    await axios.post(`${SEATS_SERVICE_URL}/seats/confirm`, { flightID, seatNumber });
+    if (returnFlightID && returnSeatNumber) {
+      await axios.post(`${SEATS_SERVICE_URL}/seats/confirm`, {
+        flightID: returnFlightID,
+        seatNumber: returnSeatNumber,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      status: 'Confirmed',
+      bookingID,
+      returnBookingID: returnBookingID || null,
+      payment,
+    });
+  } catch (error) {
+    const status = error.response?.status || 500;
+    const message = error.response?.data?.message || error.message;
+    return res.status(status).json({
+      success: false,
+      error: 'Failed to finalise booking',
+      message,
     });
   }
 });
@@ -226,4 +372,57 @@ app.get('/api/bookings/passenger/:passengerID', async (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Booking Composite Service running on port ${PORT}`);
+});
+
+// ==========================================
+// CANCEL PENDING BOOKING(S) AFTER STRIPE CANCEL
+// ==========================================
+app.post('/api/bookings/cancel-pending', async (req, res) => {
+  const { bookingID, returnBookingID } = req.body;
+
+  if (!bookingID) {
+    return res.status(400).json({ error: 'Missing required field: bookingID' });
+  }
+
+  const bookingIDs = [bookingID, returnBookingID].filter(Boolean).map(Number);
+  const cancelled = [];
+  const skipped = [];
+
+  for (const id of bookingIDs) {
+    try {
+      const recordResponse = await axios.get(`${RECORD_SERVICE_URL}/records/${id}`);
+      const record = recordResponse.data;
+
+      if (record.status !== 'Pending') {
+        skipped.push({ bookingID: id, reason: `status=${record.status}` });
+        continue;
+      }
+
+      await axios.post(`${SEATS_SERVICE_URL}/seats/release`, {
+        flightID: record.flightID,
+        seatNumber: record.seatNumber,
+      });
+
+      await axios.delete(`${RECORD_SERVICE_URL}/record/${id}`);
+      cancelled.push(id);
+    } catch (err) {
+      if (err.response?.status === 404) {
+        skipped.push({ bookingID: id, reason: 'already-deleted' });
+      } else {
+        return res.status(err.response?.status || 500).json({
+          error: 'Failed to cancel pending booking(s)',
+          message: err.response?.data?.message || err.message,
+          cancelled,
+          skipped,
+        });
+      }
+    }
+  }
+
+  return res.status(200).json({
+    success: true,
+    message: 'Pending booking cleanup completed',
+    cancelled,
+    skipped,
+  });
 });

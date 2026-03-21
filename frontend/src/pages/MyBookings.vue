@@ -90,6 +90,12 @@ function formatDate(d) {
   return `${day} ${month} ${year}, ${h12}:${mins} ${ampm} SGT`
 }
 
+function formatAmount(value) {
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return '0.00'
+  return amount.toFixed(2)
+}
+
 function formatExpiry(expiryStr) {
   if (!expiryStr) return null
   const h = Math.ceil((new Date(expiryStr) - new Date()) / 3600000)
@@ -342,7 +348,7 @@ function viewOffer(offer) {
                 <div style="display:flex; gap:16px; align-items:center;">
                   <div style="padding:8px 14px; background:linear-gradient(135deg, #f0fdf4, #f5f5f7); border:1px solid rgba(34,197,94,0.15); border-radius:10px; text-align:center;">
                     <p style="font-size:9px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#6e6e73; margin:0 0 2px;">Paid</p>
-                    <p style="font-size:17px; font-weight:800; color:#1d1d1f; margin:0;">${{ booking.amount?.toFixed(2) }}</p>
+                    <p style="font-size:17px; font-weight:800; color:#1d1d1f; margin:0;">${{ formatAmount(booking.amount) }}</p>
                   </div>
                   <div style="height:36px; width:1px; background:rgba(0,0,0,0.08);"></div>
                   <div>

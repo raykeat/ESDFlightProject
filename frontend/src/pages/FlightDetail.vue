@@ -26,6 +26,7 @@ const passengers = searchParams.passengers
 
 // ─── State ────────────────────────────────────────────────
 const flight        = ref(null)
+const seats         = ref([])
 const loading       = ref(true)
 const error         = ref(null)
 const selectedSeats = ref([])
@@ -33,9 +34,24 @@ const selectedSeats = ref([])
 // ─── Fetch from composite service ─────────────────────────
 onMounted(async () => {
   if (!flightID) { error.value = 'No flight ID provided.'; loading.value = false; return }
+
+  const storageKey = `flightSearchComposite:${flightID}`
+
   try {
-    const res = await axios.get(`http://localhost:5011/flight-search/${flightID}`)
-    flight.value = res.data.flight
+    const prefetched = sessionStorage.getItem(storageKey)
+
+    if (prefetched) {
+      const parsed = JSON.parse(prefetched)
+      flight.value = parsed.flight
+      seats.value = Array.isArray(parsed.seats) ? parsed.seats : []
+      sessionStorage.removeItem(storageKey)
+    }
+
+    if (!flight.value) {
+      const res = await axios.get(`http://localhost:5011/flight-search/${flightID}`)
+      flight.value = res.data.flight
+      seats.value = Array.isArray(res.data.seats) ? res.data.seats : []
+    }
   } catch (e) {
     console.error('Flight search composite error:', e)
     error.value = 'Could not load flight details. Please try again.'
@@ -276,17 +292,23 @@ function continueToBooking() {
               <div class="mb-6 rounded-2xl bg-[#f5f5f7] p-4 text-[#1d1d1f]">
                 <p class="mb-3 text-[10px] font-bold uppercase tracking-[0.12em] text-[#a1a1a6]">Included Amenities</p>
                 <div class="grid grid-cols-2 gap-3 text-xs font-semibold text-[#6e6e73]">
-                  <div class="flex items-center gap-2">
-                    <span class="text-base">🧳</span><span class="text-[#1d1d1f]">{{ flight.Baggage }} Baggage</span>
+                  <div class="rounded-xl bg-white/70 px-3 py-2">
+                    <p class="text-[10px] uppercase tracking-[0.1em] text-[#a1a1a6]">Baggage</p>
+                    <p class="mt-1 text-[#1d1d1f]">{{ flight.Baggage || 'Not specified' }}</p>
                   </div>
-                  <div class="flex items-center gap-2">
-                    <span class="text-base">🍱</span><span class="text-[#1d1d1f]">{{ flight.Meals }}</span>
+                  <div class="rounded-xl bg-white/70 px-3 py-2">
+                    <p class="text-[10px] uppercase tracking-[0.1em] text-[#a1a1a6]">Meals</p>
+                    <p class="mt-1 text-[#1d1d1f]">{{ flight.Meals || 'Not specified' }}</p>
                   </div>
-                  <div class="flex items-center gap-2">
-                    <span class="text-base">🥤</span><span class="text-[#1d1d1f]">{{ flight.Beverages }}</span>
+                  <div class="rounded-xl bg-white/70 px-3 py-2">
+                    <p class="text-[10px] uppercase tracking-[0.1em] text-[#a1a1a6]">Beverages</p>
+                    <p class="mt-1 text-[#1d1d1f]">{{ flight.Beverages || 'Not specified' }}</p>
                   </div>
-                  <div v-if="flight.Wifi" class="flex items-center gap-2">
-                    <span class="text-base">📶</span><span class="text-emerald-600">Free WiFi</span>
+                  <div class="rounded-xl bg-white/70 px-3 py-2">
+                    <p class="text-[10px] uppercase tracking-[0.1em] text-[#a1a1a6]">Wi-Fi</p>
+                    <p class="mt-1" :class="flight.Wifi ? 'text-emerald-600' : 'text-[#6e6e73]'">
+                      {{ flight.Wifi ? 'Included' : 'Not included' }}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -374,6 +396,7 @@ function continueToBooking() {
             <div class="p-6 md:p-10">
               <SeatSelector
                 :flightId="flightID"
+                :seatsData="seats"
                 :maxSeats="passengers"
                 @seatSelected="onSeatSelected"
               />
