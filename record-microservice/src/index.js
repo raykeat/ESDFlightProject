@@ -48,16 +48,32 @@ app.get('/health', (req, res) => {
 // ==========================================
 // POST /records
 // Create a booking record (status: Pending)
+// Supports both ESD project features and friend's naming
 // ==========================================
 app.post('/records', (req, res) => {
-  const { passengerID, flightID, amount, amountPaid, seatID, seatNumber } = req.body;
-  const normalizedAmount = amountPaid ?? amount;
-  const parsedSeatID = Number.parseInt(seatID ?? seatNumber, 10);
-  const normalizedSeatID = Number.isNaN(parsedSeatID) ? null : parsedSeatID;
+  const { 
+    passengerID, PassengerID,
+    flightID, FlightID,
+    amount, AmountPaid, amountPaid,
+    seatNumber,
+    returnFlightID,
+    returnSeatNumber
+  } = req.body;
+
+  const finalPassengerID = PassengerID ?? passengerID;
+  const finalFlightID     = FlightID     ?? flightID;
+  const finalAmountPaid   = AmountPaid   ?? amountPaid ?? amount;
 
   pool.query(
-    'INSERT INTO booking (PassengerID, FlightID, SeatID, AmountPaid, bookingstatus) VALUES (?, ?, ?, ?, "Pending")',
-    [passengerID, flightID, normalizedSeatID, normalizedAmount],
+    'INSERT INTO booking (PassengerID, FlightID, AmountPaid, bookingstatus, seatNumber, returnFlightID, returnSeatNumber) VALUES (?, ?, ?, "Pending", ?, ?, ?)',
+    [
+      finalPassengerID, 
+      finalFlightID, 
+      finalAmountPaid, 
+      seatNumber        || null, 
+      returnFlightID    || null, 
+      returnSeatNumber  || null
+    ],
     (err, result) => {
       if (err) {
         console.error(err);
@@ -66,7 +82,7 @@ app.post('/records', (req, res) => {
       res.status(201).json({
         bookingID: result.insertId,
         status: 'Pending',
-        message:   'Booking Record created successfully'
+        message: 'Booking Record created successfully'
       });
     }
   );
@@ -83,8 +99,8 @@ app.get('/records', (req, res) => {
     `SELECT
       BookingID AS bookingID,
       FlightID AS flightID,
-      SeatID AS seatID,
-      SeatID AS seatNumber,
+      seatNumber AS seatID,
+      seatNumber AS seatNumber,
       PassengerID AS passengerID,
       AmountPaid AS amount,
       AmountPaid AS amountPaid,
@@ -116,8 +132,8 @@ app.get('/records/passenger/:passengerID', (req, res) => {
     `SELECT
       BookingID AS bookingID,
       FlightID AS flightID,
-      SeatID AS seatID,
-      SeatID AS seatNumber,
+      seatNumber AS seatID,
+      seatNumber AS seatNumber,
       PassengerID AS passengerID,
       AmountPaid AS amount,
       AmountPaid AS amountPaid,
@@ -150,8 +166,8 @@ app.get('/records/:bookingID', (req, res) => {
     `SELECT
       BookingID AS bookingID,
       FlightID AS flightID,
-      SeatID AS seatID,
-      SeatID AS seatNumber,
+      seatNumber AS seatID,
+      seatNumber AS seatNumber,
       PassengerID AS passengerID,
       AmountPaid AS amount,
       AmountPaid AS amountPaid,

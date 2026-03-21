@@ -6,6 +6,10 @@ const props = defineProps({
   flightId: {
     type: [Number, String],
     required: true
+  },
+  maxSeats: {
+    type: Number,
+    default: 1
   }
 })
 
@@ -13,7 +17,7 @@ const emit = defineEmits(['seatSelected'])
 
 const seats = ref([])
 const loading = ref(true)
-const selectedSeatId = ref(null)
+const selectedSeats = ref([])
 
 onMounted(async () => {
   loading.value = true
@@ -32,8 +36,7 @@ onMounted(async () => {
           id: seat.SeatNumber,
           row: parseInt(rowStr),
           col: colStr,
-          isAvailable: seat.Status === 'available',
-          priceModifier: parseInt(rowStr) <= 2 ? 50 : 0 // Premium for front rows
+          isAvailable: seat.Status === 'available'
         }
       })
     } else {
@@ -50,8 +53,21 @@ onMounted(async () => {
 
 function selectSeat(seat) {
   if (!seat.isAvailable) return
-  selectedSeatId.value = seat.id
-  emit('seatSelected', seat.id)
+  
+  const idx = selectedSeats.value.indexOf(seat.id)
+  if (idx !== -1) {
+    selectedSeats.value.splice(idx, 1) // Deselect
+  } else {
+    if (selectedSeats.value.length < props.maxSeats) {
+      selectedSeats.value.push(seat.id) // Select
+    } else {
+      // If they already reached max, maybe replace the last one chosen?
+      // For simplicity, let's just alert them or do nothing.
+      return
+    }
+  }
+  
+  emit('seatSelected', selectedSeats.value)
 }
 
 const getRowSeats = (rowNum) => seats.value.filter(s => s.row === rowNum).sort((a,b) => a.col.localeCompare(b.col))
@@ -60,7 +76,7 @@ const uniqueRows = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 <template>
   <div class="seat-selector-container py-2 flex flex-col items-center">
-    <!-- Premium Legend -->
+    <!-- Legend -->
     <div class="mb-8 flex flex-wrap items-center justify-center gap-4 md:gap-8 rounded-full border border-black/5 bg-white/60 px-6 py-3 shadow-[0_8px_16px_rgba(0,0,0,0.03)] backdrop-blur-md">
       <div class="flex items-center gap-2 group">
         <div class="h-3 w-3 rounded bg-white border border-black/10 shadow-[inset_0_1px_2px_rgba(0,0,0,0.05)] transition-transform group-hover:scale-110"></div> 
@@ -73,10 +89,6 @@ const uniqueRows = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       <div class="flex items-center gap-2 group">
         <div class="h-3 w-3 rounded bg-[#e5e5ea] shadow-[inset_0_1px_3px_rgba(0,0,0,0.1)] transition-transform group-hover:scale-110"></div> 
         <span class="text-[11px] font-bold uppercase tracking-[0.1em] text-[#a1a1a6]">Occupied</span>
-      </div>
-      <div class="flex items-center gap-2 group">
-        <div class="flex h-3 w-3 items-center justify-center rounded bg-amber-50 border border-amber-200 text-[8px] transition-transform group-hover:scale-110">👑</div> 
-        <span class="text-[11px] font-bold uppercase tracking-[0.1em] text-amber-700">Premium (+$50)</span>
       </div>
     </div>
 
@@ -115,16 +127,12 @@ const uniqueRows = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
               :class="[
                 !seat.isAvailable 
                   ? 'bg-[#e5e5ea] text-[#a1a1a6] shadow-[inset_0_2px_4px_rgba(0,0,0,0.06)] cursor-not-allowed' 
-                  : selectedSeatId === seat.id 
+                  : selectedSeats.includes(seat.id) 
                     ? 'bg-gradient-to-b from-[#f43f5e] to-[#e63946] text-white scale-110 shadow-[0_8px_16px_rgba(230,57,70,0.35),inset_0_1px_1px_rgba(255,255,255,0.4)] ring-2 ring-[#e63946]/30 -translate-y-1 z-20' 
-                    : seat.priceModifier > 0 
-                      ? 'bg-gradient-to-b from-amber-50 to-white border border-amber-200 text-amber-900 shadow-[0_2px_8px_rgba(245,158,11,0.08)] hover:-translate-y-0.5 hover:shadow-[0_4px_12px_rgba(245,158,11,0.15)] hover:border-amber-300'
-                      : 'bg-white border border-black/5 text-[#1d1d1f] shadow-[0_2px_6px_rgba(0,0,0,0.04)] hover:-translate-y-0.5 hover:shadow-[0_6px_12px_rgba(0,0,0,0.08)] hover:border-[#e63946]/30'
+                    : 'bg-white border border-black/5 text-[#1d1d1f] shadow-[0_2px_6px_rgba(0,0,0,0.04)] hover:-translate-y-0.5 hover:shadow-[0_6px_12px_rgba(0,0,0,0.08)] hover:border-[#e63946]/30'
               ]"
             >
               {{ seat.col }}
-              <!-- Premium indicator dot -->
-              <span v-if="seat.priceModifier > 0 && seat.isAvailable && selectedSeatId !== seat.id" class="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-100 border border-amber-200 text-[6px]">👑</span>
             </button>
           </div>
 
@@ -144,16 +152,12 @@ const uniqueRows = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
               :class="[
                 !seat.isAvailable 
                   ? 'bg-[#e5e5ea] text-[#a1a1a6] shadow-[inset_0_2px_4px_rgba(0,0,0,0.06)] cursor-not-allowed' 
-                  : selectedSeatId === seat.id 
+                  : selectedSeats.includes(seat.id) 
                     ? 'bg-gradient-to-b from-[#f43f5e] to-[#e63946] text-white scale-110 shadow-[0_8px_16px_rgba(230,57,70,0.35),inset_0_1px_1px_rgba(255,255,255,0.4)] ring-2 ring-[#e63946]/30 -translate-y-1 z-20' 
-                    : seat.priceModifier > 0 
-                      ? 'bg-gradient-to-b from-amber-50 to-white border border-amber-200 text-amber-900 shadow-[0_2px_8px_rgba(245,158,11,0.08)] hover:-translate-y-0.5 hover:shadow-[0_4px_12px_rgba(245,158,11,0.15)] hover:border-amber-300'
-                      : 'bg-white border border-black/5 text-[#1d1d1f] shadow-[0_2px_6px_rgba(0,0,0,0.04)] hover:-translate-y-0.5 hover:shadow-[0_6px_12px_rgba(0,0,0,0.08)] hover:border-[#e63946]/30'
+                    : 'bg-white border border-black/5 text-[#1d1d1f] shadow-[0_2px_6px_rgba(0,0,0,0.04)] hover:-translate-y-0.5 hover:shadow-[0_6px_12px_rgba(0,0,0,0.08)] hover:border-[#e63946]/30'
               ]"
             >
               {{ seat.col }}
-              <!-- Premium indicator dot -->
-              <span v-if="seat.priceModifier > 0 && seat.isAvailable && selectedSeatId !== seat.id" class="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-100 border border-amber-200 text-[6px]">👑</span>
             </button>
           </div>
         </div>

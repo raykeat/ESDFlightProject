@@ -42,25 +42,31 @@ app.get("/seats/:flightID", (req, res) => {
 app.post("/seats/hold", (req, res) => {
 
     const { flightID, seatNumber, passengerID } = req.body;
+    const seatArray = String(seatNumber).split(',').map(s => s.trim());
+    const placeholders = seatArray.map(() => '?').join(',');
 
     const checkQuery =
-        "SELECT * FROM seats WHERE FlightID=? AND SeatNumber=? AND Status='available'";
+        `SELECT * FROM seats WHERE FlightID=? AND SeatNumber IN (${placeholders}) AND Status='available'`;
 
-    db.query(checkQuery, [flightID, seatNumber], (err, result) => {
+    db.query(checkQuery, [flightID, ...seatArray], (err, result) => {
 
-        if (result.length === 0) {
-            return res.status(400).json({ message: "Seat not available" });
+        if (err) {
+            return res.status(500).send(err);
+        }
+
+        if (result.length < seatArray.length) {
+            return res.status(400).json({ message: "One or more seats not available" });
         }
 
         const holdQuery =
-            "UPDATE seats SET Status='hold', PassengerID=? WHERE FlightID=? AND SeatNumber=?";
+            `UPDATE seats SET Status='hold', PassengerID=? WHERE FlightID=? AND SeatNumber IN (${placeholders})`;
 
-        db.query(holdQuery, [passengerID, flightID, seatNumber], err => {
+        db.query(holdQuery, [passengerID, flightID, ...seatArray], err => {
 
             if (err) {
                 res.status(500).send(err);
             } else {
-                res.json({ message: "Seat placed on hold" });
+                res.json({ message: "Seats placed on hold" });
             }
 
         });
@@ -72,11 +78,13 @@ app.post("/seats/hold", (req, res) => {
 app.post("/seats/confirm", (req, res) => {
 
     const { flightID, seatNumber } = req.body;
+    const seatArray = String(seatNumber).split(',').map(s => s.trim());
+    const placeholders = seatArray.map(() => '?').join(',');
 
     const query =
-        "UPDATE seats SET Status='unavailable' WHERE FlightID=? AND SeatNumber=?";
+        `UPDATE seats SET Status='unavailable' WHERE FlightID=? AND SeatNumber IN (${placeholders})`;
 
-    db.query(query, [flightID, seatNumber], err => {
+    db.query(query, [flightID, ...seatArray], err => {
 
         if (err) {
             res.status(500).send(err);
@@ -91,16 +99,18 @@ app.post("/seats/confirm", (req, res) => {
 app.post("/seats/release", (req, res) => {
 
     const { flightID, seatNumber } = req.body;
+    const seatArray = String(seatNumber).split(',').map(s => s.trim());
+    const placeholders = seatArray.map(() => '?').join(',');
 
     const query =
-        "UPDATE seats SET Status='available', PassengerID=NULL WHERE FlightID=? AND SeatNumber=?";
+        `UPDATE seats SET Status='available', PassengerID=NULL WHERE FlightID=? AND SeatNumber IN (${placeholders})`;
 
-    db.query(query, [flightID, seatNumber], err => {
+    db.query(query, [flightID, ...seatArray], err => {
 
         if (err) {
             res.status(500).send(err);
         } else {
-            res.json({ message: "Seat released" });
+            res.json({ message: "Seats released" });
         }
 
     });

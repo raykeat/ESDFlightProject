@@ -28,13 +28,27 @@ const loadingReturn = ref(false)
 
 // ─── Selection state ─────────────────────────────────────
 // step: 'outbound' | 'return' | 'done'
-const step = ref('outbound')
+const step = ref(route.query.step || 'outbound')
 
-const selectedOutbound = ref(null)
+const selectedOutbound = ref(route.query.outboundFlightID ? {
+  flightID:     route.query.outboundFlightID,
+  flightNumber: route.query.outboundFlightNumber,
+  origin:       route.query.outboundOrigin,
+  destination:  route.query.outboundDestination,
+  price:        route.query.outboundPrice
+} : null)
+
+const selectedOutboundSeat = ref(route.query.outboundSeat || null)
 const selectedReturn = ref(null)
 
 // ─── Fetch outbound flights on mount ─────────────────────
 onMounted(async () => {
+  if (step.value === 'return') {
+    loading.value = false
+    await fetchReturnFlights()
+    return
+  }
+
   loading.value = true
   try {
     const response = await axios.get('http://localhost:3003/flight/available', {
@@ -112,6 +126,10 @@ function formatFlight(f) {
     arrivalDate:   fmt(arrDate),
     isNextDay,
     availableSeats: 30,
+    meals:         f.Meals,
+    beverages:     f.Beverages,
+    wifi:          f.Wifi,
+    baggage:       f.Baggage,
   }
 }
 
@@ -133,7 +151,7 @@ async function confirmOutbound() {
       query: {
         flightID:         selectedOutbound.value.flightID,
         isReturn:         'false',
-        // Pass round-trip context so FlightDetail can later fetch return
+        // Pass round-trip context so FlightDetail can bounce back to search-results
         tripType:         searchParams.value.tripType,
         departingCountry: searchParams.value.departingCountry,
         arrivingCountry:  searchParams.value.arrivingCountry,
@@ -162,7 +180,7 @@ async function confirmOutbound() {
 // Round-trip: after selecting return flight, go to FlightDetail for return seat selection
 function proceedToBooking() {
   if (!currentPassenger.value) {
-    router.push({ path: '/auth', query: { redirect: '/search-results', ...searchParams.value } })
+    router.push({ path: '/auth', query: { redirect: '/search-results', ...searchParams.value, step: 'return', outboundFlightID: selectedOutbound.value.flightID, outboundFlightNumber: selectedOutbound.value.flightNumber, outboundOrigin: selectedOutbound.value.origin, outboundDestination: selectedOutbound.value.destination, outboundPrice: selectedOutbound.value.price, outboundSeat: selectedOutboundSeat.value } })
     return
   }
 
@@ -170,15 +188,18 @@ function proceedToBooking() {
   router.push({
     path: '/flight-detail',
     query: {
-      flightID:          selectedReturn.value.flightID,
-      isReturn:          'true',
-      outboundFlightID:  selectedOutbound.value.flightID,
-      tripType:          searchParams.value.tripType,
-      departingCountry:  searchParams.value.departingCountry,
-      arrivingCountry:   searchParams.value.arrivingCountry,
-      departureDate:     searchParams.value.departureDate,
-      returnDate:        searchParams.value.returnDate,
-      passengers:        searchParams.value.passengers,
+      flightID:             selectedReturn.value.flightID,
+      isReturn:             'true',
+      outboundFlightID:     selectedOutbound.value.flightID,
+      outboundFlightNumber: selectedOutbound.value.flightNumber,
+      outboundSeat:         selectedOutboundSeat.value,
+      outboundPrice:        selectedOutbound.value.price,
+      tripType:             searchParams.value.tripType,
+      departingCountry:     searchParams.value.departingCountry,
+      arrivingCountry:      searchParams.value.arrivingCountry,
+      departureDate:        searchParams.value.departureDate,
+      returnDate:           searchParams.value.returnDate,
+      passengers:           searchParams.value.passengers,
     },
   })
 }
@@ -320,10 +341,19 @@ function proceedToBooking() {
                 </div>
               </div>
               <!-- Details strip -->
-              <div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-black/5 pt-4 text-[12px] text-[#6e6e73]">
-                <span>📅 <span class="font-semibold text-[#1d1d1f]">{{ flight.departureDate }}</span> → <span class="font-semibold text-[#1d1d1f]">{{ flight.arrivalDate }}</span><span v-if="flight.isNextDay" class="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">+1 day</span></span>
-                <span>⏱ {{ formatDuration(flight.duration) }}</span>
-                <span class="rounded-full bg-[#f5f5f7] px-2.5 py-0.5 font-semibold">✈ Direct</span>
+              <div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-black/5 pt-4 text-[12px] text-[#6e6e73]">
+                <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <span>📅 <span class="font-semibold text-[#1d1d1f]">{{ flight.departureDate }}</span> → <span class="font-semibold text-[#1d1d1f]">{{ flight.arrivalDate }}</span><span v-if="flight.isNextDay" class="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">+1 day</span></span>
+                  <span>⏱ {{ formatDuration(flight.duration) }}</span>
+                  <span class="rounded-full bg-black/5 px-2.5 py-0.5 font-semibold border border-black/5">✈ Direct</span>
+                </div>
+                <div class="h-4 w-px bg-black/10 hidden md:block"></div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="rounded-full border border-black/5 bg-[#f5f5f7] px-2.5 py-0.5 font-medium text-[#1d1d1f]">🧳 {{ flight.baggage }}</span>
+                  <span class="rounded-full border border-black/5 bg-[#f5f5f7] px-2.5 py-0.5 font-medium text-[#1d1d1f]">🍱 {{ flight.meals }}</span>
+                  <span class="rounded-full border border-black/5 bg-[#f5f5f7] px-2.5 py-0.5 font-medium text-[#1d1d1f]">🥤 {{ flight.beverages }}</span>
+                  <span v-if="flight.wifi" class="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 font-semibold text-emerald-700">📶 Free WiFi</span>
+                </div>
               </div>
             </div>
             <!-- No seat selector here — seat map is loaded via FlightSearch composite service in Step 2 -->
@@ -386,10 +416,19 @@ function proceedToBooking() {
                 </div>
               </div>
               <!-- Details strip -->
-              <div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-black/5 pt-4 text-[12px] text-[#6e6e73]">
-                <span>📅 <span class="font-semibold text-[#1d1d1f]">{{ flight.departureDate }}</span> → <span class="font-semibold text-[#1d1d1f]">{{ flight.arrivalDate }}</span><span v-if="flight.isNextDay" class="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">+1 day</span></span>
-                <span>⏱ {{ formatDuration(flight.duration) }}</span>
-                <span class="rounded-full bg-purple-50 px-2.5 py-0.5 font-semibold text-purple-600">✈ Direct</span>
+              <div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-black/5 pt-4 text-[12px] text-[#6e6e73]">
+                <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <span>📅 <span class="font-semibold text-[#1d1d1f]">{{ flight.departureDate }}</span> → <span class="font-semibold text-[#1d1d1f]">{{ flight.arrivalDate }}</span><span v-if="flight.isNextDay" class="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">+1 day</span></span>
+                  <span>⏱ {{ formatDuration(flight.duration) }}</span>
+                  <span class="rounded-full bg-purple-50 px-2.5 py-0.5 font-semibold text-purple-600 border border-purple-100">✈ Direct</span>
+                </div>
+                <div class="h-4 w-px bg-black/10 hidden md:block"></div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="rounded-full border border-black/5 bg-[#f5f5f7] px-2.5 py-0.5 font-medium text-[#1d1d1f]">🧳 {{ flight.baggage }}</span>
+                  <span class="rounded-full border border-black/5 bg-[#f5f5f7] px-2.5 py-0.5 font-medium text-[#1d1d1f]">🍱 {{ flight.meals }}</span>
+                  <span class="rounded-full border border-black/5 bg-[#f5f5f7] px-2.5 py-0.5 font-medium text-[#1d1d1f]">🥤 {{ flight.beverages }}</span>
+                  <span v-if="flight.wifi" class="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 font-semibold text-emerald-700">📶 Free WiFi</span>
+                </div>
               </div>
             </div>
             <!-- No seat selector here — seat map is loaded via FlightSearch composite service in Step 2 -->
