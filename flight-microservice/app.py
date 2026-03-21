@@ -33,6 +33,10 @@ class Flight(db.Model):
     ArrivalTime = db.Column(db.Time, nullable=False)
     Price = db.Column(db.Numeric(10, 2), nullable=False)
     Status = db.Column(db.Enum('available', 'unavailable', 'cancelled'), default='available')
+    Meals = db.Column(db.String(50), nullable=False)
+    Beverages = db.Column(db.String(50), nullable=False)
+    Wifi = db.Column(db.Boolean, nullable=False)
+    Baggage = db.Column(db.String(50), nullable=False)
 
     def to_dict(self):
         # Safely parse date
@@ -67,7 +71,11 @@ class Flight(db.Model):
             'FlightDuration': format_duration(self.FlightDuration),
             'ArrivalTime': format_time(self.ArrivalTime),
             'Price': float(self.Price) if self.Price else None,
-            'Status': self.Status.capitalize() if self.Status else None
+            'Status': self.Status.capitalize() if self.Status else None,
+            'Meals': self.Meals,
+            'Beverages': self.Beverages,
+            'Wifi': self.Wifi,
+            'Baggage': self.Baggage
         }
 
 @app.route('/flight/available', methods=['GET'])

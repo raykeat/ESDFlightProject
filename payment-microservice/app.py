@@ -207,6 +207,7 @@ def create_checkout_session():
             }), 400
 
         booking_id    = data.get('bookingID')
+        user_booking_count = data.get('userBookingCount', booking_id)
         passenger_id  = data.get('passengerID')
         amount        = data.get('amount')
         flight_number = data.get('flightNumber')
@@ -280,13 +281,14 @@ def create_checkout_session():
                         'unit_amount': to_stripe_cents(amount),
                         'product_data': {
                             'name':        f'Flight {flight_number}',
-                            'description': f'Booking #{booking_id} — Seat included',
+                            'description': f'Booking #{user_booking_count} — Seat included',
                         },
                     },
                     'quantity': 1,
                 }],
                 metadata={
                     'booking_id':    str(booking_id),
+                    'user_booking_count': str(user_booking_count),
                     'passenger_id':  str(passenger_id),
                     'flight_number': flight_number,
                 },

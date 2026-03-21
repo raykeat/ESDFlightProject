@@ -39,15 +39,7 @@ function closeMenu(e) {
         @click="router.push('/')"
       >BLAZE AIR</span>
 
-      <!-- Nav links -->
-      <nav style="display:flex; align-items:center; gap:32px;">
-        <a @click="router.push('/#experience')" style="font-size:14px; font-weight:500; color:#6e6e73; cursor:pointer; text-decoration:none; transition:color 0.2s;"
-          onmouseover="this.style.color='#1d1d1f'" onmouseout="this.style.color='#6e6e73'">Experience</a>
-        <a @click="router.push('/#booking')" style="font-size:14px; font-weight:500; color:#6e6e73; cursor:pointer; text-decoration:none; transition:color 0.2s;"
-          onmouseover="this.style.color='#1d1d1f'" onmouseout="this.style.color='#6e6e73'">Book</a>
-        <a @click="router.push('/#fleet')" style="font-size:14px; font-weight:500; color:#6e6e73; cursor:pointer; text-decoration:none; transition:color 0.2s;"
-          onmouseover="this.style.color='#1d1d1f'" onmouseout="this.style.color='#6e6e73'">Fleet</a>
-      </nav>
+      <!-- Nav links removed (Experience / Book / Fleet were landing page anchors that don't apply) -->
 
       <!-- Profile menu -->
       <div style="position:relative;">

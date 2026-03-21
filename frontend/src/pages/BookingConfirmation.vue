@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { usePassengerSession } from '../composables/usePassengerSession'
@@ -12,11 +12,34 @@ const loading     = ref(false)
 const error       = ref(null)
 const sessionUrl  = ref(route.query.sessionUrl || null)  // reuse session if returning from Stripe
 
+const isRoundTrip = !!route.query.outboundFlightID
+
 const bookingDetails = ref({
+  // The 'flightID' passed from FlightDetail for round-trip is actually the RETURN flight.
+  // One-way: main flight. Round-trip: return flight.
   flightID:     parseInt(route.query.flightID),
   seatNumber:   route.query.seatNumber,
   amount:       parseFloat(route.query.amount),
-  flightNumber: route.query.flightNumber || 'N/A'
+  flightNumber: route.query.flightNumber || 'N/A',
+
+  outboundFlightID:     route.query.outboundFlightID ? parseInt(route.query.outboundFlightID) : null,
+  outboundFlightNumber: route.query.outboundFlightNumber || null,
+  outboundSeat:         route.query.outboundSeat || null,
+  outboundPrice:        route.query.outboundPrice ? parseFloat(route.query.outboundPrice) : null,
+})
+
+const totalAmount = computed(() => {
+  if (isRoundTrip) {
+    return bookingDetails.value.amount + (bookingDetails.value.outboundPrice || 0)
+  }
+  return bookingDetails.value.amount
+})
+
+const displayFlightNumber = computed(() => {
+  if (isRoundTrip) {
+    return `${bookingDetails.value.outboundFlightNumber} & ${bookingDetails.value.flightNumber}`
+  }
+  return bookingDetails.value.flightNumber
 })
 
 // Preserve search params so Back button returns to correct search results
@@ -48,13 +71,23 @@ async function confirmBooking() {
 
     if (!finalSessionUrl) {
       // Step 1: Call Booking Composite to create a pending booking
-      const bookingResponse = await axios.post('http://localhost:3010/api/bookings', {
+      const payload = {
         passengerID: currentPassenger.value.passenger_id,
-        flightID:    bookingDetails.value.flightID,
-        seatNumber:  bookingDetails.value.seatNumber,
-      })
+        // Primary flight: Outbound if round-trip, else the single flight
+        flightID:    isRoundTrip ? bookingDetails.value.outboundFlightID : bookingDetails.value.flightID,
+        seatNumber:  isRoundTrip ? bookingDetails.value.outboundSeat : bookingDetails.value.seatNumber,
+        amount:      Number(bookingDetails.value.amount),
+      }
 
-      const { bookingID } = bookingResponse.data
+      if (isRoundTrip) {
+        payload.returnFlightID   = bookingDetails.value.flightID
+        payload.returnSeatNumber = bookingDetails.value.seatNumber
+      }
+
+      const bookingResponse = await axios.post('http://localhost:3010/api/bookings', payload)
+
+      const { bookingID, userBookingCount } = bookingResponse.data
+      console.log(`Booking created with ID ${bookingID}. User-specific count: ${userBookingCount}`);
 
       // Build cancel URL with sessionUrl so we can reuse the session if user comes back
       const cancelUrl = new URL('http://localhost:5173/booking-confirmation')
@@ -62,20 +95,28 @@ async function confirmBooking() {
       cancelUrl.searchParams.set('seatNumber',       bookingDetails.value.seatNumber)
       cancelUrl.searchParams.set('amount',           bookingDetails.value.amount)
       cancelUrl.searchParams.set('flightNumber',     bookingDetails.value.flightNumber)
+      if (isRoundTrip) {
+        cancelUrl.searchParams.set('outboundFlightID',     bookingDetails.value.outboundFlightID)
+        cancelUrl.searchParams.set('outboundFlightNumber', bookingDetails.value.outboundFlightNumber)
+        cancelUrl.searchParams.set('outboundSeat',         bookingDetails.value.outboundSeat)
+        cancelUrl.searchParams.set('outboundPrice',        bookingDetails.value.outboundPrice)
+      }
       cancelUrl.searchParams.set('departingCountry', searchParams.departingCountry || '')
       cancelUrl.searchParams.set('arrivingCountry',  searchParams.arrivingCountry  || '')
       cancelUrl.searchParams.set('departureDate',    searchParams.departureDate    || '')
       cancelUrl.searchParams.set('returnDate',       searchParams.returnDate       || '')
       cancelUrl.searchParams.set('passengers',       searchParams.passengers       || '')
       cancelUrl.searchParams.set('cabin',            searchParams.cabin            || '')
+      cancelUrl.searchParams.set('sessionUrl',       finalSessionUrl || '')
       cancelUrl.searchParams.set('cancelled',        'true')
 
       // Step 2: Call Payment Service to create a Stripe Checkout Session
       const paymentResponse = await axios.post('http://localhost:5001/payment/checkout', {
         bookingID:    bookingID,
+        userBookingCount: userBookingCount,
         passengerID:  currentPassenger.value.passenger_id,
-        amount:       bookingDetails.value.amount,
-        flightNumber: bookingDetails.value.flightNumber,
+        amount:       totalAmount.value,
+        flightNumber: displayFlightNumber.value,
         successUrl:   `http://localhost:5173/booking-success/${bookingID}?session_id={CHECKOUT_SESSION_ID}`,
         cancelUrl:    cancelUrl.toString()
       })
@@ -134,14 +175,33 @@ const wasCancelled = route.query.cancelled === 'true'
         <h2 class="text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73] mb-6">Booking Summary</h2>
 
         <div class="space-y-4">
-          <div class="flex justify-between border-b border-black/10 pb-4">
-            <span class="text-[#6e6e73]">Flight</span>
-            <span class="font-medium text-[#1d1d1f]">{{ bookingDetails.flightNumber }} (#{{ bookingDetails.flightID }})</span>
-          </div>
-          <div class="flex justify-between border-b border-black/10 pb-4">
-            <span class="text-[#6e6e73]">Seat</span>
-            <span class="font-medium text-[#1d1d1f]">{{ bookingDetails.seatNumber }}</span>
-          </div>
+          <template v-if="!isRoundTrip">
+            <div class="flex justify-between border-b border-black/10 pb-4">
+              <span class="text-[#6e6e73]">Flight</span>
+              <span class="font-medium text-[#1d1d1f]">{{ bookingDetails.flightNumber }} (#{{ bookingDetails.flightID }})</span>
+            </div>
+            <div class="flex justify-between border-b border-black/10 pb-4">
+              <span class="text-[#6e6e73]">Seat(s)</span>
+              <span class="font-medium text-[#1d1d1f] text-right">{{ bookingDetails.seatNumber.replace(/,/g, ', ') }}</span>
+            </div>
+          </template>
+          <template v-else>
+            <div class="flex justify-between border-b border-black/10 pb-4">
+              <span class="text-[#6e6e73]">Departure Flight</span>
+              <div class="text-right">
+                <span class="block font-medium text-[#1d1d1f]">{{ bookingDetails.outboundFlightNumber }}</span>
+                <span class="block text-xs font-medium text-[#6e6e73]">Seat(s) {{ bookingDetails.outboundSeat?.replace(/,/g, ', ') }}</span>
+              </div>
+            </div>
+            <div class="flex justify-between border-b border-black/10 pb-4">
+              <span class="text-[#6e6e73]">Return Flight</span>
+              <div class="text-right">
+                <span class="block font-medium text-[#1d1d1f]">{{ bookingDetails.flightNumber }}</span>
+                <span class="block text-xs font-medium text-[#6e6e73]">Seat(s) {{ bookingDetails.seatNumber?.replace(/,/g, ', ') }}</span>
+              </div>
+            </div>
+          </template>
+
           <div class="flex justify-between border-b border-black/10 pb-4">
             <span class="text-[#6e6e73]">Passenger</span>
             <span class="font-medium text-[#1d1d1f]">
@@ -150,7 +210,7 @@ const wasCancelled = route.query.cancelled === 'true'
           </div>
           <div class="flex justify-between text-lg font-semibold pt-1">
             <span>Total</span>
-            <span class="text-[#e63946]">${{ bookingDetails.amount?.toFixed(2) }}</span>
+            <span class="text-[#e63946]">${{ totalAmount.toFixed(2) }}</span>
           </div>
         </div>
 

@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 import { usePassengerSession } from '../composables/usePassengerSession'
-import AppNav from '../components/AppNav.vue'
+// AppNav removed
 
 const router = useRouter()
 const { currentPassenger } = usePassengerSession()
@@ -106,7 +106,6 @@ function viewOffer(offer) {
 
 <template>
   <div>
-  <AppNav />
   <main style="min-height:100vh; background: radial-gradient(circle at 12% 6%, #ffffff 0%, #f5f5f7 48%, #ececf1 100%); padding: 60px 0 80px;">
     <div style="max-width: 800px; margin: 0 auto; padding: 0 24px;">
 

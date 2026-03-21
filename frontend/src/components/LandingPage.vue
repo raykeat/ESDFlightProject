@@ -49,6 +49,12 @@ function submitSearch() {
     return
   }
   
+  // Validate return date for round trip
+  if (booking.value.tripType === 'round-trip' && !booking.value.returnDate) {
+    alert('Please select a return date for round trips')
+    return
+  }
+  
   // Navigate to search results with query params
   router.push({
     path: '/search-results',
@@ -94,11 +100,7 @@ onBeforeUnmount(() => {
     <section class="relative mx-auto max-w-[1240px] px-6 pt-6 md:px-10 lg:px-16">
       <header class="animate__animated animate__fadeInDown sticky top-4 z-20 flex items-center justify-between rounded-[28px] border border-black/5 bg-white/75 px-5 py-3 backdrop-blur-xl md:px-7">
         <span class="text-sm font-semibold tracking-[0.18em] text-[#1d1d1f]">BLAZE AIR</span>
-        <nav class="hidden items-center gap-8 text-sm font-medium text-[#6e6e73] md:flex">
-          <a href="#experience" class="transition-colors duration-300 hover:text-[#1d1d1f]">Experience</a>
-          <a href="#booking" class="transition-colors duration-300 hover:text-[#1d1d1f]">Book</a>
-          <a href="#fleet" class="transition-colors duration-300 hover:text-[#1d1d1f]">Fleet</a>
-        </nav>
+        <!-- Nav removed per request -->
 
         <RouterLink
           v-if="!isSignedIn"
@@ -224,6 +226,7 @@ onBeforeUnmount(() => {
                         <option value="" disabled>Select origin city</option>
                         <option>Bangkok</option>
                         <option>Dubai</option>
+                        <option>Edinburgh</option>
                         <option>London</option>
                         <option>New York</option>
                         <option>Singapore</option>
@@ -261,6 +264,7 @@ onBeforeUnmount(() => {
                         <option value="" disabled>Select destination city</option>
                         <option>Bangkok</option>
                         <option>Dubai</option>
+                        <option>Edinburgh</option>
                         <option>London</option>
                         <option>New York</option>
                         <option>Singapore</option>

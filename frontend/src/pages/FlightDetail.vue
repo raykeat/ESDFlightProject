@@ -19,14 +19,16 @@ const searchParams     = {
   arrivingCountry:  route.query.arrivingCountry  || '',
   departureDate:    route.query.departureDate    || '',
   returnDate:       route.query.returnDate       || '',
-  passengers:       route.query.passengers       || 1,
+  passengers:       parseInt(route.query.passengers) || 1,
 }
 
+const passengers = searchParams.passengers
+
 // ─── State ────────────────────────────────────────────────
-const flight       = ref(null)
-const loading      = ref(true)
-const error        = ref(null)
-const selectedSeat = ref(null)
+const flight        = ref(null)
+const loading       = ref(true)
+const error         = ref(null)
+const selectedSeats = ref([])
 
 // ─── Fetch from composite service ─────────────────────────
 onMounted(async () => {
@@ -43,19 +45,13 @@ onMounted(async () => {
 })
 
 // ─── Seat selection ───────────────────────────────────────
-function onSeatSelected(seatId) { selectedSeat.value = seatId }
+function onSeatSelected(seats) { selectedSeats.value = seats }
 
 // ─── Computed price ───────────────────────────────────────
 const totalPrice = computed(() => {
   if (!flight.value) return '0.00'
   const base = parseFloat(flight.value.Price ?? flight.value.price ?? 0)
-  const row  = parseInt(selectedSeat.value?.match(/\d+/)?.[0] ?? 99)
-  return (base + (row <= 2 ? 50 : 0)).toFixed(2)
-})
-
-const isPremium = computed(() => {
-  const row = parseInt(selectedSeat.value?.match(/\d+/)?.[0] ?? 99)
-  return row <= 2
+  return (base * passengers).toFixed(2)
 })
 
 // ─── Format helpers ───────────────────────────────────────
@@ -105,19 +101,48 @@ function formatDate(d) {
 function goBack() { router.back() }
 
 function continueToBooking() {
+  if (selectedSeats.value.length !== passengers) {
+    alert(`Please select ${passengers} seat(s) before continuing.`)
+    return
+  }
+  
+  const seatString = selectedSeats.value.join(',')
+
   if (!currentPassenger.value) {
     router.push({ path: '/auth', query: { redirect: '/flight-detail', flightID, ...searchParams } })
     return
   }
+
+  if (searchParams.tripType === 'round-trip' && !isReturn) {
+    // Proceed to return flight selection
+    router.push({
+      path: '/search-results',
+      query: {
+        step: 'return',
+        outboundFlightID: flightID,
+        outboundFlightNumber: flight.value?.FlightNumber,
+        outboundOrigin: flight.value?.Origin,
+        outboundDestination: flight.value?.Destination,
+        outboundPrice: totalPrice.value,
+        outboundSeat: seatString,
+        ...searchParams,
+      }
+    })
+    return
+  }
+
+  // Otherwise, proceed to checkout (one-way or round-trip return flight)
   router.push({
     path: '/booking-confirmation',
     query: {
       flightID,
-      flightNumber:     flight.value?.FlightNumber,
-      amount:           totalPrice.value,
-      seatNumber:       selectedSeat.value,
-      outboundFlightID: outboundFlightID || '',
-      outboundSeat:     outboundSeat     || '',
+      flightNumber:         flight.value?.FlightNumber,
+      amount:               totalPrice.value,
+      seatNumber:           seatString,
+      outboundFlightID:     route.query.outboundFlightID || '',
+      outboundFlightNumber: route.query.outboundFlightNumber || '',
+      outboundSeat:         route.query.outboundSeat     || '',
+      outboundPrice:        route.query.outboundPrice    || '',
       ...searchParams,
     }
   })
@@ -247,6 +272,25 @@ function continueToBooking() {
                 </div>
               </div>
 
+              <!-- Amenities -->
+              <div class="mb-6 rounded-2xl bg-[#f5f5f7] p-4 text-[#1d1d1f]">
+                <p class="mb-3 text-[10px] font-bold uppercase tracking-[0.12em] text-[#a1a1a6]">Included Amenities</p>
+                <div class="grid grid-cols-2 gap-3 text-xs font-semibold text-[#6e6e73]">
+                  <div class="flex items-center gap-2">
+                    <span class="text-base">🧳</span><span class="text-[#1d1d1f]">{{ flight.Baggage }} Baggage</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-base">🍱</span><span class="text-[#1d1d1f]">{{ flight.Meals }}</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-base">🥤</span><span class="text-[#1d1d1f]">{{ flight.Beverages }}</span>
+                  </div>
+                  <div v-if="flight.Wifi" class="flex items-center gap-2">
+                    <span class="text-base">📶</span><span class="text-emerald-600">Free WiFi</span>
+                  </div>
+                </div>
+              </div>
+
               <!-- Selected seat pill -->
               <transition
                 enter-active-class="transition-all duration-300 ease-out"
@@ -256,12 +300,11 @@ function continueToBooking() {
                 leave-from-class="opacity-100 scale-100"
                 leave-to-class="opacity-0 scale-95"
               >
-                <div v-if="selectedSeat" class="mb-5 rounded-2xl border border-[#e63946]/15 bg-gradient-to-br from-[#e63946]/6 to-rose-50 p-5">
+                <div v-if="selectedSeats.length > 0" class="mb-5 rounded-2xl border border-[#e63946]/15 bg-gradient-to-br from-[#e63946]/6 to-rose-50 p-5">
                   <div class="flex items-center justify-between">
                     <div>
-                      <p class="text-[10px] font-bold uppercase tracking-[0.15em] text-[#e63946]">Selected Seat</p>
-                      <p class="mt-1 text-3xl font-bold text-[#1d1d1f]">{{ selectedSeat }}</p>
-                      <p v-if="isPremium" class="mt-0.5 text-[11px] font-semibold text-amber-600">👑 Premium row · +$50</p>
+                      <p class="text-[10px] font-bold uppercase tracking-[0.15em] text-[#e63946]">Selected Seats ({{ selectedSeats.length }}/{{ passengers }})</p>
+                      <p class="mt-1 text-2xl font-bold text-[#1d1d1f]">{{ selectedSeats.join(', ') }}</p>
                     </div>
                     <div class="text-right">
                       <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#6e6e73]">Total</p>
@@ -273,16 +316,16 @@ function continueToBooking() {
 
               <!-- CTA button -->
               <button
-                :disabled="!selectedSeat"
+                :disabled="selectedSeats.length !== passengers"
                 @click="continueToBooking"
                 class="group relative w-full overflow-hidden rounded-[18px] py-4 text-sm font-bold uppercase tracking-[0.12em] text-white transition-all duration-300 active:scale-[0.98]"
-                :class="selectedSeat
+                :class="selectedSeats.length === passengers
                   ? 'bg-gradient-to-r from-[#e63946] to-[#f43f5e] shadow-[0_8px_24px_rgba(230,57,70,0.28)] hover:shadow-[0_12px_32px_rgba(230,57,70,0.38)] hover:-translate-y-0.5'
                   : 'bg-[#d1d1d6] cursor-not-allowed opacity-70'"
               >
-                <div v-if="selectedSeat" class="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/15 to-transparent transition-transform duration-700 group-hover:translate-x-full"></div>
+                <div v-if="selectedSeats.length === passengers" class="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/15 to-transparent transition-transform duration-700 group-hover:translate-x-full"></div>
                 <span class="relative z-10 flex items-center justify-center gap-2">
-                  <span v-if="!selectedSeat">Select a seat to continue</span>
+                  <span v-if="selectedSeats.length !== passengers">Select {{ passengers }} seat(s) to continue</span>
                   <template v-else>
                     Continue to Booking · ${{ totalPrice }}
                     <svg class="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
@@ -323,10 +366,6 @@ function continueToBooking() {
                     <div class="h-3 w-3 rounded bg-[#e5e5ea]"></div>
                     <span class="text-[11px] font-semibold text-[#a1a1a6]">Occupied</span>
                   </div>
-                  <div class="flex items-center gap-1.5">
-                    <div class="h-3 w-3 rounded bg-amber-50 border border-amber-200 text-[7px] flex items-center justify-center">👑</div>
-                    <span class="text-[11px] font-semibold text-amber-700">Premium +$50</span>
-                  </div>
                 </div>
               </div>
             </div>
@@ -335,6 +374,7 @@ function continueToBooking() {
             <div class="p-6 md:p-10">
               <SeatSelector
                 :flightId="flightID"
+                :maxSeats="passengers"
                 @seatSelected="onSeatSelected"
               />
             </div>
