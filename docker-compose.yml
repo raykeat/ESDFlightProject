@@ -46,9 +46,8 @@ services:
       - PORT=3001
       - RECORD_SERVICE_URL=http://record-service:3000
       - FLIGHT_SERVICE_URL=http://flight-service:3000
+      - SEATS_SERVICE_URL=http://seats-service:5003
       - PAYMENT_SERVICE_URL=http://payment-service:5000
-      - NOTIFICATION_SERVICE_URL=http://notification-service:3004
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
       - PASSENGER_SERVICE_URL=https://personal-4whagfbm.outsystemscloud.com/Passenger_Srv/rest/PassengerAPI/  # OutSystems
     depends_on:
       - record-service
@@ -212,13 +211,28 @@ services:
     environment:
       - FLIGHT_SERVICE_URL=http://flight-service:3000
       - SEATS_SERVICE_URL=http://seats-service:5003
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - PORT=5010
       - FLASK_ENV=development
     depends_on:
       - flight-service
       - seats-service
-      - kafka
+    networks:
+      - app-network
+
+  # ========== FLIGHT SEARCH COMPOSITE SERVICE ==========
+  flight-search-composite:
+    build: ./flight-search-composite
+    container_name: flight-search-composite-app
+    restart: unless-stopped
+    ports:
+      - "3011:3006"
+    environment:
+      - PORT=3006
+      - FLIGHT_SERVICE_URL=http://flight-service:3000
+      - SEATS_SERVICE_URL=http://seats-service:5003
+    depends_on:
+      - flight-service
+      - seats-service
     networks:
       - app-network
 
@@ -258,112 +272,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # ========== NOTIFICATION SERVICE (Atomic) ==========
-  # Subscribes to RabbitMQ (booking.confirmed) and Kafka (flight.cancelled.alt/noalt)
-  # Calls Email Service via HTTP — does NOT call SendGrid directly
-  notification-service:
-    build: ./notification-service
-    container_name: notification-service
-    restart: unless-stopped
-    ports:
-      - "3004:3004"                               # Access at localhost:3004
-    environment:
-      - FLASK_PORT=3004
-      - FLASK_ENV=development
-      - RABBITMQ_HOST=rabbitmq
-      - RABBITMQ_PORT=5672
-      - RABBITMQ_USER=guest
-      - RABBITMQ_PASSWORD=guest
-      - RABBITMQ_VHOST=/
-      - RABBITMQ_EXCHANGE=airline_events
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-      - EMAIL_SERVICE_URL=http://email-service:3005
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      kafka:
-        condition: service_healthy
-      email-service:
-        condition: service_started
-    networks:
-      - app-network
 
-  # ========== EMAIL SERVICE (Atomic Wrapper) ==========
-  # Thin wrapper around SendGrid API — stateless, no DB
-  email-service:
-    build: ./email-service
-    container_name: email-service
-    restart: unless-stopped
-    ports:
-      - "3005:3005"                               # Access at localhost:3005
-    environment:
-      - FLASK_PORT=3005
-      - FLASK_ENV=development
-      - SENDGRID_API_KEY=${SENDGRID_API_KEY}
-      - SENDGRID_FROM_EMAIL=${SENDGRID_FROM_EMAIL}
-      - SENDGRID_FROM_NAME=${SENDGRID_FROM_NAME}
-    networks:
-      - app-network
-
-  # ========== RABBITMQ ==========
-  rabbitmq:
-    image: rabbitmq:3-management
-    container_name: rabbitmq
-    restart: unless-stopped
-    ports:
-      - "5672:5672"                               # AMQP — used by services
-      - "15672:15672"                             # Management UI → http://localhost:15672
-    environment:
-      - RABBITMQ_DEFAULT_USER=guest
-      - RABBITMQ_DEFAULT_PASS=guest
-    networks:
-      - app-network
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # ========== ZOOKEEPER (required by Kafka) ==========
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0
-    container_name: zookeeper
-    restart: unless-stopped
-    environment:
-      - ZOOKEEPER_CLIENT_PORT=2181
-      - ZOOKEEPER_TICK_TIME=2000
-    networks:
-      - app-network
-    healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "2181"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # ========== KAFKA ==========
-  kafka:
-    image: confluentinc/cp-kafka:7.5.0
-    container_name: kafka
-    restart: unless-stopped
-    depends_on:
-      zookeeper:
-        condition: service_healthy
-    ports:
-      - "9092:9092"                               # Access at localhost:9092
-    environment:
-      - KAFKA_BROKER_ID=1
-      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
-      - KAFKA_ADVERTISED_LISTENERS=INTERNAL://kafka:29092,EXTERNAL://localhost:9092
-      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
-      - KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL
-      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
-    networks:
-      - app-network
-    healthcheck:
-      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
 
 networks:
   app-network:

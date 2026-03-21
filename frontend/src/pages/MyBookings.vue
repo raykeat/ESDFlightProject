@@ -28,6 +28,18 @@ function getFlightDetails(flightID) {
   return MOCK_FLIGHTS[flightID] || null
 }
 
+const passengerID = computed(() => {
+  const raw = currentPassenger.value?.passenger_id ?? currentPassenger.value?.PassengerID ?? currentPassenger.value?.id
+  const numeric = Number(raw)
+  return Number.isNaN(numeric) ? null : numeric
+})
+
+function formatAmount(value) {
+  const parsed = Number(value)
+  if (Number.isNaN(parsed)) return '0.00'
+  return parsed.toFixed(2)
+}
+
 onMounted(async () => {
   if (!currentPassenger.value) { router.push('/auth'); return }
   await loadData()
@@ -37,9 +49,16 @@ async function loadData() {
   loading.value = true
   error.value   = null
   try {
+    if (!passengerID.value) {
+      error.value = 'Could not identify your passenger account. Please sign in again.'
+      bookings.value = []
+      offers.value = []
+      return
+    }
+
     const [bookingsRes, offersRes] = await Promise.allSettled([
-      axios.get(`http://localhost:3010/api/bookings/passenger/${currentPassenger.value.passenger_id}`),
-      axios.get(`http://localhost:5002/offer?passengerID=${currentPassenger.value.passenger_id}&status=Pending Response`)
+      axios.get(`http://localhost:3010/api/bookings/passenger/${passengerID.value}`),
+      axios.get(`http://localhost:5002/offer?passengerID=${passengerID.value}&status=Pending Response`)
     ])
     if (bookingsRes.status === 'fulfilled') bookings.value = bookingsRes.value.data
     else error.value = 'Could not load your bookings. Please try again.'
@@ -343,12 +362,12 @@ function viewOffer(offer) {
                 <div style="display:flex; gap:16px; align-items:center;">
                   <div style="padding:8px 14px; background:linear-gradient(135deg, #f0fdf4, #f5f5f7); border:1px solid rgba(34,197,94,0.15); border-radius:10px; text-align:center;">
                     <p style="font-size:9px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#6e6e73; margin:0 0 2px;">Paid</p>
-                    <p style="font-size:17px; font-weight:800; color:#1d1d1f; margin:0;">${{ booking.amount?.toFixed(2) }}</p>
+                    <p style="font-size:17px; font-weight:800; color:#1d1d1f; margin:0;">${{ formatAmount(booking.amount ?? booking.amountPaid) }}</p>
                   </div>
                   <div style="height:36px; width:1px; background:rgba(0,0,0,0.08);"></div>
                   <div>
                     <p style="font-size:9px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#9ca3af; margin:0 0 2px;">Booked</p>
-                    <p style="font-size:13px; font-weight:600; color:#1d1d1f; margin:0;">{{ formatDate(booking.createdAt) }}</p>
+                    <p style="font-size:13px; font-weight:600; color:#1d1d1f; margin:0;">{{ formatDate(booking.createdAt ?? booking.createdTime) }}</p>
                   </div>
                 </div>
 

@@ -1,10 +1,8 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
+
 const app = express();
-const amqp = require('amqplib');
-
-
 
 app.use(cors({
   origin: [
@@ -16,244 +14,355 @@ app.use(cors({
 
 app.use(express.json());
 
-// Configuration - service URLs from environment variables
 const RECORD_SERVICE_URL = process.env.RECORD_SERVICE_URL || 'http://record-service:3000';
 const PASSENGER_SERVICE_URL = process.env.PASSENGER_SERVICE_URL || 'http://passenger-service:3000';
 const FLIGHT_SERVICE_URL = process.env.FLIGHT_SERVICE_URL || 'http://flight-service:3000';
-const PAYMENT_SERVICE_URL = process.env.PAYMENT_SERVICE_URL || 'http://payment-service:5000';
-const NOTIFICATION_SERVICE_URL = process.env.NOTIFICATION_SERVICE_URL || 'http://notification-service:3000';
-const RABBITMQ_URL             = process.env.RABBITMQ_URL            || 'amqp://guest:guest@rabbitmq:5672';  // ← add this
+const SEATS_SERVICE_URL = process.env.SEATS_SERVICE_URL || 'http://seats-service:5003';
 
+function normalizePassenger(raw) {
+  if (!raw || typeof raw !== 'object') return null;
 
+  const passengerId = raw.PassengerID ?? raw.passengerID ?? raw.id ?? raw.passenger_id;
+  const email = raw.Email ?? raw.email;
+  const firstName = raw.FirstName ?? raw.firstName ?? '';
+  const lastName = raw.LastName ?? raw.lastName ?? '';
 
-// ==========================================
-// RABBITMQ HELPER
-// ==========================================
-async function publishBookingConfirmed(bookingData) {
-  let connection;
+  if (!passengerId) return null;
+
+  return {
+    PassengerID: Number(passengerId),
+    FirstName: firstName,
+    LastName: lastName,
+    Email: email || null,
+  };
+}
+
+function normalizeFlight(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+
+  const flightId = raw.FlightID ?? raw.flightID;
+  if (!flightId) return null;
+
+  return {
+    FlightID: Number(flightId),
+    FlightNumber: raw.FlightNumber ?? raw.flightNumber ?? null,
+    Price: Number(raw.Price ?? raw.price ?? 0),
+    Status: (raw.Status ?? raw.status ?? '').toString().toLowerCase(),
+    Origin: raw.Origin ?? raw.origin ?? null,
+    Destination: raw.Destination ?? raw.destination ?? null,
+    Date: raw.Date ?? raw.date ?? null,
+    DepartureTime: raw.DepartureTime ?? raw.departureTime ?? null,
+  };
+}
+
+async function fetchPassenger(passengerID) {
+  const candidates = [
+    `${PASSENGER_SERVICE_URL}/passengers/${passengerID}`,
+    `${PASSENGER_SERVICE_URL}/getpassenger/${passengerID}/`,
+    `${PASSENGER_SERVICE_URL}/getpassenger/${passengerID}`,
+  ];
+
+  for (const url of candidates) {
+    try {
+      const response = await axios.get(url, { timeout: 10000 });
+      const normalized = normalizePassenger(response.data);
+      if (normalized) return normalized;
+    } catch (error) {
+      if (error.response?.status === 404) {
+        continue;
+      }
+    }
+  }
+
+  return null;
+}
+
+async function fetchFlight(flightID) {
+  const candidates = [
+    `${FLIGHT_SERVICE_URL}/flight/${flightID}`,
+    `${FLIGHT_SERVICE_URL}/flights/${flightID}`,
+  ];
+
+  for (const url of candidates) {
+    try {
+      const response = await axios.get(url, { timeout: 10000 });
+      const normalized = normalizeFlight(response.data);
+      if (normalized) return normalized;
+    } catch (error) {
+      if (error.response?.status === 404) {
+        continue;
+      }
+    }
+  }
+
+  return null;
+}
+
+async function fetchSeatsForFlight(flightID) {
+  const candidates = [
+    `${SEATS_SERVICE_URL}/seats?FlightID=${flightID}`,
+    `${SEATS_SERVICE_URL}/seats/${flightID}`,
+  ];
+
+  for (const url of candidates) {
+    try {
+      const response = await axios.get(url, { timeout: 10000 });
+      if (Array.isArray(response.data)) {
+        return response.data;
+      }
+    } catch (error) {
+      if (error.response?.status === 404) {
+        continue;
+      }
+    }
+  }
+
+  return [];
+}
+
+function resolveSeat(seats, requestedSeatID, requestedSeatNumber) {
+  if (!Array.isArray(seats) || seats.length === 0) {
+    return null;
+  }
+
+  if (requestedSeatID != null) {
+    return seats.find((seat) => Number(seat.SeatID) === Number(requestedSeatID)) || null;
+  }
+
+  if (requestedSeatNumber) {
+    return seats.find(
+      (seat) => String(seat.SeatNumber).toUpperCase() === String(requestedSeatNumber).toUpperCase()
+    ) || null;
+  }
+
+  return null;
+}
+
+async function holdSeatById(seatID) {
+  return axios.put(`${SEATS_SERVICE_URL}/seats/${seatID}/hold`, {}, { timeout: 10000 });
+}
+
+async function bookSeatById(seatID, passengerID) {
+  return axios.put(
+    `${SEATS_SERVICE_URL}/seats/${seatID}/book`,
+    { PassengerID: passengerID },
+    { timeout: 10000 }
+  );
+}
+
+async function releaseSeatByFlightAndSeatNumber(flightID, seatNumber) {
+  if (!flightID || !seatNumber) return;
+
   try {
-    connection = await amqp.connect(RABBITMQ_URL);
-    const channel = await connection.createChannel();
- 
-    const exchange = 'airline_events';
-    await channel.assertExchange(exchange, 'topic', { durable: true });
- 
-    channel.publish(
-      exchange,
-      'booking.confirmed',                          // routing key — consumed by notification-service
-      Buffer.from(JSON.stringify(bookingData)),
-      { persistent: true }                          // message survives RabbitMQ restart
+    await axios.post(
+      `${SEATS_SERVICE_URL}/seats/release`,
+      {
+        flightID,
+        seatNumber,
+      },
+      { timeout: 10000 }
     );
- 
-    console.log('✓ Published booking.confirmed to RabbitMQ');
-    console.log('  Payload:', JSON.stringify(bookingData, null, 2));
- 
-    await channel.close();
-  } catch (err) {
-    // Log the error but don't fail the booking — email is non-critical
-    console.error('✗ Failed to publish to RabbitMQ:', err.message);
-  } finally {
-    if (connection) await connection.close();
+  } catch (error) {
+    console.error('Seat release rollback failed:', error.message);
   }
 }
- 
-// Health check endpoint
+
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
+  res.json({
+    status: 'OK',
     service: 'booking-composite-service',
     dependencies: {
-      bookingService: 'pending',
-      passengerService: 'pending',
-      flightService: 'pending',
-      paymentService: 'pending',
-      notificationService: 'pending'
+      recordService: RECORD_SERVICE_URL,
+      passengerService: PASSENGER_SERVICE_URL,
+      flightService: FLIGHT_SERVICE_URL,
+      seatsService: SEATS_SERVICE_URL,
     }
   });
 });
 
-
-
-
-// ==========================================
-// BOOKING FLOW - Scenario 1
-// ==========================================
-// POST /api/bookings - Complete booking flow
 app.post('/api/bookings', async (req, res) => {
-  const { passengerID, flightID, seatNumber } = req.body;
-  
-  if (!passengerID || !flightID || !seatNumber) {
-    return res.status(400).json({ 
-      error: 'Missing required fields: passengerID, flightID, seatNumber' 
+  const passengerID = Number(req.body.passengerID ?? req.body.PassengerID);
+  const flightID = Number(req.body.flightID ?? req.body.FlightID);
+
+  const requestedSeatID = req.body.seatID ?? req.body.SeatID;
+  const requestedSeatNumber = req.body.seatNumber ?? req.body.SeatNumber;
+
+  if (!passengerID || !flightID || (requestedSeatID == null && !requestedSeatNumber)) {
+    return res.status(400).json({
+      error: 'Missing required fields: passengerID, flightID, and one of seatID/seatNumber'
     });
   }
- 
-  console.log(`Starting booking flow for passenger ${passengerID}, flight ${flightID}, seat ${seatNumber}`);
- 
+
+  let heldSeat = null;
+
   try {
-    // Step 1: Validate passenger exists (mock for now)
-    // ── Declare variables at top so all steps can access them ──
-    let passenger = null;
-
-    // Step 1: Validate passenger exists
-    console.log('Step 1: Validating passenger...');
-    const passengerResponse = await axios.get(`${PASSENGER_SERVICE_URL}/passengers/${passengerID}`);
-    passenger = passengerResponse.data;
+    const passenger = await fetchPassenger(passengerID);
     if (!passenger) {
-      throw new Error('Passenger not found');
+      return res.status(404).json({ error: 'Passenger not found' });
     }
-    console.log('✓ Passenger validated:', passenger.FirstName, passenger.LastName);
 
-    // Step 2: Check seat availability (mock for now)
-    console.log('Step 2: Checking seat availability...');
-    // TODO: Call Flight Service once coded
-    const seatAvailable = true;
-    if (!seatAvailable) {
-      throw new Error('Seat not available');
+    const flight = await fetchFlight(flightID);
+    if (!flight) {
+      return res.status(404).json({ error: 'Flight not found' });
     }
-    console.log('✓ Seat available');
 
-    // Step 3: Create pending booking in Booking Service
-    console.log('Step 3: Creating pending booking...');
-    const bookingResponse = await axios.post(`${RECORD_SERVICE_URL}/records`, {
-      passengerID,
-      flightID,
-      amount: 299.99,
-      seatNumber
-    });
-    const booking = bookingResponse.data;
-    console.log(`✓ Pending booking created with ID: ${booking.bookingID}`);
+    if (flight.Status && flight.Status !== 'available') {
+      return res.status(400).json({ error: `Flight is not available (status: ${flight.Status})` });
+    }
 
-    // Step 4: Hold seat in Flight Service (mock for now)
-    console.log('Step 4: Holding seat...');
-    // TODO: Call Flight Service to hold seat once coded
-    console.log('✓ Seat held');
+    const seats = await fetchSeatsForFlight(flightID);
+    const seat = resolveSeat(seats, requestedSeatID, requestedSeatNumber);
 
-    // Step 5: Process payment (mock for now)
-    console.log('Step 5: Processing payment...');
-    // TODO: Call Payment Service once coded
-    const paymentSuccess = true;
+    if (!seat) {
+      return res.status(404).json({ error: 'Seat not found for flight' });
+    }
 
-    if (paymentSuccess) {
-      // ── SUCCESS PATH ──────────────────────────────────────
-      console.log('✓ Payment successful');
+    if (String(seat.Status).toLowerCase() !== 'available') {
+      return res.status(400).json({ error: 'Seat not available' });
+    }
 
-      // Step 6: Update booking to Confirmed
-      console.log('Step 6: Updating booking to Confirmed...');
-      await axios.put(`${RECORD_SERVICE_URL}/records/${booking.bookingID}/status`, {
-        status: 'Confirmed'
-      });
-      console.log('✓ Booking confirmed');
+    await holdSeatById(seat.SeatID);
+    heldSeat = seat;
 
-      // Step 7: Mark seat as BOOKED in Flight Service (mock)
-      console.log('Step 7: Marking seat as BOOKED...');
-      // TODO: Call Flight Service to mark seat as BOOKED
-      console.log('✓ Seat marked as BOOKED');
+    const amountPaid = Number(req.body.amountPaid ?? req.body.AmountPaid ?? req.body.amount ?? flight.Price);
+    if (!amountPaid || amountPaid <= 0) {
+      await releaseSeatByFlightAndSeatNumber(flightID, seat.SeatNumber);
+      return res.status(400).json({ error: 'Invalid amountPaid' });
+    }
 
-      // Step 8: Publish to RabbitMQ → Notification Service → Email Service → SendGrid
-      console.log('Step 8: Publishing booking confirmation to RabbitMQ...');
-      await publishBookingConfirmed({
-        booking_id:      booking.bookingID,
-        passenger_name: `${FirstName} ${LastName}`,
-        passenger_email: Email,
-        // passenger_name:  `${passenger.firstName} ${passenger.lastName}`,  // ← real data
-        // passenger_email: `${passenger.email}`,                                  // ← real email
-        flight_number:   'SQ123',           // TODO: replace with Flight Service
-        origin:          'Singapore (SIN)', // TODO: replace with Flight Service
-        destination:     'Tokyo (NRT)',     // TODO: replace with Flight Service
-        departure_date:  '2025-06-15 10:30',// TODO: replace with Flight Service
-        seat_number:     seatNumber,
-        amount_paid:     299.99             // TODO: replace with Payment Service
-        });
-
-      return res.status(201).json({
-        success:   true,
-        message:   'Booking confirmed successfully',
-        bookingID: booking.bookingID,
-        status:    'Confirmed',
+    const recordResponse = await axios.post(
+      `${RECORD_SERVICE_URL}/records`,
+      {
         passengerID,
         flightID,
-        seatNumber
-      });
-  
-  
-    } else {
-      // ── FAILURE PATH ──────────────────────────────────────
-      console.log('✗ Payment failed');
- 
-      // Step 6: Update booking to Failed
-      console.log('Step 6: Updating booking to Failed...');
-      await axios.put(`${RECORD_SERVICE_URL}/records/${booking.bookingID}/status`, {
-        status: 'Failed'
-      });
-      console.log('✓ Booking marked as Failed');
- 
-      // Step 7: Release seat hold in Flight Service (mock)
-      console.log('Step 7: Releasing seat hold...');
-      // TODO: Call Flight Service to release seat hold
-      console.log('✓ Seat hold released');
- 
-      // Step 8: No notification sent on payment failure
-      console.log('Step 8: Skipping notification — payment failed');
- 
-      // Return failure response
-      return res.status(400).json({
-        success: false,
-        message: 'Payment failed. Booking cancelled.',
-        bookingID: booking.bookingID,
-        status: 'Failed'
-      });
-    }
- 
+        seatID: Number(seat.SeatID),
+        amountPaid,
+      },
+      { timeout: 10000 }
+    );
+
+    const booking = recordResponse.data || {};
+
+    return res.status(201).json({
+      success: true,
+      bookingID: booking.bookingID,
+      bookingstatus: booking.bookingstatus || booking.status || 'Pending',
+      status: booking.status || booking.bookingstatus || 'Pending',
+      passengerID,
+      flightID,
+      seatID: Number(seat.SeatID),
+      seatNumber: seat.SeatNumber,
+      amountPaid,
+      amount: amountPaid,
+      passenger,
+      flight,
+      message: 'Pending booking created. Proceed to payment.'
+    });
   } catch (error) {
-    console.error('Error in booking flow:', error.message);
- 
-    if (error.bookingID) {
-      try {
-        await axios.delete(`${RECORD_SERVICE_URL}/record/${error.bookingID}`);
-        console.log('✓ Cleaned up pending booking');
-      } catch (cleanupError) {
-        console.error('Cleanup failed:', cleanupError.message);
-      }
+    if (heldSeat) {
+      await releaseSeatByFlightAndSeatNumber(flightID, heldSeat.SeatNumber);
     }
- 
+
+    console.error('Booking creation failed:', error.message);
     return res.status(500).json({
       success: false,
-      error: 'Booking failed',
-      message: error.message
+      error: 'Booking creation failed',
+      message: error.response?.data?.message || error.response?.data?.error || error.message,
     });
   }
 });
- 
 
-// ==========================================
-// GET /api/bookings/:bookingID
-// Get a single booking by ID
-// Called by BookingSuccess.vue after payment
-// ==========================================
+app.post('/api/bookings/:bookingID/finalize', async (req, res) => {
+  const bookingID = Number(req.params.bookingID);
+  const passengerID = Number(req.body.passengerID ?? req.body.PassengerID);
+
+  if (!bookingID || !passengerID) {
+    return res.status(400).json({ error: 'bookingID and passengerID are required' });
+  }
+
+  try {
+    const bookingResponse = await axios.get(`${RECORD_SERVICE_URL}/records/${bookingID}`, { timeout: 10000 });
+    const booking = bookingResponse.data || {};
+
+    const currentStatus = String(booking.bookingstatus || booking.status || '').toLowerCase();
+    if (currentStatus === 'confirmed') {
+      return res.json({
+        success: true,
+        message: 'Booking already confirmed',
+        bookingID,
+        status: 'Confirmed'
+      });
+    }
+
+    if (currentStatus && currentStatus !== 'pending') {
+      return res.status(409).json({
+        success: false,
+        error: `Booking cannot be finalized from status: ${booking.bookingstatus || booking.status}`
+      });
+    }
+
+    const seatID = booking.seatID;
+    if (!seatID) {
+      return res.status(500).json({ error: 'Booking is missing seatID' });
+    }
+
+    await axios.put(
+      `${RECORD_SERVICE_URL}/records/${bookingID}/status`,
+      { bookingstatus: 'Confirmed' },
+      { timeout: 10000 }
+    );
+
+    try {
+      await bookSeatById(seatID, passengerID);
+    } catch (seatError) {
+      await axios.put(
+        `${RECORD_SERVICE_URL}/records/${bookingID}/status`,
+        { bookingstatus: 'Pending' },
+        { timeout: 10000 }
+      );
+      throw seatError;
+    }
+
+    return res.json({
+      success: true,
+      bookingID,
+      status: 'Confirmed',
+      bookingstatus: 'Confirmed',
+      seatID,
+      message: 'Booking finalized successfully'
+    });
+  } catch (error) {
+    console.error('Booking finalization failed:', error.message);
+
+    return res.status(500).json({
+      success: false,
+      error: 'Booking finalization failed',
+      message: error.response?.data?.message || error.response?.data?.error || error.message,
+    });
+  }
+});
+
 app.get('/api/bookings/:bookingID', async (req, res) => {
   const { bookingID } = req.params;
+
   try {
-    const response = await axios.get(`${RECORD_SERVICE_URL}/records/${bookingID}`);
+    const response = await axios.get(`${RECORD_SERVICE_URL}/records/${bookingID}`, { timeout: 10000 });
     res.json(response.data);
   } catch (error) {
     if (error.response?.status === 404) {
       return res.status(404).json({ error: 'Booking not found' });
     }
+
     console.error('Error fetching booking:', error.message);
     res.status(500).json({ error: 'Failed to fetch booking', message: error.message });
   }
 });
 
-// ==========================================
-// GET /api/bookings/passenger/:passengerID
-// Get all bookings for a passenger
-// Called by MyBookings.vue
-// ==========================================
 app.get('/api/bookings/passenger/:passengerID', async (req, res) => {
   const { passengerID } = req.params;
+
   try {
-    const response = await axios.get(`${RECORD_SERVICE_URL}/records/passenger/${passengerID}`);
+    const response = await axios.get(`${RECORD_SERVICE_URL}/records/passenger/${passengerID}`, { timeout: 10000 });
     res.json(response.data);
   } catch (error) {
     console.error('Error fetching bookings for passenger:', error.message);
@@ -261,18 +370,11 @@ app.get('/api/bookings/passenger/:passengerID', async (req, res) => {
   }
 });
 
-// ==========================================
-// TODO: Scenario 2
-// ==========================================
-
-
-// ==========================================
-// TODO: Scenario 3
-// ==========================================
-
-
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Booking Composite Service running on port ${PORT}`);
   console.log(`Using Record Service at: ${RECORD_SERVICE_URL}`);
+  console.log(`Using Passenger Service at: ${PASSENGER_SERVICE_URL}`);
+  console.log(`Using Flight Service at: ${FLIGHT_SERVICE_URL}`);
+  console.log(`Using Seats Service at: ${SEATS_SERVICE_URL}`);
 });

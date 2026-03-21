@@ -25,6 +25,8 @@ const outboundFlights = ref([])
 const returnFlights = ref([])
 const loading = ref(true)
 const loadingReturn = ref(false)
+const outboundError = ref('')
+const returnError = ref('')
 
 // ─── Selection state ─────────────────────────────────────
 // step: 'outbound' | 'return' | 'done'
@@ -32,21 +34,27 @@ const step = ref('outbound')
 
 const selectedOutbound = ref(null)
 const selectedReturn = ref(null)
+const selectedOutboundSeat = ref('')
+const selectedReturnSeat = ref('')
 
 // ─── Fetch outbound flights on mount ─────────────────────
 onMounted(async () => {
   loading.value = true
+  outboundError.value = ''
   try {
     const response = await axios.get('http://localhost:3003/flight/available', {
       params: {
         origin: searchParams.value.departingCountry,
         dest: searchParams.value.arrivingCountry,
         dateFrom: searchParams.value.departureDate,
+        dateTo: searchParams.value.departureDate,
       },
     })
     outboundFlights.value = response.data.map(formatFlight)
   } catch (e) {
     console.error('Error fetching outbound flights:', e)
+    outboundFlights.value = []
+    outboundError.value = 'Unable to load flights right now. Please try again.'
   } finally {
     loading.value = false
   }
@@ -55,17 +63,21 @@ onMounted(async () => {
 // ─── Fetch return flights once outbound seat is chosen ────
 async function fetchReturnFlights() {
   loadingReturn.value = true
+  returnError.value = ''
   try {
     const response = await axios.get('http://localhost:3003/flight/available', {
       params: {
         origin: searchParams.value.arrivingCountry,
         dest: searchParams.value.departingCountry,
         dateFrom: searchParams.value.returnDate,
+        dateTo: searchParams.value.returnDate,
       },
     })
     returnFlights.value = response.data.map(formatFlight)
   } catch (e) {
     console.error('Error fetching return flights:', e)
+    returnFlights.value = []
+    returnError.value = 'Unable to load return flights right now. Please try again.'
   } finally {
     loadingReturn.value = false
   }
@@ -88,10 +100,34 @@ function formatFlight(f) {
 // ─── User actions ─────────────────────────────────────────
 function selectOutbound(flight) {
   selectedOutbound.value = flight
+  openFlightDetails(flight, 'outbound')
 }
 
 function selectReturn(flight) {
   selectedReturn.value = flight
+  openFlightDetails(flight, 'return')
+}
+
+function openFlightDetails(flight, leg) {
+  router.push({
+    path: '/flight-details',
+    query: {
+      flightID: flight.flightID,
+      flightNumber: flight.flightNumber,
+      amount: flight.price,
+      origin: flight.origin,
+      destination: flight.destination,
+      departureTime: flight.departureTime,
+      arrivalTime: flight.arrivalTime,
+      leg,
+      tripType: searchParams.value.tripType,
+      departingCountry: searchParams.value.departingCountry,
+      arrivingCountry: searchParams.value.arrivingCountry,
+      departureDate: searchParams.value.departureDate,
+      returnDate: searchParams.value.returnDate,
+      passengers: searchParams.value.passengers,
+    }
+  })
 }
 
 // Called when user confirms their outbound flight
@@ -220,6 +256,17 @@ function proceedToBooking() {
           <p class="mt-6 text-sm font-semibold uppercase tracking-[0.1em] text-[#6e6e73] animate-pulse">Scanning the skies...</p>
         </div>
 
+        <!-- Outbound empty/error state -->
+        <div v-else-if="outboundFlights.length === 0" class="animate__animated animate__fadeInUp rounded-[32px] border border-black/10 bg-white/80 p-10 text-center shadow-sm backdrop-blur-xl">
+          <h2 class="text-2xl font-semibold tracking-[-0.02em] text-[#1d1d1f]">No flights found</h2>
+          <p class="mt-3 text-sm text-[#6e6e73]">
+            {{ outboundError || 'No flights are available for this route and date. Try another date or destination.' }}
+          </p>
+          <RouterLink to="/" class="mt-6 inline-flex rounded-full bg-[#1d1d1f] px-6 py-3 text-sm font-semibold text-white transition hover:bg-black">
+            Modify Search
+          </RouterLink>
+        </div>
+
         <!-- Outbound flight list -->
         <div v-else class="grid gap-6 animate__animated animate__fadeInUp">
           <article
@@ -281,6 +328,19 @@ function proceedToBooking() {
             <div class="h-8 w-8 animate-spin rounded-full border-[3px] border-[#e63946] border-t-transparent"></div>
           </div>
           <p class="mt-6 text-sm font-semibold uppercase tracking-[0.1em] text-[#6e6e73] animate-pulse">Finding return flights...</p>
+        </div>
+
+        <div v-else-if="returnFlights.length === 0" class="animate__animated animate__fadeInUp rounded-[32px] border border-black/10 bg-white/80 p-10 text-center shadow-sm backdrop-blur-xl">
+          <h2 class="text-2xl font-semibold tracking-[-0.02em] text-[#1d1d1f]">No return flights found</h2>
+          <p class="mt-3 text-sm text-[#6e6e73]">
+            {{ returnError || 'No return flights are available for the selected date.' }}
+          </p>
+          <button
+            class="mt-6 rounded-full bg-[#1d1d1f] px-6 py-3 text-sm font-semibold text-white transition hover:bg-black"
+            @click="step = 'outbound'; selectedReturn = null; selectedReturnSeat = ''"
+          >
+            Choose Another Departure
+          </button>
         </div>
 
         <div v-else class="grid gap-6 animate__animated animate__fadeInUp">

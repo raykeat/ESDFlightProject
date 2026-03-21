@@ -50,11 +50,19 @@ app.get('/health', (req, res) => {
 // Create a booking record (status: Pending)
 // ==========================================
 app.post('/records', (req, res) => {
-  const { passengerID, flightID, amount, seatNumber } = req.body;
+  const { passengerID, flightID } = req.body;
+  const seatID = req.body.seatID ?? req.body.SeatID ?? req.body.seatNumber;
+  const amountPaid = req.body.amountPaid ?? req.body.AmountPaid ?? req.body.amount;
+
+  if (!passengerID || !flightID || seatID == null || amountPaid == null) {
+    return res.status(400).json({
+      error: 'Missing required fields: passengerID, flightID, seatID, amountPaid'
+    });
+  }
 
   pool.query(
-    'INSERT INTO booking (passengerID, flightID, status, amount, seatNumber) VALUES (?, ?, "Pending", ?, ?)',
-    [passengerID, flightID, amount, seatNumber],
+    'INSERT INTO record (PassengerID, FlightID, SeatID, bookingstatus, AmountPaid) VALUES (?, ?, ?, "Pending", ?)',
+    [passengerID, flightID, seatID, amountPaid],
     (err, result) => {
       if (err) {
         console.error(err);
@@ -62,7 +70,8 @@ app.post('/records', (req, res) => {
       }
       res.status(201).json({
         bookingID: result.insertId,
-        status:    'Pending',
+        bookingstatus: 'Pending',
+        status: 'Pending',
         message:   'Booking Record created successfully'
       });
     }
@@ -77,7 +86,19 @@ app.get('/records', (req, res) => {
   const { flightID } = req.query;
 
   pool.query(
-    'SELECT * FROM booking WHERE flightID = ?',
+    `SELECT
+      BookingID AS bookingID,
+      FlightID AS flightID,
+      SeatID AS seatID,
+      PassengerID AS passengerID,
+      AmountPaid AS amountPaid,
+      bookingstatus,
+      CreatedTime AS createdTime,
+      bookingstatus AS status,
+      AmountPaid AS amount,
+      SeatID AS seatNumber
+    FROM record
+    WHERE FlightID = ?`,
     [flightID],
     (err, results) => {
       if (err) {
@@ -97,7 +118,20 @@ app.get('/records/passenger/:passengerID', (req, res) => {
   const { passengerID } = req.params;
 
   pool.query(
-    'SELECT * FROM booking WHERE passengerID = ? ORDER BY createdAt DESC',
+    `SELECT
+      BookingID AS bookingID,
+      FlightID AS flightID,
+      SeatID AS seatID,
+      PassengerID AS passengerID,
+      AmountPaid AS amountPaid,
+      bookingstatus,
+      CreatedTime AS createdTime,
+      bookingstatus AS status,
+      AmountPaid AS amount,
+      SeatID AS seatNumber
+    FROM record
+    WHERE PassengerID = ?
+    ORDER BY CreatedTime DESC`,
     [passengerID],
     (err, results) => {
       if (err) {
@@ -117,7 +151,19 @@ app.get('/records/:bookingID', (req, res) => {
   const { bookingID } = req.params;
 
   pool.query(
-    'SELECT * FROM booking WHERE bookingID = ?',
+    `SELECT
+      BookingID AS bookingID,
+      FlightID AS flightID,
+      SeatID AS seatID,
+      PassengerID AS passengerID,
+      AmountPaid AS amountPaid,
+      bookingstatus,
+      CreatedTime AS createdTime,
+      bookingstatus AS status,
+      AmountPaid AS amount,
+      SeatID AS seatNumber
+    FROM record
+    WHERE BookingID = ?`,
     [bookingID],
     (err, results) => {
       if (err) {
@@ -138,10 +184,17 @@ app.get('/records/:bookingID', (req, res) => {
 // ==========================================
 app.put('/records/:bookingID/status', (req, res) => {
   const { bookingID } = req.params;
-  const { status }    = req.body;
+  const status = req.body.status ?? req.body.bookingstatus;
+  const allowedStatuses = ['Confirmed', 'Pending', 'Cancelled', 'Failed'];
+
+  if (!allowedStatuses.includes(status)) {
+    return res.status(400).json({
+      error: `Invalid status. Allowed values: ${allowedStatuses.join(', ')}`
+    });
+  }
 
   pool.query(
-    'UPDATE booking SET status = ? WHERE bookingID = ?',
+    'UPDATE record SET bookingstatus = ? WHERE BookingID = ?',
     [status, bookingID],
     (err) => {
       if (err) {
@@ -161,7 +214,7 @@ app.delete('/record/:bookingID', (req, res) => {
   const { bookingID } = req.params;
 
   pool.query(
-    'DELETE FROM booking WHERE bookingID = ?',
+    'DELETE FROM record WHERE BookingID = ?',
     [bookingID],
     (err, result) => {
       if (err) {

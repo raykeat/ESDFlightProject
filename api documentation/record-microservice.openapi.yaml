@@ -31,10 +31,10 @@ paths:
                     type: string
                     example: record-service
 
-  /bookings:
+  /records:
     post:
       tags: [Bookings]
-      summary: Create a booking
+      summary: Create a booking record
       requestBody:
         required: true
         content:
@@ -57,17 +57,17 @@ paths:
 
     get:
       tags: [Bookings]
-      summary: Get bookings by flight ID
+      summary: Get booking records by flight ID
       parameters:
         - in: query
           name: flightID
           required: true
           schema:
             type: integer
-          description: Flight ID used to filter booking records.
+          description: Flight ID used to filter records.
       responses:
         '200':
-          description: Booking list for the given flight
+          description: Record list for the given flight
           content:
             application/json:
               schema:
@@ -81,10 +81,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/SimpleError'
 
-  /bookings/{bookingID}:
+  /records/{bookingID}:
     get:
       tags: [Bookings]
-      summary: Get booking by booking ID
+      summary: Get booking record by booking ID
       parameters:
         - in: path
           name: bookingID
@@ -93,13 +93,13 @@ paths:
             type: integer
       responses:
         '200':
-          description: Booking found
+          description: Record found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Booking'
         '404':
-          description: Booking not found
+          description: Record not found
           content:
             application/json:
               schema:
@@ -111,10 +111,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/SimpleError'
 
-  /bookings/{bookingID}/status:
+  /records/{bookingID}/status:
     put:
       tags: [Bookings]
-      summary: Update booking status
+      summary: Update booking record status
       parameters:
         - in: path
           name: bookingID
@@ -141,7 +141,33 @@ paths:
               schema:
                 $ref: '#/components/schemas/SimpleError'
 
-  /booking/{bookingID}:
+  /records/passenger/{passengerID}:
+    get:
+      tags: [Bookings]
+      summary: Get booking records by passenger ID
+      parameters:
+        - in: path
+          name: passengerID
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Records found
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Booking'
+        '500':
+          description: Database or server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /record/{bookingID}:
     delete:
       tags: [Bookings]
       summary: Delete booking by booking ID
@@ -153,13 +179,13 @@ paths:
             type: integer
       responses:
         '200':
-          description: Booking deleted
+          description: Record deleted
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/MessageResponse'
         '404':
-          description: Booking not found
+          description: Record not found
           content:
             application/json:
               schema:
@@ -179,48 +205,44 @@ components:
         bookingID:
           type: integer
           example: 1
-        passengerID:
-          type: integer
-          example: 101
         flightID:
           type: integer
-          example: 201
-        status:
+          example: 36251
+        seatID:
+          type: integer
+          example: 5000
+        passengerID:
+          type: integer
+          example: 1
+        amountPaid:
+          type: number
+          format: decimal
+          example: 385.50
+        bookingstatus:
           type: string
           example: Confirmed
-        amount:
-          type: number
-          format: double
-          example: 299.99
-        seatNumber:
+        createdTime:
           type: string
-          nullable: true
-          example: 12A
-        refundID:
-          type: string
-          nullable: true
-          example: re_123456789
-        createdAt:
-          type: string
-          example: '2026-03-11 16:25:01'
+          format: date-time
+          example: '2025-03-10T09:15:22Z'
 
     CreateBookingRequest:
       type: object
-      required: [passengerID, flightID, amount]
+      required: [passengerID, flightID, seatID, amountPaid]
       properties:
         passengerID:
           type: integer
-          example: 101
+          example: 1
         flightID:
           type: integer
-          example: 201
-        amount:
+          example: 36251
+        seatID:
+          type: integer
+          example: 5000
+        amountPaid:
           type: number
-          format: double
-          example: 299.99
-        seatNumber:
-          type: string
-          example: 12A
+          format: decimal
+          example: 385.50
 
     CreateBookingResponse:
       type: object
@@ -228,7 +250,7 @@ components:
         bookingID:
           type: integer
           example: 12
-        status:
+        bookingstatus:
           type: string
           example: Pending
         message:
@@ -237,9 +259,9 @@ components:
 
     UpdateBookingStatusRequest:
       type: object
-      required: [status]
+      required: [bookingstatus]
       properties:
-        status:
+        bookingstatus:
           type: string
           example: Confirmed
 
@@ -255,4 +277,4 @@ components:
       properties:
         error:
           type: string
-          example: Booking not found
+          example: Record not found

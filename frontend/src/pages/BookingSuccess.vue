@@ -2,9 +2,11 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
+import { usePassengerSession } from '../composables/usePassengerSession'
 
 const route  = useRoute()
 const router = useRouter()
+const { currentPassenger } = usePassengerSession()
 
 const bookingID = route.params.bookingID
 const sessionID = route.query.session_id   // Stripe appends this to the successUrl
@@ -14,25 +16,66 @@ const payment    = ref(null)
 const loading    = ref(true)
 const error      = ref(null)
 
+const PAYMENT_API_BASE = 'http://localhost:5001'
+const BOOKING_API_BASE = 'http://localhost:3010'
+const REQUEST_TIMEOUT_MS = 15000
+
+const paymentApi = axios.create({
+  baseURL: PAYMENT_API_BASE,
+  timeout: REQUEST_TIMEOUT_MS,
+})
+
+const bookingApi = axios.create({
+  baseURL: BOOKING_API_BASE,
+  timeout: REQUEST_TIMEOUT_MS,
+})
+
+function formatAmount(value) {
+  const parsed = Number(value)
+  if (Number.isNaN(parsed)) {
+    return '0.00'
+  }
+  return parsed.toFixed(2)
+}
+
 onMounted(async () => {
   try {
-    // Step 1: Verify the Stripe session and update payment to Completed
-    if (sessionID) {
-      const paymentResponse = await axios.get(
-        `http://localhost:5001/payment/verify-session/${sessionID}`
-      )
-      payment.value = paymentResponse.data
+    if (!bookingID) {
+      throw new Error('Missing booking reference')
     }
 
-    // Step 2: Fetch booking details from Booking Composite
-    const bookingResponse = await axios.get(
-      `http://localhost:3010/api/bookings/${bookingID}`
-    )
-    booking.value = bookingResponse.data
+    if (!sessionID) {
+      throw new Error('Missing Stripe session reference')
+    }
+
+    // Step 1: Verify Stripe session
+    const paymentResponse = await paymentApi.get(`/payment/verify-session/${sessionID}`)
+    payment.value = paymentResponse.data
+
+    // Step 2: Get current booking state
+    const initialBookingResponse = await bookingApi.get(`/api/bookings/${bookingID}`)
+    booking.value = initialBookingResponse.data
+
+    // Step 3: Finalize if still pending
+    const currentStatus = String(booking.value?.status || booking.value?.bookingstatus || '').toLowerCase()
+    const passengerID = Number(currentPassenger.value?.passenger_id || booking.value?.passengerID)
+
+    if (currentStatus !== 'confirmed' && passengerID) {
+      await bookingApi.post(`/api/bookings/${bookingID}/finalize`, {
+        passengerID,
+      })
+
+      const refreshedBookingResponse = await bookingApi.get(`/api/bookings/${bookingID}`)
+      booking.value = refreshedBookingResponse.data
+    }
 
   } catch (err) {
     console.error('Error confirming booking:', err)
-    error.value = err.response?.data?.message || 'Could not confirm your booking. Please contact support.'
+    if (err.code === 'ECONNABORTED') {
+      error.value = 'Confirmation timed out. Please refresh the page and check your booking status in My Bookings.'
+    } else {
+      error.value = err.response?.data?.message || err.message || 'Could not confirm your booking. Please contact support.'
+    }
   } finally {
     loading.value = false
   }
@@ -107,7 +150,7 @@ onMounted(async () => {
               </div>
               <div class="flex justify-between">
                 <span class="text-[#6e6e73] text-sm">Amount Paid</span>
-                <span class="font-medium text-[#1d1d1f]">${{ booking.amount?.toFixed(2) }}</span>
+                <span class="font-medium text-[#1d1d1f]">${{ formatAmount(booking.amount ?? booking.amountPaid) }}</span>
               </div>
             </template>
 
