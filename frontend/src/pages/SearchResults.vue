@@ -71,16 +71,46 @@ async function fetchReturnFlights() {
   }
 }
 
+// ─── Format helpers ──────────────────────────────────────
+function formatTime12h(isoString) {
+  if (!isoString) return '--'
+  const d = new Date(isoString)
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })
+}
+
+function formatDuration(d) {
+  if (!d) return '--'
+  const clean = String(d).replace('h', '').trim()
+  const [h, m = '00'] = clean.split(':')
+  return `${parseInt(h)}h ${String(m).padStart(2, '0')}m`
+}
+
 function formatFlight(f) {
   const [day, month, year] = f.Date.split('/')
+  const depDate = new Date(`${year}-${month}-${day}`)
+
+  // Detect overnight: arrival time < departure time means it crossed midnight
+  const [depH, depM] = f.DepartureTime.split(':').map(Number)
+  const [arrH, arrM] = f.ArrivalTime.split(':').map(Number)
+  const isNextDay = arrH * 60 + arrM < depH * 60 + depM
+
+  const arrDate = new Date(depDate)
+  if (isNextDay) arrDate.setDate(arrDate.getDate() + 1)
+
+  const fmt = (d) => d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' })
+
   return {
-    flightID: f.FlightID,
-    flightNumber: f.FlightNumber,
-    origin: f.Origin,
-    destination: f.Destination,
+    flightID:      f.FlightID,
+    flightNumber:  f.FlightNumber,
+    origin:        f.Origin,
+    destination:   f.Destination,
     departureTime: `${year}-${month}-${day}T${f.DepartureTime}:00`,
-    arrivalTime: `${year}-${month}-${day}T${f.ArrivalTime}:00`,
-    price: f.Price,
+    arrivalTime:   `${year}-${month}-${day}T${f.ArrivalTime}:00`,
+    price:         f.Price,
+    duration:      f.FlightDuration,
+    departureDate: fmt(depDate),
+    arrivalDate:   fmt(arrDate),
+    isNextDay,
     availableSeats: 30,
   }
 }
@@ -94,39 +124,61 @@ function selectReturn(flight) {
   selectedReturn.value = flight
 }
 
-// Called when user confirms their outbound flight
+// Called when user confirms their outbound flight selection
 async function confirmOutbound() {
   if (isRoundTrip.value) {
-    step.value = 'return'
-    await fetchReturnFlights()
+    // For round trip: go to FlightDetail for outbound seat selection first
+    router.push({
+      path: '/flight-detail',
+      query: {
+        flightID:         selectedOutbound.value.flightID,
+        isReturn:         'false',
+        // Pass round-trip context so FlightDetail can later fetch return
+        tripType:         searchParams.value.tripType,
+        departingCountry: searchParams.value.departingCountry,
+        arrivingCountry:  searchParams.value.arrivingCountry,
+        departureDate:    searchParams.value.departureDate,
+        returnDate:       searchParams.value.returnDate,
+        passengers:       searchParams.value.passengers,
+      },
+    })
   } else {
-    proceedToBooking()
+    // One-way: go directly to FlightDetail for seat selection
+    router.push({
+      path: '/flight-detail',
+      query: {
+        flightID:         selectedOutbound.value.flightID,
+        isReturn:         'false',
+        tripType:         'one-way',
+        departingCountry: searchParams.value.departingCountry,
+        arrivingCountry:  searchParams.value.arrivingCountry,
+        departureDate:    searchParams.value.departureDate,
+        passengers:       searchParams.value.passengers,
+      },
+    })
   }
 }
 
-// Final booking action
+// Round-trip: after selecting return flight, go to FlightDetail for return seat selection
 function proceedToBooking() {
-  const flight = isRoundTrip.value ? selectedReturn.value : selectedOutbound.value
-  const seat = isRoundTrip.value ? selectedReturnSeat.value : selectedOutboundSeat.value
-
   if (!currentPassenger.value) {
     router.push({ path: '/auth', query: { redirect: '/search-results', ...searchParams.value } })
     return
   }
 
+  // Navigate to FlightDetail for the return flight seat selection
   router.push({
-    path: '/booking-confirmation',
+    path: '/flight-detail',
     query: {
-      flightID:           selectedOutbound.value.flightID,
-      flightNumber:       selectedOutbound.value.flightNumber,
-      amount:             selectedOutbound.value.price,
-      returnFlightID:     isRoundTrip.value ? selectedReturn.value?.flightID : '',
-      returnAmount:       isRoundTrip.value ? selectedReturn.value?.price : '',
-      departingCountry:   searchParams.value.departingCountry,
-      arrivingCountry:    searchParams.value.arrivingCountry,
-      departureDate:      searchParams.value.departureDate,
-      returnDate:         searchParams.value.returnDate,
-      passengers:         searchParams.value.passengers,
+      flightID:          selectedReturn.value.flightID,
+      isReturn:          'true',
+      outboundFlightID:  selectedOutbound.value.flightID,
+      tripType:          searchParams.value.tripType,
+      departingCountry:  searchParams.value.departingCountry,
+      arrivingCountry:   searchParams.value.arrivingCountry,
+      departureDate:     searchParams.value.departureDate,
+      returnDate:        searchParams.value.returnDate,
+      passengers:        searchParams.value.passengers,
     },
   })
 }
@@ -231,14 +283,14 @@ function proceedToBooking() {
             @click="selectOutbound(flight)"
           >
             <div class="p-6 md:p-8">
-              <div class="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+              <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <!-- Flight path -->
                 <div class="flex flex-1 items-center justify-between md:max-w-[65%]">
-                  <div class="w-[85px] text-left">
-                    <p class="text-3xl font-bold tracking-tight text-[#1d1d1f]">{{ new Date(flight.departureTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) }}</p>
+                  <div class="w-[100px] text-left">
+                    <p class="text-2xl font-bold tracking-tight text-[#1d1d1f]">{{ formatTime12h(flight.departureTime) }}</p>
                     <p class="mt-1 text-[13px] font-medium text-[#6e6e73]">{{ flight.origin }}</p>
                   </div>
-                  <div class="flex flex-1 flex-col items-center px-4">
+                  <div class="flex flex-1 flex-col items-center px-3">
                     <div class="mb-2 rounded-full border border-black/5 bg-[#f5f5f7] px-3 py-1 text-[11px] font-bold tracking-[0.15em] text-[#6e6e73] transition-all group-hover:bg-white group-hover:shadow-sm">{{ flight.flightNumber }}</div>
                     <div class="relative w-full">
                       <div class="h-[2px] w-full border-t-2 border-dashed border-[#e63946]/30 transition-colors duration-500 group-hover:border-[#e63946]/60"></div>
@@ -247,16 +299,16 @@ function proceedToBooking() {
                       </div>
                       <div class="absolute left-0 top-1/2 h-2 w-2 -translate-x-1 -translate-y-1/2 rounded-full border-2 border-white bg-[#e63946]/50 shadow-sm transition-colors duration-500 group-hover:bg-[#e63946]"></div>
                     </div>
-                    <p class="mt-2 text-[11px] font-semibold tracking-wide text-[#a1a1a6]">Direct</p>
+                    <p class="mt-1.5 text-[11px] font-semibold tracking-wide text-[#a1a1a6]">Direct</p>
                   </div>
-                  <div class="w-[85px] text-right">
-                    <p class="text-3xl font-bold tracking-tight text-[#1d1d1f]">{{ new Date(flight.arrivalTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) }}</p>
+                  <div class="w-[100px] text-right">
+                    <p class="text-2xl font-bold tracking-tight text-[#1d1d1f]">{{ formatTime12h(flight.arrivalTime) }}</p>
                     <p class="mt-1 text-[13px] font-medium text-[#6e6e73]">{{ flight.destination }}</p>
                   </div>
                 </div>
                 <div class="hidden h-16 w-px bg-gradient-to-b from-transparent via-black/10 to-transparent md:block"></div>
                 <!-- Price -->
-                <div class="flex items-center justify-between border-t border-black/5 pt-5 md:w-auto md:flex-col md:items-end md:justify-center md:border-none md:pt-0">
+                <div class="flex items-center justify-between border-t border-black/5 pt-4 md:w-auto md:flex-col md:items-end md:justify-center md:border-none md:pt-0">
                   <div class="flex items-baseline gap-1">
                     <span class="text-sm font-semibold text-[#6e6e73]">$</span>
                     <span class="text-3xl font-bold tracking-tight text-[#1d1d1f] transition-colors group-hover:text-[#e63946]">{{ flight.price }}</span>
@@ -266,6 +318,12 @@ function proceedToBooking() {
                     <span class="text-[11px] font-bold tracking-wide text-emerald-700">{{ flight.availableSeats }} seats left</span>
                   </div>
                 </div>
+              </div>
+              <!-- Details strip -->
+              <div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-black/5 pt-4 text-[12px] text-[#6e6e73]">
+                <span>📅 <span class="font-semibold text-[#1d1d1f]">{{ flight.departureDate }}</span> → <span class="font-semibold text-[#1d1d1f]">{{ flight.arrivalDate }}</span><span v-if="flight.isNextDay" class="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">+1 day</span></span>
+                <span>⏱ {{ formatDuration(flight.duration) }}</span>
+                <span class="rounded-full bg-[#f5f5f7] px-2.5 py-0.5 font-semibold">✈ Direct</span>
               </div>
             </div>
             <!-- No seat selector here — seat map is loaded via FlightSearch composite service in Step 2 -->
@@ -293,13 +351,13 @@ function proceedToBooking() {
             @click="selectReturn(flight)"
           >
             <div class="p-6 md:p-8">
-              <div class="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+              <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div class="flex flex-1 items-center justify-between md:max-w-[65%]">
-                  <div class="w-[85px] text-left">
-                    <p class="text-3xl font-bold tracking-tight text-[#1d1d1f]">{{ new Date(flight.departureTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) }}</p>
+                  <div class="w-[100px] text-left">
+                    <p class="text-2xl font-bold tracking-tight text-[#1d1d1f]">{{ formatTime12h(flight.departureTime) }}</p>
                     <p class="mt-1 text-[13px] font-medium text-[#6e6e73]">{{ flight.origin }}</p>
                   </div>
-                  <div class="flex flex-1 flex-col items-center px-4">
+                  <div class="flex flex-1 flex-col items-center px-3">
                     <div class="mb-2 rounded-full border border-black/5 bg-[#f5f5f7] px-3 py-1 text-[11px] font-bold tracking-[0.15em] text-[#6e6e73] transition-all group-hover:bg-white group-hover:shadow-sm">{{ flight.flightNumber }}</div>
                     <div class="relative w-full">
                       <div class="h-[2px] w-full border-t-2 border-dashed border-purple-400/40 transition-colors duration-500 group-hover:border-purple-400/70"></div>
@@ -308,15 +366,15 @@ function proceedToBooking() {
                       </div>
                       <div class="absolute left-0 top-1/2 h-2 w-2 -translate-x-1 -translate-y-1/2 rounded-full border-2 border-white bg-purple-400/50 shadow-sm transition-colors duration-500 group-hover:bg-purple-500"></div>
                     </div>
-                    <p class="mt-2 text-[11px] font-semibold tracking-wide text-[#a1a1a6]">Direct</p>
+                    <p class="mt-1.5 text-[11px] font-semibold tracking-wide text-[#a1a1a6]">Direct</p>
                   </div>
-                  <div class="w-[85px] text-right">
-                    <p class="text-3xl font-bold tracking-tight text-[#1d1d1f]">{{ new Date(flight.arrivalTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) }}</p>
+                  <div class="w-[100px] text-right">
+                    <p class="text-2xl font-bold tracking-tight text-[#1d1d1f]">{{ formatTime12h(flight.arrivalTime) }}</p>
                     <p class="mt-1 text-[13px] font-medium text-[#6e6e73]">{{ flight.destination }}</p>
                   </div>
                 </div>
                 <div class="hidden h-16 w-px bg-gradient-to-b from-transparent via-black/10 to-transparent md:block"></div>
-                <div class="flex items-center justify-between border-t border-black/5 pt-5 md:w-auto md:flex-col md:items-end md:justify-center md:border-none md:pt-0">
+                <div class="flex items-center justify-between border-t border-black/5 pt-4 md:w-auto md:flex-col md:items-end md:justify-center md:border-none md:pt-0">
                   <div class="flex items-baseline gap-1">
                     <span class="text-sm font-semibold text-[#6e6e73]">$</span>
                     <span class="text-3xl font-bold tracking-tight text-[#1d1d1f] transition-colors group-hover:text-purple-600">{{ flight.price }}</span>
@@ -326,6 +384,12 @@ function proceedToBooking() {
                     <span class="text-[11px] font-bold tracking-wide text-emerald-700">{{ flight.availableSeats }} seats left</span>
                   </div>
                 </div>
+              </div>
+              <!-- Details strip -->
+              <div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-black/5 pt-4 text-[12px] text-[#6e6e73]">
+                <span>📅 <span class="font-semibold text-[#1d1d1f]">{{ flight.departureDate }}</span> → <span class="font-semibold text-[#1d1d1f]">{{ flight.arrivalDate }}</span><span v-if="flight.isNextDay" class="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">+1 day</span></span>
+                <span>⏱ {{ formatDuration(flight.duration) }}</span>
+                <span class="rounded-full bg-purple-50 px-2.5 py-0.5 font-semibold text-purple-600">✈ Direct</span>
               </div>
             </div>
             <!-- No seat selector here — seat map is loaded via FlightSearch composite service in Step 2 -->

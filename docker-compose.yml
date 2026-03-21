@@ -222,6 +222,24 @@ services:
     networks:
       - app-network
 
+  # ========== FLIGHT SEARCH COMPOSITE SERVICE ==========
+  flight-search-composite:
+    build: ./flight-search-composite
+    container_name: flight-search-app
+    restart: unless-stopped
+    ports:
+      - "5011:5011"
+    environment:
+      - FLIGHT_SERVICE_URL=http://flight-service:3000
+      - SEATS_SERVICE_URL=http://seats-service:5003
+      - PORT=5011
+      - FLASK_ENV=development
+    depends_on:
+      - flight-service
+      - seats-service
+    networks:
+      - app-network
+
   # ========== COUPON MICROSERVICE ==========
   coupon-service:
     build: ./coupon-microservice
