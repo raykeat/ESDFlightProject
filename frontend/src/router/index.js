@@ -9,6 +9,7 @@ import MyBookings from '../pages/MyBookings.vue'
 import RebookingOffer from '../pages/RebookingOffer.vue'
 import StaffAuth    from '../pages/StaffAuth.vue'
 import StaffFlights from '../pages/StaffFlights.vue'
+import FlightDetail from '../pages/FlightDetail.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -47,6 +48,11 @@ const router = createRouter({
       path: '/my-bookings',
       name: 'my-bookings',
       component: MyBookings
+    },
+    {
+      path: '/flight-detail',
+      name: 'flight-detail',
+      component: FlightDetail
     },
     {
       path: '/rebooking-offer',
