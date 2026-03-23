@@ -81,25 +81,12 @@ async function handleUpdateProfile() {
   }
 }
 
-function goBackHome() {
-  router.push('/')
-}
 </script>
 
 <template>
   <main class="min-h-screen px-6 py-8 md:px-10 lg:px-16">
     <section class="mx-auto max-w-[980px]">
-      <header class="animate__animated animate__fadeInDown flex items-center justify-between rounded-[28px] border border-black/5 bg-white/80 px-5 py-3 backdrop-blur-xl md:px-7">
-        <RouterLink to="/" class="text-sm font-semibold tracking-[0.18em] text-[#1d1d1f]">BLAZE AIR</RouterLink>
-        <button
-          class="rounded-full border border-black/10 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73] transition hover:border-[#e63946]/45 hover:text-[#1d1d1f]"
-          @click="goBackHome"
-        >
-          Back To Home
-        </button>
-      </header>
-
-      <section class="animate__animated animate__fadeInUp mt-10 rounded-[34px] border border-black/5 bg-white/90 p-6 shadow-[0_22px_52px_rgba(15,23,42,0.08)] backdrop-blur-2xl md:p-8">
+      <section class="animate__animated animate__fadeInUp mt-2 rounded-[34px] border border-black/5 bg-white/90 p-6 shadow-[0_22px_52px_rgba(15,23,42,0.08)] backdrop-blur-2xl md:p-8">
         <h1 class="text-4xl font-semibold tracking-[-0.03em] text-[#1d1d1f] md:text-5xl">View profile</h1>
         <p class="mt-3 max-w-2xl text-sm text-[#6e6e73] md:text-base">Update your passenger account details. Changes will reflect in your header profile immediately.</p>
 

@@ -167,244 +167,126 @@ function continueToBooking() {
 
 <template>
   <main class="relative min-h-screen overflow-hidden" style="background: linear-gradient(135deg, #f8f8fa 0%, #f0f0f5 100%);">
-
-    <!-- Ambient blobs -->
     <div class="pointer-events-none absolute inset-0 z-0">
-      <div class="absolute -top-40 -right-40 h-[600px] w-[600px] rounded-full bg-[#e63946]/8 blur-[120px]"></div>
-      <div class="absolute -bottom-40 -left-40 h-[500px] w-[500px] rounded-full bg-indigo-400/6 blur-[100px]"></div>
+      <div class="absolute -top-40 -right-40 h-[500px] w-[500px] rounded-full bg-[#e63946]/7 blur-[110px]"></div>
+      <div class="absolute -bottom-40 -left-40 h-[420px] w-[420px] rounded-full bg-indigo-400/5 blur-[95px]"></div>
     </div>
 
-    <div class="relative z-10 mx-auto max-w-[1440px] px-6 pt-8 pb-20 md:px-10 xl:px-16">
-
-      <!-- Back button -->
-      <button
-        @click="goBack"
-        class="mb-8 inline-flex items-center gap-2 rounded-full border border-black/8 bg-white/80 px-5 py-2.5 text-sm font-semibold text-[#1d1d1f] shadow-sm backdrop-blur-xl transition-all hover:bg-white hover:shadow-md hover:-translate-x-0.5 active:scale-95"
-      >
-        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-          <path stroke-linecap="round" d="M15 19l-7-7 7-7"/>
-        </svg>
-        Back to Results
-      </button>
-
-      <!-- ── Loading ── -->
-      <div v-if="loading" class="flex flex-col items-center justify-center py-48">
-        <div class="relative flex h-16 w-16 items-center justify-center">
+    <div class="relative z-10 mx-auto h-[calc(100vh-56px)] max-w-[1520px] px-5 py-3 md:px-8 xl:px-12">
+      <div v-if="loading" class="flex h-full flex-col items-center justify-center">
+        <div class="relative flex h-14 w-14 items-center justify-center">
           <div class="absolute h-full w-full animate-ping rounded-full border-[3px] border-[#e63946]/20"></div>
-          <div class="h-8 w-8 animate-spin rounded-full border-[3px] border-[#e63946] border-t-transparent"></div>
+          <div class="h-7 w-7 animate-spin rounded-full border-[3px] border-[#e63946] border-t-transparent"></div>
         </div>
-        <p class="mt-5 text-xs font-bold uppercase tracking-[0.2em] text-[#6e6e73] animate-pulse">Loading flight…</p>
+        <p class="mt-4 text-xs font-bold uppercase tracking-[0.2em] text-[#6e6e73]">Loading flight…</p>
       </div>
 
-      <!-- ── Error ── -->
-      <div v-else-if="error" class="flex flex-col items-center justify-center py-48 text-center">
-        <p class="text-5xl mb-4">✈️</p>
+      <div v-else-if="error" class="flex h-full flex-col items-center justify-center text-center">
         <p class="text-base font-semibold text-[#1d1d1f]">{{ error }}</p>
-        <button @click="goBack" class="mt-6 rounded-full bg-[#e63946] px-8 py-3 text-sm font-bold text-white hover:bg-[#d62839] transition-all">Go Back</button>
+        <button @click="goBack" class="mt-5 rounded-full bg-[#e63946] px-7 py-2.5 text-sm font-bold text-white transition hover:bg-[#d62839]">Go Back</button>
       </div>
 
-      <!-- ── Main two-column layout ── -->
-      <div v-else class="flex flex-col gap-6 lg:flex-row lg:items-start">
+      <div v-else class="grid h-full grid-cols-1 gap-4 lg:grid-cols-[420px_1fr] xl:grid-cols-[460px_1fr]">
+        <aside class="rounded-[24px] border border-white/80 bg-white/85 p-5 shadow-[0_18px_40px_rgba(0,0,0,0.07)] backdrop-blur-2xl">
+          <div class="mb-4 flex items-center justify-between">
+            <button
+              @click="goBack"
+              class="inline-flex items-center gap-1.5 rounded-full border border-black/8 bg-white px-3 py-1.5 text-[11px] font-semibold text-[#1d1d1f] transition hover:bg-[#f8f8fa]"
+            >
+              <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                <path stroke-linecap="round" d="M15 19l-7-7 7-7"/>
+              </svg>
+              Back to Results
+            </button>
+            <span
+              class="rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em]"
+              :class="isReturn ? 'bg-purple-50 text-purple-600' : 'bg-red-50 text-[#e63946]'"
+            >
+              {{ isReturn ? 'Return Flight' : 'Outbound Flight' }}
+            </span>
+          </div>
 
-        <!-- ════════════════════════════════
-             LEFT PANEL — Flight Details
-        ════════════════════════════════ -->
-        <aside class="w-full lg:w-[400px] xl:w-[440px] lg:flex-shrink-0">
-          <div class="sticky top-8 overflow-hidden rounded-[28px] border border-white/80 bg-white/80 shadow-[0_24px_60px_rgba(0,0,0,0.07)] backdrop-blur-2xl">
+          <div class="mb-4 flex items-center justify-between rounded-2xl bg-[#f5f5f7] px-3.5 py-3">
+            <span class="text-sm font-bold text-[#1d1d1f]">{{ flight.FlightNumber }}</span>
+            <span class="text-sm font-semibold text-[#6e6e73]">${{ parseFloat(flight.Price ?? flight.price).toFixed(2) }}</span>
+          </div>
 
-            <!-- Coloured top strip -->
-            <div class="h-1.5 w-full" :class="isReturn ? 'bg-gradient-to-r from-purple-500 to-purple-400' : 'bg-gradient-to-r from-[#e63946] to-[#f43f5e]'"></div>
-
-            <div class="p-8">
-
-              <!-- Label + badge row -->
-              <div class="mb-6 flex items-center justify-between">
-                <span
-                  class="rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.15em]"
-                  :class="isReturn ? 'bg-purple-50 text-purple-600' : 'bg-red-50 text-[#e63946]'"
-                >
-                  {{ isReturn ? '↩ Return Flight' : '↗ Outbound Flight' }}
-                </span>
-                <div class="flex items-center gap-1.5 rounded-full border border-black/8 bg-[#f5f5f7] px-3 py-1.5">
-                  <svg class="h-3.5 w-3.5 text-[#e63946]" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
-                  </svg>
-                  <span class="text-xs font-bold tracking-wide text-[#1d1d1f]">{{ flight.FlightNumber }}</span>
-                </div>
-              </div>
-
-              <!-- Route display — fixed so long names don't overflow -->
-              <div class="mb-6 flex items-center gap-2">
-                <!-- Origin -->
-                <div class="min-w-0 flex-1">
-                  <p class="truncate text-[22px] font-bold leading-tight tracking-tight text-[#1d1d1f]">{{ flight.Origin }}</p>
-                </div>
-                <!-- Arrow -->
-                <div class="flex flex-none flex-col items-center gap-1 px-2">
-                  <div class="flex items-center gap-0.5">
-                    <div class="h-px w-8 bg-gradient-to-r from-[#e63946]/30 to-[#e63946]/60"></div>
-                    <svg class="h-3.5 w-3.5 text-[#e63946]" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
-                    </svg>
-                  </div>
-                  <span class="text-[9px] font-semibold uppercase tracking-widest text-[#a1a1a6]">Direct</span>
-                </div>
-                <!-- Destination -->
-                <div class="min-w-0 flex-1 text-right">
-                  <p class="truncate text-[22px] font-bold leading-tight tracking-tight text-[#1d1d1f]">{{ flight.Destination }}</p>
-                </div>
-              </div>
-
-              <!-- Details grid -->
-              <div class="mb-6 grid grid-cols-2 gap-3">
-                <div class="rounded-2xl bg-[#f5f5f7] p-4">
-                  <p class="mb-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[#a1a1a6]">Departure</p>
-                  <p class="text-sm font-bold text-[#1d1d1f]">{{ formatTime(flight.DepartureTime) }}</p>
-                  <p class="mt-0.5 text-[11px] text-[#6e6e73]">{{ formatDate(flight.Date) }}</p>
-                </div>
-                <div class="rounded-2xl bg-[#f5f5f7] p-4">
-                  <p class="mb-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[#a1a1a6]">Arrival</p>
-                  <div class="flex items-center gap-1.5">
-                    <p class="text-sm font-bold text-[#1d1d1f]">{{ formatTime(flight.ArrivalTime) }}</p>
-                    <span v-if="isNextDay" class="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">+1</span>
-                  </div>
-                  <p class="mt-0.5 text-[11px] text-[#6e6e73]">
-                    {{ isNextDay ? arrivalDate : formatDate(flight.Date) }}
-                  </p>
-                </div>
-                <div class="rounded-2xl bg-[#f5f5f7] p-4">
-                  <p class="mb-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[#a1a1a6]">Duration</p>
-                  <p class="text-sm font-semibold text-[#1d1d1f]">{{ formatDuration(flight.FlightDuration) }}</p>
-                </div>
-                <div class="rounded-2xl bg-[#f5f5f7] p-4">
-                  <p class="mb-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[#a1a1a6]">Status</p>
-                  <span class="inline-flex items-center gap-1 text-sm font-semibold text-emerald-600">
-                    <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>{{ flight.Status }}
-                  </span>
-                </div>
-                <div class="col-span-2 rounded-2xl bg-[#f5f5f7] p-4">
-                  <p class="mb-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[#a1a1a6]">Base Fare</p>
-                  <p class="text-sm font-bold text-[#1d1d1f]">${{ parseFloat(flight.Price ?? flight.price).toFixed(2) }}</p>
-                </div>
-              </div>
-
-              <!-- Amenities -->
-              <div class="mb-6 rounded-2xl bg-[#f5f5f7] p-4 text-[#1d1d1f]">
-                <p class="mb-3 text-[10px] font-bold uppercase tracking-[0.12em] text-[#a1a1a6]">Included Amenities</p>
-                <div class="grid grid-cols-2 gap-3 text-xs font-semibold text-[#6e6e73]">
-                  <div class="rounded-xl bg-white/70 px-3 py-2">
-                    <p class="text-[10px] uppercase tracking-[0.1em] text-[#a1a1a6]">Baggage</p>
-                    <p class="mt-1 text-[#1d1d1f]">{{ flight.Baggage || 'Not specified' }}</p>
-                  </div>
-                  <div class="rounded-xl bg-white/70 px-3 py-2">
-                    <p class="text-[10px] uppercase tracking-[0.1em] text-[#a1a1a6]">Meals</p>
-                    <p class="mt-1 text-[#1d1d1f]">{{ flight.Meals || 'Not specified' }}</p>
-                  </div>
-                  <div class="rounded-xl bg-white/70 px-3 py-2">
-                    <p class="text-[10px] uppercase tracking-[0.1em] text-[#a1a1a6]">Beverages</p>
-                    <p class="mt-1 text-[#1d1d1f]">{{ flight.Beverages || 'Not specified' }}</p>
-                  </div>
-                  <div class="rounded-xl bg-white/70 px-3 py-2">
-                    <p class="text-[10px] uppercase tracking-[0.1em] text-[#a1a1a6]">Wi-Fi</p>
-                    <p class="mt-1" :class="flight.Wifi ? 'text-emerald-600' : 'text-[#6e6e73]'">
-                      {{ flight.Wifi ? 'Included' : 'Not included' }}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Selected seat pill -->
-              <transition
-                enter-active-class="transition-all duration-300 ease-out"
-                enter-from-class="opacity-0 scale-95"
-                enter-to-class="opacity-100 scale-100"
-                leave-active-class="transition-all duration-200"
-                leave-from-class="opacity-100 scale-100"
-                leave-to-class="opacity-0 scale-95"
-              >
-                <div v-if="selectedSeats.length > 0" class="mb-5 rounded-2xl border border-[#e63946]/15 bg-gradient-to-br from-[#e63946]/6 to-rose-50 p-5">
-                  <div class="flex items-center justify-between">
-                    <div>
-                      <p class="text-[10px] font-bold uppercase tracking-[0.15em] text-[#e63946]">Selected Seats ({{ selectedSeats.length }}/{{ passengers }})</p>
-                      <p class="mt-1 text-2xl font-bold text-[#1d1d1f]">{{ selectedSeats.join(', ') }}</p>
-                    </div>
-                    <div class="text-right">
-                      <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#6e6e73]">Total</p>
-                      <p class="mt-1 text-2xl font-bold text-[#e63946]">${{ totalPrice }}</p>
-                    </div>
-                  </div>
-                </div>
-              </transition>
-
-              <!-- CTA button -->
-              <button
-                :disabled="selectedSeats.length !== passengers"
-                @click="continueToBooking"
-                class="group relative w-full overflow-hidden rounded-[18px] py-4 text-sm font-bold uppercase tracking-[0.12em] text-white transition-all duration-300 active:scale-[0.98]"
-                :class="selectedSeats.length === passengers
-                  ? 'bg-gradient-to-r from-[#e63946] to-[#f43f5e] shadow-[0_8px_24px_rgba(230,57,70,0.28)] hover:shadow-[0_12px_32px_rgba(230,57,70,0.38)] hover:-translate-y-0.5'
-                  : 'bg-[#d1d1d6] cursor-not-allowed opacity-70'"
-              >
-                <div v-if="selectedSeats.length === passengers" class="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/15 to-transparent transition-transform duration-700 group-hover:translate-x-full"></div>
-                <span class="relative z-10 flex items-center justify-center gap-2">
-                  <span v-if="selectedSeats.length !== passengers">Select {{ passengers }} seat(s) to continue</span>
-                  <template v-else>
-                    Continue to Booking · ${{ totalPrice }}
-                    <svg class="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M12 5l7 7-7 7"/>
-                    </svg>
-                  </template>
-                </span>
-              </button>
-
+          <div class="mb-4 rounded-2xl bg-[#f5f5f7] p-3.5">
+            <div class="flex items-center justify-between gap-2">
+              <p class="truncate text-2xl font-bold text-[#1d1d1f]">{{ flight.Origin }}</p>
+              <span class="text-xs font-semibold uppercase tracking-[0.14em] text-[#a1a1a6]">Direct</span>
+              <p class="truncate text-right text-2xl font-bold text-[#1d1d1f]">{{ flight.Destination }}</p>
             </div>
           </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div class="rounded-xl bg-[#f5f5f7] p-3">
+              <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#a1a1a6]">Departure</p>
+              <p class="mt-1 text-base font-bold text-[#1d1d1f]">{{ formatTime(flight.DepartureTime) }}</p>
+              <p class="text-[11px] text-[#6e6e73]">{{ formatDate(flight.Date) }}</p>
+            </div>
+            <div class="rounded-xl bg-[#f5f5f7] p-3">
+              <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#a1a1a6]">Arrival</p>
+              <p class="mt-1 text-base font-bold text-[#1d1d1f]">{{ formatTime(flight.ArrivalTime) }}</p>
+              <p class="text-[11px] text-[#6e6e73]">{{ isNextDay ? arrivalDate : formatDate(flight.Date) }}</p>
+            </div>
+            <div class="rounded-xl bg-[#f5f5f7] p-3">
+              <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#a1a1a6]">Duration</p>
+              <p class="mt-1 text-base font-semibold text-[#1d1d1f]">{{ formatDuration(flight.FlightDuration) }}</p>
+            </div>
+            <div class="rounded-xl bg-[#f5f5f7] p-3">
+              <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#a1a1a6]">Status</p>
+              <p class="mt-1 text-base font-semibold text-emerald-600">{{ flight.Status }}</p>
+            </div>
+          </div>
+
+          <div class="mt-4 rounded-xl border border-black/6 bg-white px-3.5 py-2.5">
+            <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#a1a1a6]">Amenities</p>
+            <p class="mt-1 text-sm font-semibold text-[#1d1d1f]">
+              {{ flight.Baggage || 'Baggage N/A' }} · {{ flight.Meals || 'Meals N/A' }} · {{ flight.Beverages || 'Beverages N/A' }} · {{ flight.Wifi ? 'Wi-Fi Included' : 'No Wi-Fi' }}
+            </p>
+          </div>
+
+          <div class="mt-4 rounded-2xl border border-[#e63946]/15 bg-gradient-to-br from-[#e63946]/6 to-rose-50 p-3.5">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#e63946]">Selected Seats</p>
+                <p class="mt-1 text-lg font-bold text-[#1d1d1f]">{{ selectedSeats.length ? selectedSeats.join(', ') : 'None yet' }}</p>
+              </div>
+              <div class="text-right">
+                <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#6e6e73]">Total</p>
+                <p class="mt-1 text-2xl font-bold text-[#e63946]">${{ totalPrice }}</p>
+              </div>
+            </div>
+          </div>
+
+          <button
+            :disabled="selectedSeats.length !== passengers"
+            @click="continueToBooking"
+            class="mt-4 w-full rounded-[14px] py-3 text-sm font-bold uppercase tracking-[0.12em] text-white transition-all"
+            :class="selectedSeats.length === passengers
+              ? 'bg-gradient-to-r from-[#e63946] to-[#f43f5e] shadow-[0_8px_24px_rgba(230,57,70,0.28)] hover:-translate-y-0.5'
+              : 'bg-[#d1d1d6] cursor-not-allowed opacity-70'"
+          >
+            <span v-if="selectedSeats.length !== passengers">Select {{ passengers }} seat(s) to continue</span>
+            <span v-else>Continue to Booking · ${{ totalPrice }}</span>
+          </button>
         </aside>
 
-        <!-- ════════════════════════════════
-             RIGHT PANEL — Seat Map
-        ════════════════════════════════ -->
-        <section class="min-w-0 flex-1">
-          <div class="rounded-[28px] border border-white/80 bg-white/70 shadow-[0_24px_60px_rgba(0,0,0,0.07)] backdrop-blur-2xl">
-
-            <!-- Header -->
-            <div class="border-b border-black/5 px-8 py-6">
-              <div class="flex items-center justify-between">
-                <div>
-                  <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-[#a1a1a6]">Cabin Map</p>
-                  <h2 class="mt-0.5 text-2xl font-semibold tracking-tight text-[#1d1d1f]">Choose Your Seat</h2>
-                </div>
-                <!-- Inline legend -->
-                <div class="hidden sm:flex items-center gap-5">
-                  <div class="flex items-center gap-1.5">
-                    <div class="h-3 w-3 rounded bg-white border border-black/10 shadow-sm"></div>
-                    <span class="text-[11px] font-semibold text-[#6e6e73]">Available</span>
-                  </div>
-                  <div class="flex items-center gap-1.5">
-                    <div class="h-3 w-3 rounded bg-gradient-to-br from-[#f43f5e] to-[#e63946] shadow-sm"></div>
-                    <span class="text-[11px] font-semibold text-[#1d1d1f]">Selected</span>
-                  </div>
-                  <div class="flex items-center gap-1.5">
-                    <div class="h-3 w-3 rounded bg-[#e5e5ea]"></div>
-                    <span class="text-[11px] font-semibold text-[#a1a1a6]">Occupied</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Seat selector -->
-            <div class="p-6 md:p-10">
-              <SeatSelector
-                :flightId="flightID"
-                :seatsData="seats"
-                :maxSeats="passengers"
-                @seatSelected="onSeatSelected"
-              />
-            </div>
-
+        <section class="rounded-[24px] border border-white/80 bg-white/80 p-5 shadow-[0_18px_40px_rgba(0,0,0,0.07)] backdrop-blur-2xl">
+          <div class="mb-3">
+            <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-[#a1a1a6]">Cabin Map</p>
+            <h2 class="text-2xl font-semibold tracking-tight text-[#1d1d1f]">Choose Your Seat</h2>
+          </div>
+          <div class="h-[calc(100%-52px)]">
+            <SeatSelector
+              :flightId="flightID"
+              :seatsData="seats"
+              :maxSeats="passengers"
+              @seatSelected="onSeatSelected"
+            />
           </div>
         </section>
-
       </div>
     </div>
   </main>

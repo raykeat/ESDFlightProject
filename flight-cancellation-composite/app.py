@@ -11,7 +11,7 @@ Orchestrates:
 5. Return success to Airline Staff UI immediately
 
 Endpoints:
-    POST /cancel  — Staff UI triggers flight cancellation
+    POST /cancellation  — Staff UI triggers flight cancellation
     GET  /health  — Health check
 """
 
@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 # ==========================================
 FLIGHT_SERVICE_URL = os.environ.get("FLIGHT_SERVICE_URL", "http://flight-service:3000")
 SEATS_SERVICE_URL  = os.environ.get("SEATS_SERVICE_URL",  "http://seats-service:5003")
+RECORD_SERVICE_URL = os.environ.get("RECORD_SERVICE_URL", "http://record-service:3000")
 KAFKA_BOOTSTRAP    = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:29092")
 KAFKA_TOPIC        = "flight.cancelled"
 
@@ -102,12 +103,12 @@ def health():
 
 
 # ==========================================
-# POST /cancel
+# POST /cancellation
 # Airline Staff UI triggers flight cancellation
 #
 # Required body:
-#   flightID           (int)  — flight to cancel
-#   cancellationReason (str)  — reason for cancellation
+#   FlightID             (int)  — flight to cancel
+#   CancellationReason   (str)  — reason for cancellation
 #
 # Steps:
 #   1. GET flight details from Flight Service
@@ -116,13 +117,24 @@ def health():
 #   4. Publish flight.cancelled event to Kafka
 #   5. Return success to UI
 # ==========================================
+@app.post("/cancellation")
 @app.post("/cancel")
 def cancel_flight():
     log_event("cancel_flight_request")
 
     # ── Validate request ─────────────────────────────────────
     data  = request.get_json(silent=True)
-    error = validate_fields(data, ["flightID", "cancellationReason"])
+    normalized = {
+        "FlightID": data.get("FlightID") if data else None,
+        "CancellationReason": data.get("CancellationReason") if data else None,
+    }
+
+    if normalized["FlightID"] is None and data:
+        normalized["FlightID"] = data.get("flightID")
+    if normalized["CancellationReason"] is None and data:
+        normalized["CancellationReason"] = data.get("cancellationReason")
+
+    error = validate_fields(normalized, ["FlightID", "CancellationReason"])
     if error:
         return jsonify({
             "error":   "Bad Request",
@@ -130,8 +142,8 @@ def cancel_flight():
             "message": error
         }), 400
 
-    flight_id           = data["flightID"]
-    cancellation_reason = data["cancellationReason"]
+    flight_id           = normalized["FlightID"]
+    cancellation_reason = normalized["CancellationReason"]
 
     if not isinstance(flight_id, int) or flight_id <= 0:
         return jsonify({
@@ -142,10 +154,14 @@ def cancel_flight():
 
     log_event("cancel_flight_started", flightID=flight_id, reason=cancellation_reason)
 
-    # ── Step 1: GET flight details (needed for Kafka payload) ─
+    # ── Step 1: PUT flight status to cancelled (returns flight details) ─
     try:
-        flight_res = requests.get(
-            f"{FLIGHT_SERVICE_URL}/flight/{flight_id}",
+        flight_res = requests.put(
+            f"{FLIGHT_SERVICE_URL}/flights/{flight_id}",
+            json={
+                "Status": "Cancelled",
+                "CancellationReason": cancellation_reason,
+            },
             timeout=10
         )
     except requests.exceptions.RequestException as e:
@@ -172,71 +188,56 @@ def cancel_flight():
 
     flight = flight_res.json()
 
-    # Guard: already cancelled
-    if flight.get("Status", "").lower() == "cancelled":
-        return jsonify({
-            "error":   "Conflict",
-            "code":    "FLIGHT_ALREADY_CANCELLED",
-            "message": f"Flight {flight_id} is already cancelled"
-        }), 409
-
-    # ── Step 2: PUT flight status to "Cancelled" ──────────────
+    # ── Step 2a: GET count of affected passengers (confirmed bookings) ──
+    passengers_affected = 0
     try:
-        update_res = requests.put(
-            f"{FLIGHT_SERVICE_URL}/flight/{flight_id}/status",
-            json={"status": "cancelled"},
+        records_res = requests.get(
+            f"{RECORD_SERVICE_URL}/records",
+            params={"FlightID": flight_id, "bookingstatus": "Confirmed"},
             timeout=10
         )
+        if records_res.ok:
+            records = records_res.json()
+            passengers_affected = len(records) if isinstance(records, list) else 0
+        else:
+            logger.warning("Record Service returned %d for flightID=%d", records_res.status_code, flight_id)
+            passengers_affected = 0
     except requests.exceptions.RequestException as e:
-        log_event("flight_status_update_failed", flightID=flight_id, error=str(e))
-        return jsonify({
-            "error":   "Service Unavailable",
-            "code":    "FLIGHT_SERVICE_ERROR",
-            "message": "Could not update flight status"
-        }), 503
+        logger.warning("Could not count affected passengers for flightID=%d: %s", flight_id, str(e))
+        passengers_affected = 0
 
-    if not update_res.ok:
-        log_event("flight_status_update_failed", flightID=flight_id, status=update_res.status_code)
-        return jsonify({
-            "error":   "Service Error",
-            "code":    "FLIGHT_UPDATE_FAILED",
-            "message": f"Failed to update flight status: {update_res.text}"
-        }), 502
-
-    log_event("flight_status_updated", flightID=flight_id, status="cancelled")
-
-    # ── Step 3: PUT bulk release all seats on the flight ──────
-    seats_released = 0
-    seats_failed   = 0
+    # ── Step 2b: PUT bulk cancel all seats on the flight ──────
 
     try:
         release_res = requests.put(
-            f"{SEATS_SERVICE_URL}/seats/release/{flight_id}",
+            f"{SEATS_SERVICE_URL}/seats/cancel",
+            params={"FlightID": flight_id},
             timeout=10
         )
-        if release_res.ok:
-            seats_released = release_res.json().get("seatsReleased", 0)
-            log_event("seats_bulk_released", flightID=flight_id, seatsReleased=seats_released)
-        else:
-            seats_failed = 1
-            logger.warning("Seat Service bulk release failed for flight %d — status %d",
-                           flight_id, release_res.status_code)
+        if not release_res.ok:
+            return jsonify({
+                "error": "Service Error",
+                "code": "SEAT_UPDATE_FAILED",
+                "message": f"Failed to cancel seats: {release_res.text}"
+            }), 502
+        seats_result = release_res.json() if release_res.content else {}
+        seats_cancelled = seats_result.get("SeatsCancelled", 0)
     except requests.exceptions.RequestException as e:
-        # Non-fatal: flight is already cancelled, log and continue
-        seats_failed = 1
-        logger.warning("Seat Service unreachable for flight %d: %s", flight_id, str(e))
+        log_event("seat_service_unreachable", flightID=flight_id, error=str(e))
+        return jsonify({
+            "error": "Service Unavailable",
+            "code": "SEAT_SERVICE_ERROR",
+            "message": "Could not cancel seats for the flight"
+        }), 503
 
-    # ── Step 4: Publish flight.cancelled to Kafka ─────────────
-    # Include departureTime so Rebooking Composite can search
-    # for alternative flights within ±1 day of original departure
+    # ── Step 3: Publish flight.cancelled to Kafka ─────────────
     kafka_payload = {
-        "flightID":           flight_id,
-        "flightNumber":       flight.get("FlightNumber"),
-        "origin":             flight.get("Origin"),
-        "destination":        flight.get("Destination"),
-        "date":               flight.get("Date"),
-        "departureTime":      flight.get("DepartureTime"),
-        "cancellationReason": cancellation_reason,
+        "FlightID":           flight_id,
+        "Origin":             flight.get("Origin"),
+        "Destination":        flight.get("Destination"),
+        "Date":               flight.get("FlightDate") or flight.get("Date"),
+        "DepartureTime":      flight.get("DepartureTime"),
+        "CancellationReason": cancellation_reason,
     }
 
     kafka_published = False
@@ -244,7 +245,7 @@ def cancel_flight():
         try:
             future = producer.send(
                 KAFKA_TOPIC,
-                key=flight_id,  # flightID as message key — ensures partition ordering per flight
+                key=str(flight_id),
                 value=kafka_payload,
             )
             producer.flush()
@@ -260,19 +261,16 @@ def cancel_flight():
     else:
         logger.warning("Kafka producer not available — event not published")
 
-    # ── Step 5: Return success to Staff UI ────────────────────
+    # ── Step 4: Return success to Staff UI ────────────────────
     log_event("cancel_flight_completed",
               flightID=flight_id,
-              seatsReleased=seats_released,
               kafkaPublished=kafka_published)
 
     return jsonify({
-        "message":        "Flight successfully cancelled",
-        "flightID":       flight_id,
-        "flightNumber":   flight.get("FlightNumber"),
-        "seatsReleased":  seats_released,
-        "seatsFailed":    seats_failed,
-        "kafkaPublished": kafka_published,
+        "message": f"Flight {flight_id} successfully cancelled.",
+        "SeatsCancelled": seats_cancelled,
+        "seatsReleased": seats_cancelled,
+        "PassengersAffected": passengers_affected
     }), 200
 
 

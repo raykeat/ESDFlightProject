@@ -8,7 +8,7 @@ const router = useRouter()
 const flights         = ref([])
 const loading         = ref(true)
 const error           = ref(null)
-const filterStatus    = ref('All')
+const filterStatus    = ref('Available')
 const searchQuery     = ref('')
 const showCancelModal = ref(false)
 const selectedFlight  = ref(null)
@@ -18,7 +18,7 @@ const cancelError     = ref('')
 const cancelSuccess   = ref(null)
 const staffSession    = ref(null)
 
-const STATUS_FILTERS = ['All', 'Available', 'Unavailable', 'Cancelled']
+const STATUS_FILTERS = ['Available', 'Unavailable', 'Cancelled']
 
 onMounted(async () => {
   const session = sessionStorage.getItem('staffSession')
@@ -31,7 +31,7 @@ async function loadFlights() {
   loading.value = true
   error.value   = null
   try {
-    const res = await axios.get('http://localhost:3003/flight/available')
+    const res = await axios.get('http://localhost:3003/flights')
     flights.value = res.data
   } catch (err) {
     error.value = 'Could not load flights. Please try again.'
@@ -358,16 +358,12 @@ function statusStyle(status) {
           </div>
           <h2 style="font-size:22px; font-weight:700; color:#0f172a; margin:0 0 8px;">Flight Cancelled</h2>
           <p style="font-size:14px; color:#64748b; margin:0 0 24px; line-height:1.6;">
-            <strong style="color:#0f172a;">{{ cancelSuccess.flightNumber }}</strong> has been cancelled. All affected passengers will be notified automatically.
+            <strong style="color:#0f172a;">{{ cancelSuccess.flightNumber }}</strong> All affected passengers will be notified automatically.
           </p>
           <div style="display:flex; gap:10px; justify-content:center; margin-bottom:24px;">
-            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:12px 20px; text-align:center;">
-              <p style="font-size:22px; font-weight:800; color:#0f172a; margin:0; line-height:1;">{{ cancelSuccess.seatsReleased }}</p>
-              <p style="font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#94a3b8; margin:4px 0 0;">Seats Released</p>
-            </div>
-            <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:12px; padding:12px 20px; text-align:center;">
-              <p style="font-size:14px; font-weight:700; color:#16a34a; margin:0 0 2px;">✓ Sent</p>
-              <p style="font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#94a3b8; margin:0;">Kafka Event</p>
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:12px 20px; text-align:center; flex:1;">
+              <p style="font-size:28px; font-weight:800; color:#0f172a; margin:0; line-height:1;">{{ cancelSuccess.PassengersAffected || 0 }}</p>
+              <p style="font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#94a3b8; margin:6px 0 0;">Passengers Affected</p>
             </div>
           </div>
           <button @click="closeCancelModal"

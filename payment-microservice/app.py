@@ -443,12 +443,22 @@ def verify_session(sessionID):
 #          Scenario 3 - Passenger rejects offer
 # ==========================================
 @app.route('/payment/refund', methods=['POST'])
+@app.route('/payments/refund', methods=['POST'])
 @limiter.limit("10 per minute")
 def process_refund():
     try:
         data = request.get_json(silent=True)
 
-        error = validate_fields(data, ['bookingID', 'passengerID', 'amount', 'flightNumber'])
+        booking_id = data.get('bookingID', data.get('BookingID')) if data else None
+        passenger_id = data.get('passengerID', data.get('PassengerID')) if data else None
+
+        error = validate_fields(
+            {
+                'bookingID': booking_id,
+                'passengerID': passenger_id,
+            },
+            ['bookingID', 'passengerID']
+        )
         if error:
             return jsonify({
                 "error":   "Bad Request",
@@ -456,9 +466,7 @@ def process_refund():
                 "message": error
             }), 400
 
-        booking_id   = data.get('bookingID')
-        passenger_id = data.get('passengerID')
-        amount       = data.get('amount')
+        amount       = data.get('amount', data.get('Amount'))
         reason       = data.get('reason', 'FlightCancelled')
         refund_type  = data.get('refundType', 'full')
 
@@ -468,6 +476,40 @@ def process_refund():
                 "code":    "INVALID_FIELD_TYPE",
                 "message": "bookingID and passengerID must be integers"
             }), 400
+
+        if refund_type not in ['full', 'partial']:
+            return jsonify({
+                "error":   "Bad Request",
+                "code":    "INVALID_REFUND_TYPE",
+                "message": "refundType must be 'full' or 'partial'"
+            }), 400
+
+        already_refunded = Payment.query.filter_by(
+            bookingID=booking_id,
+            status="Refunded"
+        ).first()
+        if already_refunded:
+            return jsonify({
+                "error":    "Conflict",
+                "code":     "DUPLICATE_REFUND",
+                "message":  f"BookingID {booking_id} has already been refunded",
+                "refundID": already_refunded.refundID
+            }), 409
+
+        original_payment = Payment.query.filter_by(
+            bookingID=booking_id,
+            status="Completed"
+        ).with_for_update().order_by(Payment.paymentID.desc()).first()
+
+        if not original_payment:
+            return jsonify({
+                "error":   "Not Found",
+                "code":    "PAYMENT_NOT_FOUND",
+                "message": f"No completed payment found for bookingID {booking_id}"
+            }), 404
+
+        if amount is None:
+            amount = float(original_payment.amount)
 
         if not isinstance(amount, (int, float)):
             return jsonify({
@@ -481,13 +523,6 @@ def process_refund():
                 "error":   "Bad Request",
                 "code":    "INVALID_AMOUNT",
                 "message": "Refund amount must be greater than 0"
-            }), 400
-
-        if refund_type not in ['full', 'partial']:
-            return jsonify({
-                "error":   "Bad Request",
-                "code":    "INVALID_REFUND_TYPE",
-                "message": "refundType must be 'full' or 'partial'"
             }), 400
 
         if refund_type == 'partial':
@@ -523,30 +558,6 @@ def process_refund():
                 "status":   "Refunded",
                 "message":  "Refund already completed. No duplicate refund was made."
             }), 200
-
-        already_refunded = Payment.query.filter_by(
-            bookingID=booking_id,
-            status="Refunded"
-        ).first()
-        if already_refunded:
-            return jsonify({
-                "error":    "Conflict",
-                "code":     "DUPLICATE_REFUND",
-                "message":  f"BookingID {booking_id} has already been refunded",
-                "refundID": already_refunded.refundID
-            }), 409
-
-        original_payment = Payment.query.filter_by(
-            bookingID=booking_id,
-            status="Completed"
-        ).with_for_update().order_by(Payment.paymentID.desc()).first()
-
-        if not original_payment:
-            return jsonify({
-                "error":   "Not Found",
-                "code":    "PAYMENT_NOT_FOUND",
-                "message": f"No completed payment found for bookingID {booking_id}"
-            }), 404
 
         if not original_payment.stripeChargeID:
             return jsonify({
@@ -622,6 +633,10 @@ def process_refund():
             "bookingID":          booking_id,
             "passengerID":        passenger_id,
             "amount":             refund_amount,
+            "PaymentID":          original_payment.paymentID,
+            "Status":             "Refunded",
+            "RefundID":           stripe_refund.id,
+            "RefundAmount":       refund_amount,
             "refundType":         refund_type,
             "cancellationReason": reason,
             "refundedAt":         get_sgt_now().strftime("%Y-%m-%d %H:%M:%S SGT"),

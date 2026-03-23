@@ -5,9 +5,12 @@ CREATE TABLE IF NOT EXISTS seats (
     SeatID INT AUTO_INCREMENT PRIMARY KEY,
     FlightID INT NOT NULL,
     SeatNumber VARCHAR(5) NOT NULL,
-    Status ENUM('available', 'unavailable', 'hold') DEFAULT 'available',
+    Status ENUM('available', 'unavailable', 'hold', 'cancelled') DEFAULT 'available',
     PassengerID INT NULL
 );
+
+ALTER TABLE seats
+    MODIFY COLUMN Status ENUM('available', 'unavailable', 'hold', 'cancelled') DEFAULT 'available';
 
 INSERT INTO seats (FlightID, SeatNumber, Status) VALUES
 (10001, '1A', 'available'),
@@ -1450,3 +1453,17 @@ INSERT INTO seats (FlightID, SeatNumber, Status) VALUES
 (60004, '10D', 'unavailable'),
 (60004, '10E', 'available'),
 (60004, '10F', 'available');
+
+-- Scenario 2 test fixture
+-- FlightID 10001 = BA233 (Singapore -> Bangkok): all seats vacant
+-- FlightID 10003 = BA245 (Singapore -> Bangkok): 59/60 seats filled (1 seat left)
+
+UPDATE seats
+SET Status = 'available', PassengerID = NULL
+WHERE FlightID = 10001;
+
+UPDATE seats
+SET
+    Status = CASE WHEN SeatNumber = '10F' THEN 'available' ELSE 'unavailable' END,
+    PassengerID = CASE WHEN SeatNumber = '10F' THEN NULL ELSE 999999 END
+WHERE FlightID = 10003;

@@ -33,6 +33,7 @@ class Flight(db.Model):
     ArrivalTime = db.Column(db.Time, nullable=False)
     Price = db.Column(db.Numeric(10, 2), nullable=False)
     Status = db.Column(db.Enum('available', 'unavailable', 'cancelled'), default='available')
+    CancellationReason = db.Column(db.String(255), nullable=True)
     Meals = db.Column(db.String(50), nullable=False)
     Beverages = db.Column(db.String(50), nullable=False)
     Wifi = db.Column(db.Boolean, nullable=False)
@@ -67,16 +68,88 @@ class Flight(db.Model):
             'Origin': self.Origin,
             'Destination': self.Destination,
             'Date': date_str,
+            'FlightDate': self.FlightDate.strftime('%Y-%m-%d') if hasattr(self.FlightDate, 'strftime') else str(self.FlightDate),
             'DepartureTime': format_time(self.DepartureTime),
             'FlightDuration': format_duration(self.FlightDuration),
             'ArrivalTime': format_time(self.ArrivalTime),
             'Price': float(self.Price) if self.Price else None,
             'Status': self.Status.capitalize() if self.Status else None,
+            'CancellationReason': self.CancellationReason,
             'Meals': self.Meals,
             'Beverages': self.Beverages,
             'Wifi': self.Wifi,
             'Baggage': self.Baggage
         }
+
+
+@app.route('/flights', methods=['GET'])
+def get_flights():
+    try:
+        origin = request.args.get('origin')
+        dest = request.args.get('dest')
+        date = request.args.get('date')
+        status = request.args.get('status')
+
+        query = Flight.query
+
+        if origin:
+            query = query.filter(Flight.Origin == origin)
+        if dest:
+            query = query.filter(Flight.Destination == dest)
+        if date:
+            query = query.filter(Flight.FlightDate == date)
+        if status:
+            query = query.filter(Flight.Status == status.lower())
+
+        flights = query.order_by(Flight.DepartureTime.asc()).all()
+        return jsonify([f.to_dict() for f in flights]), 200
+    except Exception as e:
+        return jsonify({"message": f"Internal server error: {str(e)}"}), 500
+
+
+@app.route('/flights/<int:flight_id>', methods=['GET'])
+def get_flight_v2(flight_id):
+    return get_flight(flight_id)
+
+
+@app.route('/flights/<int:flight_id>', methods=['PUT'])
+def update_flight_v2(flight_id):
+    try:
+        data = request.get_json(silent=True) or {}
+        status = data.get('Status') or data.get('status')
+        cancellation_reason = data.get('CancellationReason')
+
+        if not status:
+            return jsonify({"message": "Status is required in request body"}), 400
+
+        status = status.lower()
+        if status not in ['available', 'unavailable', 'cancelled']:
+            return jsonify({"message": "Invalid status value"}), 400
+
+        flight = Flight.query.get(flight_id)
+        if not flight:
+            return jsonify({"message": "Flight not found"}), 404
+
+        flight.Status = status
+        if status == 'cancelled':
+            flight.CancellationReason = cancellation_reason
+        elif cancellation_reason is not None:
+            flight.CancellationReason = cancellation_reason
+
+        db.session.commit()
+
+        return jsonify({
+            "FlightID": flight.FlightID,
+            "Status": flight.Status.capitalize(),
+            "Origin": flight.Origin,
+            "Destination": flight.Destination,
+            "Date": flight.FlightDate.strftime('%Y-%m-%d') if hasattr(flight.FlightDate, 'strftime') else str(flight.FlightDate),
+            "DepartureTime": flight.DepartureTime.strftime('%H:%M') if hasattr(flight.DepartureTime, 'strftime') else str(flight.DepartureTime)[:5],
+            "CancellationReason": flight.CancellationReason
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"message": f"Internal server error: {str(e)}"}), 500
 
 @app.route('/flight/available', methods=['GET'])
 def get_available_flights():
@@ -128,6 +201,8 @@ def update_flight_status(flight_id):
             return jsonify({"message": "Flight not found"}), 404
 
         flight.Status = status
+        if status == 'cancelled' and 'CancellationReason' in data:
+            flight.CancellationReason = data.get('CancellationReason')
         db.session.commit()
 
         return jsonify({"message": "Flight status updated successfully"}), 200

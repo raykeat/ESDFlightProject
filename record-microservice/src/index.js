@@ -93,24 +93,45 @@ app.post('/records', (req, res) => {
 // Get booking records by flight
 // ==========================================
 app.get('/records', (req, res) => {
-  const { flightID } = req.query;
+  const flightID = req.query.FlightID || req.query.flightID;
+  const bookingStatus = req.query.BookingStatus || req.query.bookingstatus || req.query.status;
 
-  pool.query(
-    `SELECT
+  if (!flightID) {
+    return res.status(400).json({ error: 'FlightID is required' });
+  }
+
+  let sql = `SELECT
       BookingID AS bookingID,
+      BookingID AS BookingID,
       FlightID AS flightID,
+      FlightID AS FlightID,
       seatNumber AS seatID,
       seatNumber AS seatNumber,
       PassengerID AS passengerID,
+      PassengerID AS PassengerID,
       AmountPaid AS amount,
       AmountPaid AS amountPaid,
+      AmountPaid AS AmountPaid,
       bookingstatus AS status,
+      bookingstatus AS BookingStatus,
       bookingstatus AS bookingstatus,
       CreatedTime AS createdAt,
-      CreatedTime AS createdTime
+      CreatedTime AS createdTime,
+      CreatedTime AS CreatedTime
     FROM booking
-    WHERE FlightID = ?`,
-    [flightID],
+    WHERE FlightID = ?`;
+
+  const params = [flightID];
+  if (bookingStatus) {
+    sql += ' AND bookingstatus = ?';
+    params.push(bookingStatus);
+  }
+
+  sql += ' ORDER BY CreatedTime ASC';
+
+  pool.query(
+    sql,
+    params,
     (err, results) => {
       if (err) {
         console.error(err);
@@ -231,6 +252,33 @@ app.delete('/record/:bookingID', (req, res) => {
         return res.status(404).json({ error: 'Booking not found' });
       }
       res.json({ message: 'Booking deleted successfully' });
+    }
+  );
+});
+
+app.put('/records/:bookingID', (req, res) => {
+  const { bookingID } = req.params;
+  const status = req.body.BookingStatus || req.body.bookingstatus || req.body.status;
+
+  if (!status) {
+    return res.status(400).json({ error: 'BookingStatus is required' });
+  }
+
+  pool.query(
+    'UPDATE booking SET bookingstatus = ? WHERE BookingID = ?',
+    [status, bookingID],
+    (err, result) => {
+      if (err) {
+        console.error(err);
+        return res.status(500).json({ error: err.message });
+      }
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ error: 'Booking not found' });
+      }
+      return res.json({
+        BookingID: Number(bookingID),
+        BookingStatus: status
+      });
     }
   );
 });

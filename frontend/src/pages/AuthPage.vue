@@ -73,12 +73,6 @@ async function handleCreateAccount() {
   <main style="min-height:100vh; background:radial-gradient(circle at 12% 6%, #ffffff 0%, #f5f5f7 48%, #ececf1 100%); padding:32px 24px;">
     <div style="max-width:960px; margin:0 auto;">
 
-      <!-- Nav -->
-      <header style="display:flex; align-items:center; justify-content:space-between; background:rgba(255,255,255,0.8); backdrop-filter:blur(20px); border:1px solid rgba(0,0,0,0.06); border-radius:28px; padding:12px 28px; margin-bottom:40px;">
-        <RouterLink to="/" style="font-size:13px; font-weight:700; letter-spacing:0.18em; color:#1d1d1f; text-decoration:none;">BLAZE AIR</RouterLink>
-        <span style="font-size:12px; font-weight:600; letter-spacing:0.15em; text-transform:uppercase; color:#6e6e73;">Passenger Access</span>
-      </header>
-
       <!-- Auth card -->
       <div style="background:rgba(255,255,255,0.92); backdrop-filter:blur(24px); border:1px solid rgba(0,0,0,0.06); border-radius:34px; padding:40px 48px; box-shadow:0 22px 52px rgba(15,23,42,0.08);">
 
