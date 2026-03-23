@@ -1456,7 +1456,7 @@ INSERT INTO seats (FlightID, SeatNumber, Status) VALUES
 
 -- Scenario 2 test fixture
 -- FlightID 10001 = BA233 (Singapore -> Bangkok): all seats vacant
--- FlightID 10003 = BA245 (Singapore -> Bangkok): 59/60 seats filled (1 seat left)
+-- FlightID 10003 = BA245 (Singapore -> Bangkok): 55/60 seats filled (5 seats left)
 
 UPDATE seats
 SET Status = 'available', PassengerID = NULL
@@ -1464,6 +1464,6 @@ WHERE FlightID = 10001;
 
 UPDATE seats
 SET
-    Status = CASE WHEN SeatNumber = '10F' THEN 'available' ELSE 'unavailable' END,
-    PassengerID = CASE WHEN SeatNumber = '10F' THEN NULL ELSE 999999 END
+    Status = CASE WHEN SeatNumber IN ('10B', '10C', '10D', '10E', '10F') THEN 'available' ELSE 'unavailable' END,
+    PassengerID = CASE WHEN SeatNumber IN ('10B', '10C', '10D', '10E', '10F') THEN NULL ELSE 999999 END
 WHERE FlightID = 10003;

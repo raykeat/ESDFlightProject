@@ -7,7 +7,7 @@ import { useRouter } from 'vue-router'
 const router = useRouter() 
 
 const booking = ref({
-  tripType: 'round-trip',
+  tripType: 'one-way',
   departingCountry: '',
   arrivingCountry: '',
   departureDate: '',
@@ -328,7 +328,7 @@ onBeforeUnmount(() => {
           <div class="relative overflow-visible rounded-[36px] border border-white/40 bg-white/80 shadow-[0_32px_80px_rgba(15,23,42,0.14)] backdrop-blur-3xl">
 
             <!-- Decorative top gradient strip -->
-            <div class="h-1 w-full bg-gradient-to-r from-[#e63946] via-[#ff6b6b] to-[#f43f5e]"></div>
+            <div class="mx-6 mt-4 h-1 rounded-full bg-gradient-to-r from-[#e63946] via-[#ff6b6b] to-[#f43f5e] md:mx-10"></div>
 
             <div class="p-6 md:p-10">
 

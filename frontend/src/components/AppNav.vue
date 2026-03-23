@@ -68,7 +68,7 @@ onBeforeUnmount(() => {
 
         <div
           v-if="profileMenuOpen"
-          class="absolute right-0 mt-2 w-44 overflow-hidden rounded-2xl border border-black/10 bg-white/95 py-1 shadow-[0_16px_30px_rgba(15,23,42,0.12)]"
+          class="absolute right-0 mt-2 w-44 overflow-hidden rounded-2xl border border-black/15 bg-white py-1 shadow-[0_18px_32px_rgba(15,23,42,0.16)]"
         >
           <RouterLink
             to="/profile"
