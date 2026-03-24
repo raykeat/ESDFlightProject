@@ -73,13 +73,18 @@ onMounted(async () => {
     }
 
     const finalizePayload = {
-      bookingID: Number(bookingID),
+      bookingID:        Number(bookingID),
       sessionID,
-      flightID: Number(route.query.flightID),
-      seatNumber: route.query.seatNumber,
-      returnBookingID: route.query.returnBookingID ? Number(route.query.returnBookingID) : null,
-      returnFlightID: route.query.returnFlightID ? Number(route.query.returnFlightID) : null,
+      flightID:         Number(route.query.flightID),
+      seatNumber:       route.query.seatNumber,
+      returnBookingID:  route.query.returnBookingID  ? Number(route.query.returnBookingID)  : null,
+      returnFlightID:   route.query.returnFlightID   ? Number(route.query.returnFlightID)   : null,
       returnSeatNumber: route.query.returnSeatNumber || null,
+      // ── extra fields for notification email ──
+      flightNumber:     route.query.flightNumber     || null,
+      origin:           route.query.origin           || null,
+      destination:      route.query.destination      || null,
+      departureDate:    route.query.departureDate     || null,
     }
 
     const finalizeResponse = await axios.post(
