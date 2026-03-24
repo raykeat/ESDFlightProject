@@ -67,6 +67,7 @@ class Offer(db.Model):
     passengerID  = db.Column(db.Integer,  nullable=False)   # FK → Passenger DB
     origFlightID = db.Column(db.Integer,  nullable=False)   # FK → Flight DB (cancelled)
     newFlightID  = db.Column(db.Integer,  nullable=True)    # FK → Flight DB (alternative); always populated since Offer is Path A only
+    newSeatID    = db.Column(db.Integer,  nullable=True)    # logical Seat Service reference
     couponID     = db.Column(db.Integer,  nullable=True)    # FK → Coupon DB; populated after coupon created
     # fareDiff removed — airline absorbs all fare differences per disruption policy
     status       = db.Column(db.String(50),  nullable=False, default='Pending Response')
@@ -83,6 +84,7 @@ class Offer(db.Model):
             'passengerID':  self.passengerID,
             'origFlightID': self.origFlightID,
             'newFlightID':  self.newFlightID,
+            'newSeatID':    self.newSeatID,
             'couponID':     self.couponID,
             'status':       self.status,
             'expiryTime':   self.expiryTime.strftime("%Y-%m-%d %H:%M:%S SGT")  if self.expiryTime  else None,
@@ -143,6 +145,7 @@ def health():
 #   offset       — pagination (default 0)
 # ==========================================
 @app.route('/offer', methods=['GET'])
+@app.route('/offers', methods=['GET'])
 def get_all_offers():
     log_event("get_all_offers_request")
     try:
@@ -213,6 +216,7 @@ def get_all_offers():
 # Get a specific offer — auto-expires if past expiryTime
 # ==========================================
 @app.route('/offer/<int:offerID>', methods=['GET'])
+@app.route('/offers/<int:offerID>', methods=['GET'])
 def get_offer(offerID):
     log_event("get_offer_request", offerID=offerID)
     try:
@@ -267,6 +271,7 @@ def get_offer(offerID):
 #   - DB connection failure                          → 503 DB_CONNECTION_ERROR
 # ==========================================
 @app.route('/offer', methods=['POST'])
+@app.route('/offers', methods=['POST'])
 def create_offer():
     log_event("create_offer_request")
     try:
@@ -280,21 +285,29 @@ def create_offer():
             }), 400
 
         # ── Validate required fields ──────────────────────────────────
-        error = validate_fields(data, ['bookingID', 'passengerID', 'origFlightID', 'status'])
+        booking_id     = data.get('bookingID', data.get('BookingID'))
+        passenger_id   = data.get('passengerID', data.get('PassengerID'))
+        orig_flight_id = data.get('origFlightID', data.get('OrigFlightID'))
+        new_flight_id  = data.get('newFlightID', data.get('NewFlightID', None))
+        new_seat_id    = data.get('newSeatID', data.get('NewSeatID', None))
+        coupon_id      = data.get('couponID', data.get('CouponID', None))
+        status         = data.get('status', data.get('Status', 'Pending Response'))
+        expiry_time    = data.get('expiryTime', data.get('ExpiryTime', None))
+
+        payload_for_validation = {
+            'bookingID': booking_id,
+            'passengerID': passenger_id,
+            'origFlightID': orig_flight_id,
+            'status': status,
+        }
+
+        error = validate_fields(payload_for_validation, ['bookingID', 'passengerID', 'origFlightID', 'status'])
         if error:
             return jsonify({
                 'error':   'Bad Request',
                 'code':    'MISSING_FIELDS',
                 'message': error
             }), 400
-
-        booking_id     = data.get('bookingID')
-        passenger_id   = data.get('passengerID')
-        orig_flight_id = data.get('origFlightID')
-        new_flight_id  = data.get('newFlightID',  None)
-        coupon_id      = data.get('couponID',     None)
-        status         = data.get('status')
-        expiry_time    = data.get('expiryTime',   None)
 
         # ── Validate field types ──────────────────────────────────────
         if not isinstance(booking_id, int) or booking_id <= 0:
@@ -323,6 +336,13 @@ def create_offer():
                 'error':   'Bad Request',
                 'code':    'INVALID_FIELD_TYPE',
                 'message': 'newFlightID must be a positive integer'
+            }), 400
+
+        if new_seat_id is not None and (not isinstance(new_seat_id, int) or new_seat_id <= 0):
+            return jsonify({
+                'error':   'Bad Request',
+                'code':    'INVALID_FIELD_TYPE',
+                'message': 'newSeatID must be a positive integer'
             }), 400
 
         # ── Validate status ─────────────────────────────────────────
@@ -381,6 +401,7 @@ def create_offer():
             passengerID  = passenger_id,
             origFlightID = orig_flight_id,
             newFlightID  = new_flight_id,
+            newSeatID    = new_seat_id,
             couponID     = coupon_id,
             status       = status,
             expiryTime   = parsed_expiry
@@ -396,6 +417,8 @@ def create_offer():
 
         return jsonify({
             **new_offer.json(),
+            'OfferID': new_offer.offerID,
+            'Status': new_offer.status,
             'message': 'Offer created successfully'
         }), 201
 
@@ -445,6 +468,7 @@ def create_offer():
 #   - DB connection failure          → 503 DB_CONNECTION_ERROR
 # ==========================================
 @app.route('/offer/<int:offerID>', methods=['PUT'])
+@app.route('/offers/<int:offerID>', methods=['PUT'])
 def update_offer(offerID):
     log_event("update_offer_request", offerID=offerID)
     try:
@@ -543,6 +567,7 @@ def update_offer(offerID):
 # Does NOT permanently remove (preserves audit trail)
 # ==========================================
 @app.route('/offer/<int:offerID>', methods=['DELETE'])
+@app.route('/offers/<int:offerID>', methods=['DELETE'])
 def delete_offer(offerID):
     log_event("delete_offer_request", offerID=offerID)
     try:

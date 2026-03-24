@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { usePassengerSession } from '../composables/usePassengerSession'
 import { useRouter } from 'vue-router'
@@ -7,7 +7,7 @@ import { useRouter } from 'vue-router'
 const router = useRouter() 
 
 const booking = ref({
-  tripType: 'round-trip',
+  tripType: 'one-way',
   departingCountry: '',
   arrivingCountry: '',
   departureDate: '',
@@ -33,6 +33,139 @@ const highlights = [
 const { currentPassenger, isSignedIn, clearPassenger } = usePassengerSession()
 const profileMenuOpen = ref(false)
 const profileMenuRef = ref(null)
+const datePickerOpen = ref(false)
+const datePickerRef = ref(null)
+const datePickerMonth = ref(startOfMonth(new Date()))
+const activeDateField = ref('departure')
+
+const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+const leftMonth = computed(() => datePickerMonth.value)
+const rightMonth = computed(() => addMonths(datePickerMonth.value, 1))
+const leftMonthCells = computed(() => buildCalendarCells(leftMonth.value))
+const rightMonthCells = computed(() => buildCalendarCells(rightMonth.value))
+
+function startOfMonth(date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1)
+}
+
+function addMonths(date, months) {
+  return new Date(date.getFullYear(), date.getMonth() + months, 1)
+}
+
+function toISODate(date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function parseISODate(value) {
+  if (!value) return null
+  const [year, month, day] = value.split('-').map(Number)
+  if (!year || !month || !day) return null
+  return new Date(year, month - 1, day)
+}
+
+function buildCalendarCells(monthDate) {
+  const firstDay = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1)
+  const daysInMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0).getDate()
+  const mondayBasedOffset = (firstDay.getDay() + 6) % 7
+
+  const cells = []
+  for (let i = 0; i < mondayBasedOffset; i += 1) {
+    cells.push(null)
+  }
+
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    cells.push(new Date(monthDate.getFullYear(), monthDate.getMonth(), day))
+  }
+
+  while (cells.length % 7 !== 0) {
+    cells.push(null)
+  }
+
+  return cells
+}
+
+function formatMonthYear(date) {
+  return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(date)
+}
+
+function formatDateLabel(value) {
+  const date = parseISODate(value)
+  if (!date) return 'Select date'
+  return new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(date)
+}
+
+function isPastDate(date) {
+  if (!date) return false
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return date < today
+}
+
+function isSameDate(date, value) {
+  if (!date || !value) return false
+  return toISODate(date) === value
+}
+
+function isWithinRange(date) {
+  if (!date || !booking.value.departureDate || !booking.value.returnDate) return false
+  const current = toISODate(date)
+  return current > booking.value.departureDate && current < booking.value.returnDate
+}
+
+function selectTravelDate(date) {
+  if (!date || isPastDate(date)) return
+
+  const picked = toISODate(date)
+
+  if (booking.value.tripType === 'one-way') {
+    booking.value.departureDate = picked
+    booking.value.returnDate = ''
+    datePickerOpen.value = false
+    return
+  }
+
+  if (activeDateField.value === 'departure') {
+    booking.value.departureDate = picked
+    booking.value.returnDate = booking.value.returnDate && booking.value.returnDate >= picked
+      ? booking.value.returnDate
+      : ''
+    activeDateField.value = 'return'
+    return
+  }
+
+  if (!booking.value.departureDate) {
+    booking.value.departureDate = picked
+    booking.value.returnDate = ''
+    activeDateField.value = 'return'
+    return
+  }
+
+  if (picked < booking.value.departureDate) {
+    booking.value.departureDate = picked
+    booking.value.returnDate = ''
+    activeDateField.value = 'return'
+    return
+  }
+
+  booking.value.returnDate = picked
+}
+
+function toggleDatePicker(target = 'departure') {
+  activeDateField.value = target
+  datePickerOpen.value = true
+  const baseDate = parseISODate(booking.value.departureDate)
+  if (baseDate) {
+    datePickerMonth.value = startOfMonth(baseDate)
+  }
+}
+
+function shiftMonth(step) {
+  datePickerMonth.value = addMonths(datePickerMonth.value, step)
+}
 
 const displayName = computed(() => {
   const first = currentPassenger.value?.FirstName || ''
@@ -52,6 +185,11 @@ function submitSearch() {
   // Validate return date for round trip
   if (booking.value.tripType === 'round-trip' && !booking.value.returnDate) {
     alert('Please select a return date for round trips')
+    return
+  }
+
+  if (booking.value.tripType === 'round-trip' && booking.value.returnDate < booking.value.departureDate) {
+    alert('Return date cannot be earlier than departure date')
     return
   }
   
@@ -82,7 +220,22 @@ function closeMenuOnOutsideClick(event) {
   if (!profileMenuRef.value?.contains(event.target)) {
     profileMenuOpen.value = false
   }
+
+  const clickedDatePicker = datePickerRef.value?.contains(event.target)
+  if (!clickedDatePicker) {
+    datePickerOpen.value = false
+  }
 }
+
+watch(
+  () => booking.value.tripType,
+  (newType) => {
+    if (newType === 'one-way') {
+      booking.value.returnDate = ''
+      activeDateField.value = 'departure'
+    }
+  }
+)
 
 onMounted(() => {
   document.addEventListener('click', closeMenuOnOutsideClick)
@@ -166,16 +319,16 @@ onBeforeUnmount(() => {
         </p>
       </section>
 
-      <section id="booking" class="animate__animated animate__fadeInUp animate__delay-1s mt-12 md:mt-16">
+      <section id="booking" class="relative z-20 animate__animated animate__fadeInUp animate__delay-1s mt-12 md:mt-16">
         <!-- Outer glow atmosphere -->
         <div class="relative">
           <div class="pointer-events-none absolute -inset-4 rounded-[48px] bg-gradient-to-br from-[#e63946]/10 via-transparent to-[#ff6b6b]/5 blur-2xl"></div>
 
           <!-- Main card -->
-          <div class="relative overflow-hidden rounded-[36px] border border-white/40 bg-white/80 shadow-[0_32px_80px_rgba(15,23,42,0.14)] backdrop-blur-3xl">
+          <div class="relative overflow-visible rounded-[36px] border border-white/40 bg-white/80 shadow-[0_32px_80px_rgba(15,23,42,0.14)] backdrop-blur-3xl">
 
             <!-- Decorative top gradient strip -->
-            <div class="h-1 w-full bg-gradient-to-r from-[#e63946] via-[#ff6b6b] to-[#f43f5e]"></div>
+            <div class="mx-6 mt-4 h-1 rounded-full bg-gradient-to-r from-[#e63946] via-[#ff6b6b] to-[#f43f5e] md:mx-10"></div>
 
             <div class="p-6 md:p-10">
 
@@ -186,25 +339,27 @@ onBeforeUnmount(() => {
                   <h2 class="mt-1 text-2xl font-bold tracking-[-0.025em] text-[#1d1d1f] md:text-3xl">Where to next?</h2>
                 </div>
 
-                <!-- Trip type pill toggle group -->
-                <div class="relative flex rounded-2xl bg-[#f5f5f7] p-1">
-                  <!-- Sliding background pill -->
-                  <div
-                    class="absolute top-1 bottom-1 rounded-[10px] bg-white shadow-[0_2px_8px_rgba(0,0,0,0.12)] transition-all duration-300"
-                    :style="booking.tripType === 'one-way' ? 'left:4px; right:calc(50% + 2px)' : 'left:calc(50% + 2px); right:4px'"
-                  ></div>
-                  <button
-                    type="button"
-                    class="relative z-10 flex-1 rounded-[10px] px-5 py-2 text-[13px] font-semibold transition-colors duration-200"
-                    :class="booking.tripType === 'one-way' ? 'text-[#1d1d1f]' : 'text-[#6e6e73]'"
-                    @click="booking.tripType = 'one-way'"
-                  >One-way</button>
-                  <button
-                    type="button"
-                    class="relative z-10 flex-1 rounded-[10px] px-5 py-2 text-[13px] font-semibold transition-colors duration-200"
-                    :class="booking.tripType === 'round-trip' ? 'text-[#1d1d1f]' : 'text-[#6e6e73]'"
-                    @click="booking.tripType = 'round-trip'"
-                  >Round-trip</button>
+                <div class="rounded-2xl border border-black/8 bg-[#f5f5f7] p-1">
+                  <div class="grid grid-cols-2 gap-1">
+                    <button
+                      type="button"
+                      class="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-[13px] font-semibold transition-all duration-200"
+                      :class="booking.tripType === 'one-way' ? 'bg-white text-[#111827] shadow-sm' : 'text-[#6e6e73] hover:text-[#111827]'"
+                      @click="booking.tripType = 'one-way'"
+                    >
+                      <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12h18M15 6l6 6-6 6"/></svg>
+                      One-way
+                    </button>
+                    <button
+                      type="button"
+                      class="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-[13px] font-semibold transition-all duration-200"
+                      :class="booking.tripType === 'round-trip' ? 'bg-white text-[#111827] shadow-sm' : 'text-[#6e6e73] hover:text-[#111827]'"
+                      @click="booking.tripType = 'round-trip'"
+                    >
+                      <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7h14m0 0l-4-4m4 4l-4 4M21 17H7m0 0l4-4m-4 4l4 4"/></svg>
+                      Return
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -279,30 +434,107 @@ onBeforeUnmount(() => {
 
                 <!-- Row 2: Dates + Passengers -->
                 <div class="grid gap-4" :class="booking.tripType === 'round-trip' ? 'md:grid-cols-3' : 'md:grid-cols-2'">
-                  <!-- Departure date -->
-                  <div>
-                    <label class="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[#6e6e73]">
-                      <svg class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                      Departure
-                    </label>
-                    <input
-                      v-model="booking.departureDate"
-                      type="date"
-                      class="w-full rounded-2xl border border-black/8 bg-[#f7f7f8] px-5 py-4 text-sm font-semibold text-[#1d1d1f] outline-none transition-all duration-200 focus:border-[#e63946]/50 focus:bg-white focus:shadow-[0_0_0_4px_rgba(230,57,70,0.08)] focus:ring-0"
-                    />
-                  </div>
+                  <div ref="datePickerRef" class="relative" :class="booking.tripType === 'round-trip' ? 'md:col-span-2' : ''">
+                    <div class="grid gap-4" :class="booking.tripType === 'round-trip' ? 'md:grid-cols-2' : 'md:grid-cols-1'">
+                      <div>
+                        <label class="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[#6e6e73]">
+                          <svg class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                          Departure
+                        </label>
+                        <button
+                          type="button"
+                          class="w-full rounded-2xl border bg-[#f7f7f8] px-5 py-4 text-left outline-none transition-all duration-200 hover:border-black/20 focus:border-[#e63946]/50 focus:bg-white focus:shadow-[0_0_0_4px_rgba(230,57,70,0.08)]"
+                          :class="datePickerOpen && activeDateField === 'departure' ? 'border-[#e63946]/40' : 'border-black/8'"
+                          @click="toggleDatePicker('departure')"
+                        >
+                          <p class="text-sm font-semibold text-[#1d1d1f]">{{ booking.departureDate ? formatDateLabel(booking.departureDate) : 'Select departure date' }}</p>
+                          <p class="mt-1 text-xs text-[#6e6e73]">Choose your outbound flight date</p>
+                        </button>
+                      </div>
 
-                  <!-- Return date — only for round trip -->
-                  <div v-if="booking.tripType === 'round-trip'">
-                    <label class="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[#6e6e73]">
-                      <svg class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                      Return
-                    </label>
-                    <input
-                      v-model="booking.returnDate"
-                      type="date"
-                      class="w-full rounded-2xl border border-black/8 bg-[#f7f7f8] px-5 py-4 text-sm font-semibold text-[#1d1d1f] outline-none transition-all duration-200 focus:border-[#e63946]/50 focus:bg-white focus:shadow-[0_0_0_4px_rgba(230,57,70,0.08)] focus:ring-0"
-                    />
+                      <div v-if="booking.tripType === 'round-trip'">
+                        <label class="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[#6e6e73]">
+                          <svg class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                          Return
+                        </label>
+                        <button
+                          type="button"
+                          class="w-full rounded-2xl border bg-[#f7f7f8] px-5 py-4 text-left outline-none transition-all duration-200 hover:border-black/20 focus:border-[#e63946]/50 focus:bg-white focus:shadow-[0_0_0_4px_rgba(230,57,70,0.08)]"
+                          :class="datePickerOpen && activeDateField === 'return' ? 'border-[#e63946]/40' : 'border-black/8'"
+                          @click="toggleDatePicker('return')"
+                        >
+                          <p class="text-sm font-semibold text-[#1d1d1f]">{{ booking.returnDate ? formatDateLabel(booking.returnDate) : 'Select return date' }}</p>
+                          <p class="mt-1 text-xs text-[#6e6e73]">Choose your inbound flight date</p>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div
+                      v-if="datePickerOpen"
+                      class="absolute z-50 mt-3 w-full min-w-[320px] rounded-2xl border border-black/10 bg-white p-4 shadow-[0_16px_40px_rgba(15,23,42,0.16)] md:min-w-[680px]"
+                    >
+                      <div class="mb-4 flex items-center justify-between">
+                        <p class="text-xs font-bold uppercase tracking-[0.14em] text-[#6e6e73]">
+                          {{ booking.tripType === 'round-trip' ? (activeDateField === 'departure' ? 'Select departure date' : 'Select return date') : 'Select departure date' }}
+                        </p>
+                        <div class="flex items-center gap-2">
+                          <button type="button" class="rounded-lg border border-black/10 px-2.5 py-1 text-sm text-[#374151] transition hover:bg-[#f5f5f7]" @click="shiftMonth(-1)">‹</button>
+                          <button type="button" class="rounded-lg border border-black/10 px-2.5 py-1 text-sm text-[#374151] transition hover:bg-[#f5f5f7]" @click="shiftMonth(1)">›</button>
+                        </div>
+                      </div>
+
+                      <div class="grid gap-4 md:grid-cols-2">
+                        <section>
+                          <h4 class="mb-2 text-sm font-semibold text-[#111827]">{{ formatMonthYear(leftMonth) }}</h4>
+                          <div class="mb-1 grid grid-cols-7 gap-1">
+                            <span v-for="day in weekDays" :key="`left-${day}`" class="py-1 text-center text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9ca3af]">{{ day }}</span>
+                          </div>
+                          <div class="grid grid-cols-7 gap-1">
+                            <button
+                              v-for="(cell, index) in leftMonthCells"
+                              :key="`left-cell-${index}`"
+                              type="button"
+                              class="h-9 rounded-lg text-sm transition"
+                              :class="[
+                                !cell ? 'invisible' : '',
+                                cell && isPastDate(cell) ? 'cursor-not-allowed text-[#d1d5db]' : 'text-[#1f2937] hover:bg-[#f3f4f6]',
+                                cell && isWithinRange(cell) ? 'bg-[#eef2ff]' : '',
+                                cell && (isSameDate(cell, booking.departureDate) || isSameDate(cell, booking.returnDate)) ? 'bg-[#e63946] text-white hover:bg-[#e63946]' : ''
+                              ]"
+                              :disabled="!cell || isPastDate(cell)"
+                              @click="selectTravelDate(cell)"
+                            >
+                              {{ cell ? cell.getDate() : '' }}
+                            </button>
+                          </div>
+                        </section>
+
+                        <section>
+                          <h4 class="mb-2 text-sm font-semibold text-[#111827]">{{ formatMonthYear(rightMonth) }}</h4>
+                          <div class="mb-1 grid grid-cols-7 gap-1">
+                            <span v-for="day in weekDays" :key="`right-${day}`" class="py-1 text-center text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9ca3af]">{{ day }}</span>
+                          </div>
+                          <div class="grid grid-cols-7 gap-1">
+                            <button
+                              v-for="(cell, index) in rightMonthCells"
+                              :key="`right-cell-${index}`"
+                              type="button"
+                              class="h-9 rounded-lg text-sm transition"
+                              :class="[
+                                !cell ? 'invisible' : '',
+                                cell && isPastDate(cell) ? 'cursor-not-allowed text-[#d1d5db]' : 'text-[#1f2937] hover:bg-[#f3f4f6]',
+                                cell && isWithinRange(cell) ? 'bg-[#eef2ff]' : '',
+                                cell && (isSameDate(cell, booking.departureDate) || isSameDate(cell, booking.returnDate)) ? 'bg-[#e63946] text-white hover:bg-[#e63946]' : ''
+                              ]"
+                              :disabled="!cell || isPastDate(cell)"
+                              @click="selectTravelDate(cell)"
+                            >
+                              {{ cell ? cell.getDate() : '' }}
+                            </button>
+                          </div>
+                        </section>
+                      </div>
+                    </div>
                   </div>
 
                   <!-- Passengers -->

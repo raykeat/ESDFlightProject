@@ -125,7 +125,6 @@ function formatFlight(f) {
     departureDate: fmt(depDate),
     arrivalDate:   fmt(arrDate),
     isNextDay,
-    availableSeats: 30,
     meals:         f.Meals,
     beverages:     f.Beverages,
     wifi:          f.Wifi,
@@ -274,8 +273,6 @@ function proceedToBooking() {
         <div class="flex items-center gap-3 text-sm text-[#1d1d1f]">
           <span class="font-bold">{{ selectedOutbound.flightNumber }}</span>
           <span class="text-[#6e6e73]">{{ selectedOutbound.origin }} → {{ selectedOutbound.destination }}</span>
-          <span class="text-[#6e6e73]">•</span>
-          <span class="font-semibold">Seat {{ selectedOutboundSeat }}</span>
           <span class="ml-auto font-bold text-emerald-700">${{ selectedOutbound.price }}</span>
         </div>
       </div>
@@ -302,55 +299,45 @@ function proceedToBooking() {
             @click="selectOutbound(flight)"
           >
             <div class="p-6 md:p-8">
-              <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                <!-- Flight path -->
-                <div class="flex flex-1 items-center justify-between md:max-w-[65%]">
-                  <div class="w-[100px] text-left">
-                    <p class="text-2xl font-bold tracking-tight text-[#1d1d1f]">{{ formatTime12h(flight.departureTime) }}</p>
-                    <p class="mt-1 text-[13px] font-medium text-[#6e6e73]">{{ flight.origin }}</p>
-                  </div>
-                  <div class="flex flex-1 flex-col items-center px-3">
-                    <div class="mb-2 rounded-full border border-black/5 bg-[#f5f5f7] px-3 py-1 text-[11px] font-bold tracking-[0.15em] text-[#6e6e73] transition-all group-hover:bg-white group-hover:shadow-sm">{{ flight.flightNumber }}</div>
-                    <div class="relative w-full">
-                      <div class="h-[2px] w-full border-t-2 border-dashed border-[#e63946]/30 transition-colors duration-500 group-hover:border-[#e63946]/60"></div>
-                      <div class="absolute right-0 top-1/2 -translate-y-1/2 translate-x-2 text-[#e63946] opacity-70 transition-all duration-500 group-hover:scale-110 group-hover:opacity-100">
-                        <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>
-                      </div>
-                      <div class="absolute left-0 top-1/2 h-2 w-2 -translate-x-1 -translate-y-1/2 rounded-full border-2 border-white bg-[#e63946]/50 shadow-sm transition-colors duration-500 group-hover:bg-[#e63946]"></div>
+              <div class="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+                <div class="flex-1">
+                  <p class="text-[12px] font-semibold text-[#1d1d1f]">Non-stop • {{ formatDuration(flight.duration) }}</p>
+                  <div class="mt-4 grid grid-cols-[auto_1fr_auto] items-center gap-4">
+                    <div>
+                      <p class="text-3xl font-semibold tracking-[-0.03em] text-[#1d1d1f]">{{ formatTime12h(flight.departureTime) }}</p>
+                      <p class="mt-1 text-[14px] font-semibold text-[#1d1d1f]">{{ flight.origin }}</p>
+                      <p class="text-[12px] text-[#6e6e73]">{{ flight.departureDate }}</p>
                     </div>
-                    <p class="mt-1.5 text-[11px] font-semibold tracking-wide text-[#a1a1a6]">Direct</p>
-                  </div>
-                  <div class="w-[100px] text-right">
-                    <p class="text-2xl font-bold tracking-tight text-[#1d1d1f]">{{ formatTime12h(flight.arrivalTime) }}</p>
-                    <p class="mt-1 text-[13px] font-medium text-[#6e6e73]">{{ flight.destination }}</p>
+                    <div class="relative">
+                      <div class="h-[2px] w-full border-t-2 border-dashed border-[#e63946]/30 transition-colors duration-500 group-hover:border-[#e63946]/60"></div>
+                      <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-[105%] text-[#e63946] opacity-80 transition-all duration-500 group-hover:scale-110">
+                        <svg class="h-5 w-5 rotate-90" viewBox="0 0 24 24" fill="currentColor"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>
+                      </div>
+                      <p class="mt-2 text-center text-[12px] font-semibold uppercase tracking-[0.08em] text-[#6e6e73]">{{ flight.flightNumber }}</p>
+                    </div>
+                    <div class="text-right">
+                      <p class="text-3xl font-semibold tracking-[-0.03em] text-[#1d1d1f]">{{ formatTime12h(flight.arrivalTime) }}<span v-if="flight.isNextDay" class="ml-1 align-top text-xs font-semibold text-amber-600">+1</span></p>
+                      <p class="mt-1 text-[14px] font-semibold text-[#1d1d1f]">{{ flight.destination }}</p>
+                      <p class="text-[12px] text-[#6e6e73]">{{ flight.arrivalDate }}</p>
+                    </div>
                   </div>
                 </div>
-                <div class="hidden h-16 w-px bg-gradient-to-b from-transparent via-black/10 to-transparent md:block"></div>
-                <!-- Price -->
-                <div class="flex items-center justify-between border-t border-black/5 pt-4 md:w-auto md:flex-col md:items-end md:justify-center md:border-none md:pt-0">
-                  <div class="flex items-baseline gap-1">
+
+                <div class="hidden self-stretch w-px bg-black/10 md:block"></div>
+
+                <div class="border-t border-black/5 pt-4 md:min-w-[180px] md:border-none md:pt-0 md:pl-6">
+                  <p class="text-[12px] font-medium text-[#6e6e73]">From</p>
+                  <div class="mt-0.5 flex items-baseline gap-1">
                     <span class="text-sm font-semibold text-[#6e6e73]">$</span>
                     <span class="text-3xl font-bold tracking-tight text-[#1d1d1f] transition-colors group-hover:text-[#e63946]">{{ flight.price }}</span>
                   </div>
-                  <div class="mt-1 flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1">
-                    <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-                    <span class="text-[11px] font-bold tracking-wide text-emerald-700">{{ flight.availableSeats }} seats left</span>
-                  </div>
-                </div>
-              </div>
-              <!-- Details strip -->
-              <div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-black/5 pt-4 text-[12px] text-[#6e6e73]">
-                <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
-                  <span>📅 <span class="font-semibold text-[#1d1d1f]">{{ flight.departureDate }}</span> → <span class="font-semibold text-[#1d1d1f]">{{ flight.arrivalDate }}</span><span v-if="flight.isNextDay" class="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">+1 day</span></span>
-                  <span>⏱ {{ formatDuration(flight.duration) }}</span>
-                  <span class="rounded-full bg-black/5 px-2.5 py-0.5 font-semibold border border-black/5">✈ Direct</span>
-                </div>
-                <div class="h-4 w-px bg-black/10 hidden md:block"></div>
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="rounded-full border border-black/5 bg-[#f5f5f7] px-2.5 py-0.5 font-medium text-[#1d1d1f]">🧳 {{ flight.baggage }}</span>
-                  <span class="rounded-full border border-black/5 bg-[#f5f5f7] px-2.5 py-0.5 font-medium text-[#1d1d1f]">🍱 {{ flight.meals }}</span>
-                  <span class="rounded-full border border-black/5 bg-[#f5f5f7] px-2.5 py-0.5 font-medium text-[#1d1d1f]">🥤 {{ flight.beverages }}</span>
-                  <span v-if="flight.wifi" class="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 font-semibold text-emerald-700">📶 Free WiFi</span>
+                  <button
+                    type="button"
+                    class="mt-4 w-full rounded-xl bg-[#e63946] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#d62f3c]"
+                    @click.stop="selectOutbound(flight)"
+                  >
+                    Select
+                  </button>
                 </div>
               </div>
             </div>
@@ -379,53 +366,45 @@ function proceedToBooking() {
             @click="selectReturn(flight)"
           >
             <div class="p-6 md:p-8">
-              <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                <div class="flex flex-1 items-center justify-between md:max-w-[65%]">
-                  <div class="w-[100px] text-left">
-                    <p class="text-2xl font-bold tracking-tight text-[#1d1d1f]">{{ formatTime12h(flight.departureTime) }}</p>
-                    <p class="mt-1 text-[13px] font-medium text-[#6e6e73]">{{ flight.origin }}</p>
-                  </div>
-                  <div class="flex flex-1 flex-col items-center px-3">
-                    <div class="mb-2 rounded-full border border-black/5 bg-[#f5f5f7] px-3 py-1 text-[11px] font-bold tracking-[0.15em] text-[#6e6e73] transition-all group-hover:bg-white group-hover:shadow-sm">{{ flight.flightNumber }}</div>
-                    <div class="relative w-full">
-                      <div class="h-[2px] w-full border-t-2 border-dashed border-purple-400/40 transition-colors duration-500 group-hover:border-purple-400/70"></div>
-                      <div class="absolute right-0 top-1/2 -translate-y-1/2 translate-x-2 text-purple-500 opacity-70 transition-all duration-500 group-hover:scale-110 group-hover:opacity-100">
-                        <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>
-                      </div>
-                      <div class="absolute left-0 top-1/2 h-2 w-2 -translate-x-1 -translate-y-1/2 rounded-full border-2 border-white bg-purple-400/50 shadow-sm transition-colors duration-500 group-hover:bg-purple-500"></div>
+              <div class="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+                <div class="flex-1">
+                  <p class="text-[12px] font-semibold text-[#1d1d1f]">Non-stop • {{ formatDuration(flight.duration) }}</p>
+                  <div class="mt-4 grid grid-cols-[auto_1fr_auto] items-center gap-4">
+                    <div>
+                      <p class="text-3xl font-semibold tracking-[-0.03em] text-[#1d1d1f]">{{ formatTime12h(flight.departureTime) }}</p>
+                      <p class="mt-1 text-[14px] font-semibold text-[#1d1d1f]">{{ flight.origin }}</p>
+                      <p class="text-[12px] text-[#6e6e73]">{{ flight.departureDate }}</p>
                     </div>
-                    <p class="mt-1.5 text-[11px] font-semibold tracking-wide text-[#a1a1a6]">Direct</p>
-                  </div>
-                  <div class="w-[100px] text-right">
-                    <p class="text-2xl font-bold tracking-tight text-[#1d1d1f]">{{ formatTime12h(flight.arrivalTime) }}</p>
-                    <p class="mt-1 text-[13px] font-medium text-[#6e6e73]">{{ flight.destination }}</p>
+                    <div class="relative">
+                      <div class="h-[2px] w-full border-t-2 border-dashed border-purple-400/40 transition-colors duration-500 group-hover:border-purple-400/70"></div>
+                      <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-[105%] text-purple-500 opacity-80 transition-all duration-500 group-hover:scale-110">
+                        <svg class="h-5 w-5 rotate-90" viewBox="0 0 24 24" fill="currentColor"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>
+                      </div>
+                      <p class="mt-2 text-center text-[12px] font-semibold uppercase tracking-[0.08em] text-[#6e6e73]">{{ flight.flightNumber }}</p>
+                    </div>
+                    <div class="text-right">
+                      <p class="text-3xl font-semibold tracking-[-0.03em] text-[#1d1d1f]">{{ formatTime12h(flight.arrivalTime) }}<span v-if="flight.isNextDay" class="ml-1 align-top text-xs font-semibold text-amber-600">+1</span></p>
+                      <p class="mt-1 text-[14px] font-semibold text-[#1d1d1f]">{{ flight.destination }}</p>
+                      <p class="text-[12px] text-[#6e6e73]">{{ flight.arrivalDate }}</p>
+                    </div>
                   </div>
                 </div>
-                <div class="hidden h-16 w-px bg-gradient-to-b from-transparent via-black/10 to-transparent md:block"></div>
-                <div class="flex items-center justify-between border-t border-black/5 pt-4 md:w-auto md:flex-col md:items-end md:justify-center md:border-none md:pt-0">
-                  <div class="flex items-baseline gap-1">
+
+                <div class="hidden self-stretch w-px bg-black/10 md:block"></div>
+
+                <div class="border-t border-black/5 pt-4 md:min-w-[180px] md:border-none md:pt-0 md:pl-6">
+                  <p class="text-[12px] font-medium text-[#6e6e73]">From</p>
+                  <div class="mt-0.5 flex items-baseline gap-1">
                     <span class="text-sm font-semibold text-[#6e6e73]">$</span>
                     <span class="text-3xl font-bold tracking-tight text-[#1d1d1f] transition-colors group-hover:text-purple-600">{{ flight.price }}</span>
                   </div>
-                  <div class="mt-1 flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1">
-                    <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-                    <span class="text-[11px] font-bold tracking-wide text-emerald-700">{{ flight.availableSeats }} seats left</span>
-                  </div>
-                </div>
-              </div>
-              <!-- Details strip -->
-              <div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-black/5 pt-4 text-[12px] text-[#6e6e73]">
-                <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
-                  <span>📅 <span class="font-semibold text-[#1d1d1f]">{{ flight.departureDate }}</span> → <span class="font-semibold text-[#1d1d1f]">{{ flight.arrivalDate }}</span><span v-if="flight.isNextDay" class="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">+1 day</span></span>
-                  <span>⏱ {{ formatDuration(flight.duration) }}</span>
-                  <span class="rounded-full bg-purple-50 px-2.5 py-0.5 font-semibold text-purple-600 border border-purple-100">✈ Direct</span>
-                </div>
-                <div class="h-4 w-px bg-black/10 hidden md:block"></div>
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="rounded-full border border-black/5 bg-[#f5f5f7] px-2.5 py-0.5 font-medium text-[#1d1d1f]">🧳 {{ flight.baggage }}</span>
-                  <span class="rounded-full border border-black/5 bg-[#f5f5f7] px-2.5 py-0.5 font-medium text-[#1d1d1f]">🍱 {{ flight.meals }}</span>
-                  <span class="rounded-full border border-black/5 bg-[#f5f5f7] px-2.5 py-0.5 font-medium text-[#1d1d1f]">🥤 {{ flight.beverages }}</span>
-                  <span v-if="flight.wifi" class="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 font-semibold text-emerald-700">📶 Free WiFi</span>
+                  <button
+                    type="button"
+                    class="mt-4 w-full rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-purple-700"
+                    @click.stop="selectReturn(flight)"
+                  >
+                    Select
+                  </button>
                 </div>
               </div>
             </div>

@@ -167,18 +167,21 @@ onMounted(async () => {
     <div class="mx-auto max-w-[600px] px-6 md:px-10">
 
       <!-- Header -->
-      <div class="mb-8">
+      <div class="mb-8 flex items-start justify-between gap-4">
+        <div>
+          <h1 class="text-3xl font-semibold tracking-[-0.02em] text-[#1d1d1f]">Confirm Your Booking</h1>
+          <p class="mt-1 text-sm text-[#6e6e73]">Review your details before proceeding to payment</p>
+        </div>
+
         <button
-          class="mb-4 flex items-center gap-2 text-sm text-[#6e6e73] hover:text-[#1d1d1f] transition"
+          class="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-black/8 bg-white px-3 py-1.5 text-[11px] font-semibold text-[#1d1d1f] transition hover:bg-[#f8f8fa]"
           @click="goBack()"
         >
-          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" d="M15 19l-7-7 7-7"/>
           </svg>
-          Back
+          Back to Results
         </button>
-        <h1 class="text-3xl font-semibold tracking-[-0.02em] text-[#1d1d1f]">Confirm Your Booking</h1>
-        <p class="mt-1 text-sm text-[#6e6e73]">Review your details before proceeding to payment</p>
       </div>
 
       <!-- Cancelled notice -->

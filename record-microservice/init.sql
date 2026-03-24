@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS booking (
     PassengerID INT NOT NULL,
     FlightID INT NOT NULL,
     AmountPaid DECIMAL(10,2) NOT NULL,
-    bookingstatus ENUM('Confirmed', 'Pending', 'Cancelled', 'Failed') NOT NULL DEFAULT 'Pending',
+    bookingstatus ENUM('Confirmed', 'Pending', 'Cancelled', 'Failed', 'Refund Failed') NOT NULL DEFAULT 'Pending',
     
     -- Added back columns for ESD Flight Project features
     seatNumber VARCHAR(50),      -- Supports comma-separated seats like '1A, 1B'
@@ -13,3 +13,6 @@ CREATE TABLE IF NOT EXISTS booking (
     
     CreatedTime TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE booking
+    MODIFY COLUMN bookingstatus ENUM('Confirmed', 'Pending', 'Cancelled', 'Failed', 'Refund Failed') NOT NULL DEFAULT 'Pending';

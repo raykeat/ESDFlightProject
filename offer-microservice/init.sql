@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS offer (
     passengerID  INT             NOT NULL,                              -- FK → Passenger DB (OutSystems)
     origFlightID INT             NOT NULL,                              -- FK → Flight DB (cancelled flight)
     newFlightID  INT             NOT NULL,                              -- FK → Flight DB (alternative); always populated since Offer is Path A only
+    newSeatID    INT             NULL,                                  -- logical reference to Seat Service; no DB-level FK
     couponID     INT             NULL,                                  -- FK → Coupon DB, populated after coupon created
     -- fareDiff removed — airline absorbs all fare differences per disruption policy
     status       ENUM(
@@ -22,6 +23,9 @@ CREATE TABLE IF NOT EXISTS offer (
     updatedTime  TIMESTAMP       NULL        ON UPDATE CURRENT_TIMESTAMP -- auto-updated on any row change
 );
 
+  ALTER TABLE offer
+    ADD COLUMN IF NOT EXISTS newSeatID INT NULL;
+
 -- ==========================================
 -- INDEXES — speed up common query patterns
 -- ==========================================
@@ -34,8 +38,8 @@ CREATE INDEX idx_offer_isDeleted    ON offer(isDeleted);     -- all queries filt
 -- ==========================================
 -- SAMPLE DATA
 -- ==========================================
-INSERT INTO offer (bookingID, passengerID, origFlightID, newFlightID, couponID, status, expiryTime, respondedAt) VALUES
-(9,  1, 36251, 40001, 101, 'Pending Response', '2027-12-31 23:59:59', NULL),
-(10, 2, 36251, 40001, 102, 'Accepted',         '2025-03-12 09:15:22', '2025-03-11 14:22:10'),
-(11, 9, 36251, 40001, 103, 'Rejected',         '2025-03-12 09:15:22', '2025-03-11 16:05:33'),
-(12, 4, 36251, 40001, 104, 'Expired',          '2025-03-12 09:15:22', NULL);
+INSERT INTO offer (bookingID, passengerID, origFlightID, newFlightID, newSeatID, couponID, status, expiryTime, respondedAt) VALUES
+(9,  1, 36251, 40001, NULL, 101, 'Pending Response', '2027-12-31 23:59:59', NULL),
+(10, 2, 36251, 40001, NULL, 102, 'Accepted',         '2025-03-12 09:15:22', '2025-03-11 14:22:10'),
+(11, 9, 36251, 40001, NULL, 103, 'Rejected',         '2025-03-12 09:15:22', '2025-03-11 16:05:33'),
+(12, 4, 36251, 40001, NULL, 104, 'Expired',          '2025-03-12 09:15:22', NULL);

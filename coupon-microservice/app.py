@@ -141,16 +141,22 @@ def create_coupon():
     try:
         data = request.get_json(silent=True)
 
-        error = validate_fields(data, ['flightPrice', 'hoursUntilDeparture'])
+        flight_price = data.get('flightPrice', data.get('FlightPrice')) if data else None
+        hours_until_departure = data.get('hoursUntilDeparture', data.get('HoursUntilDeparture')) if data else None
+
+        error = validate_fields(
+            {
+                'flightPrice': flight_price,
+                'hoursUntilDeparture': hours_until_departure,
+            },
+            ['flightPrice', 'hoursUntilDeparture']
+        )
         if error:
             return jsonify({
                 'error': 'Bad Request',
                 'code': 'MISSING_FIELDS',
                 'message': error
             }), 400
-
-        flight_price = data.get('flightPrice')
-        hours_until_departure = data.get('hoursUntilDeparture')
 
         if not isinstance(flight_price, (int, float)):
             return jsonify({
