@@ -76,6 +76,27 @@ function buildCancelUrl(baseCancelUrl, frontendOrigin, outboundBookingID, return
   }
 }
 
+function firstNonEmpty(...values) {
+  return values.find((value) => value !== undefined && value !== null && String(value).trim() !== '');
+}
+
+async function getFlightEmailDetails(flightID) {
+  try {
+    const response = await axios.get(`${FLIGHT_SERVICE_URL}/flight/${flightID}`);
+    const flight = response.data || {};
+
+    return {
+      flightNumber: firstNonEmpty(flight.FlightNumber, flight.flightNumber, flight.flight_number),
+      origin: firstNonEmpty(flight.Origin, flight.origin),
+      destination: firstNonEmpty(flight.Destination, flight.destination),
+      departureDate: firstNonEmpty(flight.Date, flight.FlightDate, flight.DepartureDate, flight.departureDate, flight.departure_date),
+    };
+  } catch (err) {
+    console.warn('Could not fetch flight details for notification:', err.message);
+    return {};
+  }
+}
+
 // ==========================================
 // BOOKING FLOW - Scenario 1
 // ==========================================
@@ -340,15 +361,22 @@ app.post('/api/bookings/finalize', async (req, res) => {
       console.warn('Could not fetch passenger for notification:', err.message);
     }
 
-    // 5) Publish booking.confirmed to RabbitMQ → Notification Service sends email
+    // 5) Resolve flight details for notification (prefer request payload, fallback to flight-service)
+    const flightDetails = await getFlightEmailDetails(flightID);
+    const emailFlightNumber = firstNonEmpty(req.body.flightNumber, flightDetails.flightNumber, `SQ${flightID}`);
+    const emailOrigin = firstNonEmpty(req.body.origin, flightDetails.origin, 'Origin');
+    const emailDestination = firstNonEmpty(req.body.destination, flightDetails.destination, 'Destination');
+    const emailDepartureDate = firstNonEmpty(req.body.departureDate, flightDetails.departureDate, 'N/A');
+
+    // 6) Publish booking.confirmed to RabbitMQ → Notification Service sends email
     await publishBookingConfirmed({
       booking_id:      bookingID,
       passenger_name:  `${passenger.FirstName} ${passenger.LastName}`,
       passenger_email: passenger.Email,
-      flight_number:   req.body.flightNumber || `SQ${flightID}`,
-      origin:          req.body.origin       || 'Origin',
-      destination:     req.body.destination  || 'Destination',
-      departure_date:  req.body.departureDate || 'N/A',
+      flight_number:   emailFlightNumber,
+      origin:          emailOrigin,
+      destination:     emailDestination,
+      departure_date:  emailDepartureDate,
       seat_number:     seatNumber,
       amount_paid:     payment.amount
     });
