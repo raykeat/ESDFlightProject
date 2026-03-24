@@ -294,7 +294,7 @@ app.post('/api/bookings/finalize', async (req, res) => {
   }
 
   try {
-    // 1) Verify payment through Payment Service
+    // 1) Verify payment
     const paymentResponse = await axios.get(`${PAYMENT_SERVICE_URL}/payment/verify-session/${sessionID}`);
     const payment = paymentResponse.data;
 
@@ -329,6 +329,30 @@ app.post('/api/bookings/finalize', async (req, res) => {
       });
     }
 
+    // 4) Get passenger details for email
+    let passenger = { FirstName: 'Passenger', LastName: '', Email: '' };
+    try {
+      const passengerResponse = await axios.get(
+        `${PASSENGER_SERVICE_URL}/getpassenger/${payment.passengerID}/`
+      );
+      passenger = passengerResponse.data;
+    } catch (err) {
+      console.warn('Could not fetch passenger for notification:', err.message);
+    }
+
+    // 5) Publish booking.confirmed to RabbitMQ → Notification Service sends email
+    await publishBookingConfirmed({
+      booking_id:      bookingID,
+      passenger_name:  `${passenger.FirstName} ${passenger.LastName}`,
+      passenger_email: passenger.Email,
+      flight_number:   req.body.flightNumber || `SQ${flightID}`,
+      origin:          req.body.origin       || 'Origin',
+      destination:     req.body.destination  || 'Destination',
+      departure_date:  req.body.departureDate || 'N/A',
+      seat_number:     seatNumber,
+      amount_paid:     payment.amount
+    });
+
     return res.status(200).json({
       success: true,
       status: 'Confirmed',
@@ -336,6 +360,7 @@ app.post('/api/bookings/finalize', async (req, res) => {
       returnBookingID: returnBookingID || null,
       payment,
     });
+
   } catch (error) {
     const status = error.response?.status || 500;
     const message = error.response?.data?.message || error.message;

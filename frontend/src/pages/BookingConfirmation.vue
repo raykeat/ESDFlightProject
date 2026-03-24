@@ -95,7 +95,7 @@ async function confirmBooking() {
         seatNumber:  isRoundTrip ? bookingDetails.value.outboundSeat : bookingDetails.value.seatNumber,
         amount:      Number(bookingDetails.value.amount),
         flightNumber: displayFlightNumber.value,
-        frontendBaseUrl: window.location.origin,
+        frontendBaseUrl: window.location.origin
       }
 
       if (isRoundTrip) {
@@ -123,6 +123,9 @@ async function confirmBooking() {
       cancelUrl.searchParams.set('passengers',       searchParams.passengers       || '')
       cancelUrl.searchParams.set('cabin',            searchParams.cabin            || '')
       cancelUrl.searchParams.set('cancelled',        'true')
+      cancelUrl.searchParams.set('origin', searchParams.departingCountry || '')
+      cancelUrl.searchParams.set('destination', searchParams.arrivingCountry || '')
+      cancelUrl.searchParams.set('departureDate', searchParams.departureDate || '')
       payload.cancelUrl = cancelUrl.toString()
 
       const bookingResponse = await axios.post('http://localhost:3010/api/bookings', payload)

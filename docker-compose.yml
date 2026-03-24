@@ -212,13 +212,11 @@ services:
     environment:
       - FLIGHT_SERVICE_URL=http://flight-service:3000
       - SEATS_SERVICE_URL=http://seats-service:5003
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - PORT=5010
       - FLASK_ENV=development
     depends_on:
       - flight-service
       - seats-service
-      - kafka
     networks:
       - app-network
 
@@ -294,32 +292,13 @@ services:
       - RABBITMQ_PASSWORD=guest
       - RABBITMQ_VHOST=/
       - RABBITMQ_EXCHANGE=airline_events
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - EMAIL_SERVICE_URL=http://email-service:3005
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      kafka:
-        condition: service_healthy
-      email-service:
-        condition: service_started
-    networks:
-      - app-network
-
-  # ========== EMAIL SERVICE (Atomic Wrapper) ==========
-  # Thin wrapper around SendGrid API — stateless, no DB
-  email-service:
-    build: ./email-service
-    container_name: email-service
-    restart: unless-stopped
-    ports:
-      - "3005:3005"                               # Access at localhost:3005
-    environment:
-      - FLASK_PORT=3005
-      - FLASK_ENV=development
       - SENDGRID_API_KEY=${SENDGRID_API_KEY}
       - SENDGRID_FROM_EMAIL=${SENDGRID_FROM_EMAIL}
       - SENDGRID_FROM_NAME=${SENDGRID_FROM_NAME}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     networks:
       - app-network
 
@@ -474,7 +453,6 @@ services:
       replicas: 5
     networks:
       - app-network
-
 networks:
   app-network:
     driver: bridge
