@@ -85,33 +85,92 @@ def send_email(to_email: str, to_name: str, subject: str, html: str, text: str) 
 # EMAIL TEMPLATE — Scenario 1
 # =============================================================================
 
+def _format_money(amount) -> str:
+    try:
+        return f"{float(amount):.2f}"
+    except Exception:
+        return str(amount)
+
+
+def _normalize_flights(data: dict) -> list[dict]:
+    flights = data.get("flights")
+    if isinstance(flights, list) and flights:
+        return flights
+
+    return [{
+        "leg": "outbound",
+        "flight_number": data.get("flight_number", "N/A"),
+        "origin": data.get("origin", "Origin"),
+        "destination": data.get("destination", "Destination"),
+        "departure_date": data.get("departure_date", "N/A"),
+        "seat_number": data.get("seat_number", "N/A"),
+        "booking_id": data.get("booking_id"),
+    }]
+
 def booking_confirmation_template(data: dict) -> dict:
-    """Scenario 1: Booking confirmed after successful payment."""
-    return {
-        "subject": f"Booking Confirmed - {data['flight_number']}",
-        "html": f"""
-        <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;">
-          <h2 style="color:#2c7be5;">Your Booking is Confirmed!</h2>
-          <p>Dear {data['passenger_name']},</p>
-          <p>Your booking has been successfully confirmed. Here are your flight details:</p>
-          <table style="width:100%;border-collapse:collapse;margin:20px 0;">
-            <tr><td style="padding:8px;font-weight:bold;">Booking ID</td><td style="padding:8px;">{data['booking_id']}</td></tr>
-            <tr><td style="padding:8px;font-weight:bold;">Flight</td><td style="padding:8px;">{data['flight_number']}</td></tr>
-            <tr><td style="padding:8px;font-weight:bold;">From</td><td style="padding:8px;">{data['origin']}</td></tr>
-            <tr><td style="padding:8px;font-weight:bold;">To</td><td style="padding:8px;">{data['destination']}</td></tr>
-            <tr><td style="padding:8px;font-weight:bold;">Date</td><td style="padding:8px;">{data['departure_date']}</td></tr>
-            <tr><td style="padding:8px;font-weight:bold;">Seat</td><td style="padding:8px;">{data['seat_number']}</td></tr>
-            <tr><td style="padding:8px;font-weight:bold;">Amount Paid</td><td style="padding:8px;">${data['amount_paid']}</td></tr>
-          </table>
-          <p>Thank you for flying with us!</p>
-        </div>
-        """,
-        "text": (
-            f"Booking Confirmed! Booking ID: {data['booking_id']}. "
-            f"Flight: {data['flight_number']} from {data['origin']} to {data['destination']} "
-            f"on {data['departure_date']}. Seat: {data['seat_number']}. Amount Paid: ${data['amount_paid']}."
-        ),
-    }
+        """Scenario 1: Booking confirmed after successful payment."""
+        flights = _normalize_flights(data)
+        is_round_trip = len(flights) > 1
+        heading = "Your Round-Trip Booking is Confirmed!" if is_round_trip else "Your Booking is Confirmed!"
+        subject = "Booking Confirmed - Round Trip" if is_round_trip else f"Booking Confirmed - {flights[0].get('flight_number', 'N/A')}"
+
+        rows_html = []
+        rows_text = []
+        for index, flight in enumerate(flights, start=1):
+                leg_label = "Departure Flight" if flight.get("leg") == "outbound" else "Return Flight"
+                rows_html.append(f"""
+                    <tr style="background:{'#f8fafc' if index % 2 == 1 else '#ffffff'};">
+                        <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;font-weight:700;color:#111827;">{leg_label}</td>
+                        <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#111827;">{flight.get('flight_number', 'N/A')}</td>
+                        <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#374151;">{flight.get('origin', 'Origin')} → {flight.get('destination', 'Destination')}</td>
+                        <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#374151;">{flight.get('departure_date', 'N/A')}</td>
+                        <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#374151;">{flight.get('seat_number', 'N/A')}</td>
+                    </tr>
+                """)
+                rows_text.append(
+                        f"{leg_label}: {flight.get('flight_number', 'N/A')} | "
+                        f"{flight.get('origin', 'Origin')} -> {flight.get('destination', 'Destination')} | "
+                        f"Date: {flight.get('departure_date', 'N/A')} | Seat: {flight.get('seat_number', 'N/A')}"
+                )
+
+        return {
+                "subject": subject,
+                "html": f"""
+                <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;max-width:700px;margin:20px auto;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;background:#ffffff;">
+                    <div style="background:linear-gradient(135deg,#1d4ed8,#2563eb);padding:24px 28px;color:#ffffff;">
+                        <h2 style="margin:0;font-size:28px;line-height:1.2;">{heading}</h2>
+                        <p style="margin:10px 0 0;font-size:14px;opacity:0.95;">Dear {data['passenger_name']}, your payment has been received and your itinerary is confirmed.</p>
+                    </div>
+                    <div style="padding:24px 28px;">
+                        <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
+                            <thead>
+                                <tr style="background:#f3f4f6;">
+                                    <th style="text-align:left;padding:10px 12px;font-size:12px;letter-spacing:0.04em;text-transform:uppercase;color:#6b7280;">Leg</th>
+                                    <th style="text-align:left;padding:10px 12px;font-size:12px;letter-spacing:0.04em;text-transform:uppercase;color:#6b7280;">Flight</th>
+                                    <th style="text-align:left;padding:10px 12px;font-size:12px;letter-spacing:0.04em;text-transform:uppercase;color:#6b7280;">Route</th>
+                                    <th style="text-align:left;padding:10px 12px;font-size:12px;letter-spacing:0.04em;text-transform:uppercase;color:#6b7280;">Date</th>
+                                    <th style="text-align:left;padding:10px 12px;font-size:12px;letter-spacing:0.04em;text-transform:uppercase;color:#6b7280;">Seat</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {''.join(rows_html)}
+                            </tbody>
+                        </table>
+                        <table style="width:100%;border-collapse:collapse;margin-top:16px;">
+                            <tr><td style="padding:8px 0;color:#6b7280;">Booking ID</td><td style="padding:8px 0;text-align:right;font-weight:700;color:#111827;">{data.get('booking_id', 'N/A')}</td></tr>
+                            <tr><td style="padding:8px 0;color:#6b7280;">Return Booking ID</td><td style="padding:8px 0;text-align:right;font-weight:700;color:#111827;">{data.get('return_booking_id') or '-'}</td></tr>
+                            <tr><td style="padding:8px 0;color:#6b7280;">Total Amount Paid</td><td style="padding:8px 0;text-align:right;font-weight:700;color:#111827;">${_format_money(data.get('amount_paid', '0'))}</td></tr>
+                        </table>
+                        <p style="margin:18px 0 0;color:#4b5563;font-size:13px;">Thank you for flying with us.</p>
+                    </div>
+                </div>
+                """,
+                "text": (
+                        f"Booking Confirmed! Booking ID: {data.get('booking_id', 'N/A')}. "
+                        + " | ".join(rows_text)
+                        + f". Total Amount Paid: ${_format_money(data.get('amount_paid', '0'))}."
+                ),
+        }
 
 
 # =============================================================================

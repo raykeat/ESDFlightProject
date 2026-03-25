@@ -361,24 +361,48 @@ app.post('/api/bookings/finalize', async (req, res) => {
       console.warn('Could not fetch passenger for notification:', err.message);
     }
 
-    // 5) Resolve flight details for notification (prefer request payload, fallback to flight-service)
-    const flightDetails = await getFlightEmailDetails(flightID);
-    const emailFlightNumber = firstNonEmpty(req.body.flightNumber, flightDetails.flightNumber, `SQ${flightID}`);
-    const emailOrigin = firstNonEmpty(req.body.origin, flightDetails.origin, 'Origin');
-    const emailDestination = firstNonEmpty(req.body.destination, flightDetails.destination, 'Destination');
-    const emailDepartureDate = firstNonEmpty(req.body.departureDate, flightDetails.departureDate, 'N/A');
+    const outboundDetails = await getFlightEmailDetails(flightID);
+    const outboundFlight = {
+      leg: 'outbound',
+      flight_id: flightID,
+      booking_id: bookingID,
+      flight_number: firstNonEmpty(req.body.flightNumber, outboundDetails.flightNumber, `SQ${flightID}`),
+      origin: firstNonEmpty(req.body.origin, outboundDetails.origin, 'Origin'),
+      destination: firstNonEmpty(req.body.destination, outboundDetails.destination, 'Destination'),
+      departure_date: firstNonEmpty(req.body.departureDate, outboundDetails.departureDate, 'N/A'),
+      seat_number: seatNumber,
+    };
+
+    const flights = [outboundFlight];
+
+    if (returnFlightID && returnSeatNumber) {
+      const returnDetails = await getFlightEmailDetails(returnFlightID);
+      flights.push({
+        leg: 'return',
+        flight_id: returnFlightID,
+        booking_id: returnBookingID || null,
+        flight_number: firstNonEmpty(returnDetails.flightNumber, `SQ${returnFlightID}`),
+        origin: firstNonEmpty(returnDetails.origin, outboundFlight.destination, 'Origin'),
+        destination: firstNonEmpty(returnDetails.destination, outboundFlight.origin, 'Destination'),
+        departure_date: firstNonEmpty(returnDetails.departureDate, 'N/A'),
+        seat_number: returnSeatNumber,
+      });
+    }
 
     // 6) Publish booking.confirmed to RabbitMQ → Notification Service sends email
     await publishBookingConfirmed({
       booking_id:      bookingID,
       passenger_name:  `${passenger.FirstName} ${passenger.LastName}`,
       passenger_email: passenger.Email,
-      flight_number:   emailFlightNumber,
-      origin:          emailOrigin,
-      destination:     emailDestination,
-      departure_date:  emailDepartureDate,
-      seat_number:     seatNumber,
-      amount_paid:     payment.amount
+      flight_number:   outboundFlight.flight_number,
+      origin:          outboundFlight.origin,
+      destination:     outboundFlight.destination,
+      departure_date:  outboundFlight.departure_date,
+      seat_number:     outboundFlight.seat_number,
+      amount_paid:     payment.amount,
+      trip_type:       flights.length > 1 ? 'round_trip' : 'one_way',
+      flights,
+      return_booking_id: returnBookingID || null,
     });
 
     return res.status(200).json({

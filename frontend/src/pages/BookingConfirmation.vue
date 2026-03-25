@@ -270,7 +270,7 @@ onMounted(async () => {
             <span class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
             Redirecting to Stripe...
           </span>
-          <span v-else>Proceed to Payment · ${{ bookingDetails.amount?.toFixed(2) }}</span>
+          <span v-else>Proceed to Payment · ${{ totalAmount.toFixed(2) }}</span>
         </button>
 
         <p class="mt-4 text-center text-xs text-[#6e6e73]">
