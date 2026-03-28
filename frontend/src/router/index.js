@@ -10,6 +10,8 @@ import RebookingOffer from '../pages/RebookingOffer.vue'
 import StaffAuth    from '../pages/StaffAuth.vue'
 import StaffFlights from '../pages/StaffFlights.vue'
 import FlightDetail from '../pages/FlightDetail.vue'
+import ConvertMiles from '../pages/ConvertMiles.vue'
+import MyVouchers from '../pages/MyVouchers.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -68,6 +70,16 @@ const router = createRouter({
       path: '/staff/flights',
       name: 'staff-flights',
       component: StaffFlights
+    },
+    {
+      path: '/loyalty/convert',
+      name: 'loyalty-convert',
+      component: ConvertMiles
+    },
+    {
+      path: '/my-vouchers',
+      name: 'my-vouchers',
+      component: MyVouchers
     }
   ],
 })
