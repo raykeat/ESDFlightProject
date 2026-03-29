@@ -535,6 +535,11 @@ services:
       - DB_USER=root
       - DB_PASSWORD=rootpassword
       - DB_NAME=voucher_db
+      - EXTERNAL_VOUCHER_MODE=${EXTERNAL_VOUCHER_MODE:-tremendous}
+      - TREMENDOUS_API_URL=${TREMENDOUS_API_URL:-https://testflight.tremendous.com/api/v2}
+      - TREMENDOUS_API_KEY=${TREMENDOUS_API_KEY}
+      - TREMENDOUS_FUNDING_SOURCE_ID=${TREMENDOUS_FUNDING_SOURCE_ID}
+      - TREMENDOUS_CAMPAIGN_ID=${TREMENDOUS_CAMPAIGN_ID}
     depends_on:
       voucher-db:
         condition: service_healthy
@@ -569,11 +574,12 @@ services:
       - MILES_BALANCE_URL=http://miles-balance-service:5001
       - MILES_TRANSACTION_URL=http://miles-transaction-service:5002
       - VOUCHER_URL=http://voucher-service:5003
-      - NOTIFICATION_URL=http://notification-service:3000
+      - NOTIFICATION_URL=http://notification-service:3004
     depends_on:
       - miles-balance-service
       - miles-transaction-service
       - voucher-service
+      - notification-service
     networks:
       - app-network
     restart: unless-stopped

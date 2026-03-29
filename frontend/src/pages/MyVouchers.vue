@@ -76,8 +76,25 @@ function getVoucherIcon(type) {
       return '⬆️'
     case 'LOUNGE_PASS':
       return '🏨'
+    case 'PARTNER_GIFT':
+      return '🎟️'
     default:
       return '🎁'
+  }
+}
+
+function getVoucherDisplayName(type) {
+  switch (type) {
+    case 'TRAVEL_CREDIT':
+      return 'Travel Credit'
+    case 'UPGRADE':
+      return 'Cabin Upgrade'
+    case 'LOUNGE_PASS':
+      return 'Lounge Pass'
+    case 'PARTNER_GIFT':
+      return 'Partner Gift Card'
+    default:
+      return 'Voucher'
   }
 }
 
@@ -163,9 +180,7 @@ function convertMore() {
           <div class="mt-4">
             <p class="text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">{{ voucher.voucherType || voucher.type }}</p>
             <h3 class="mt-2 text-lg font-semibold text-[#1d1d1f]">
-              {{ voucher.voucherType === 'TRAVEL_CREDIT' ? 'Travel Credit' : 
-                 voucher.voucherType === 'UPGRADE' ? 'Cabin Upgrade' :
-                 voucher.voucherType === 'LOUNGE_PASS' ? 'Lounge Pass' : 'Voucher' }}
+              {{ getVoucherDisplayName(voucher.voucherType || voucher.type) }}
             </h3>
           </div>
 
@@ -195,6 +210,10 @@ function convertMore() {
               <span class="text-[#6e6e73]">Used:</span>
               <span class="font-semibold text-[#1d1d1f]">{{ voucher.usedDate }}</span>
             </div>
+            <div v-if="voucher.providerName" class="flex justify-between">
+              <span class="text-[#6e6e73]">Provider:</span>
+              <span class="font-semibold text-[#1d1d1f]">{{ voucher.providerName }}</span>
+            </div>
           </div>
 
           <!-- Actions -->
@@ -205,6 +224,15 @@ function convertMore() {
             >
               Use This Voucher
             </button>
+            <a
+              v-if="voucher.redemptionUrl"
+              :href="voucher.redemptionUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="mt-2 block w-full rounded-lg border border-black/10 bg-white px-4 py-2 text-center text-xs font-semibold uppercase tracking-[0.12em] text-[#1d1d1f] transition hover:bg-[#f5f5f7]"
+            >
+              Open Redemption Link
+            </a>
           </div>
         </div>
       </div>

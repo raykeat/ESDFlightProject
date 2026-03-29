@@ -11,6 +11,7 @@ const currentStep = ref(1) // 1: View Balance, 2: Multi-Select Vouchers, 3: Conf
 const currentBalance = ref(null)
 const selectedVouchers = ref([]) // Array of voucher types selected
 const generatedVouchers = ref([]) // Generated voucher codes
+const travelCreditMiles = ref(500)
 const loading = ref(false)
 const errorMessage = ref('')
 
@@ -27,12 +28,39 @@ const selectedVoucherDetails = computed(() => {
     .filter(Boolean)
 })
 
+const travelCreditMinMiles = computed(() => {
+  const travelType = voucherTypes.value.find(v => v.type === 'TRAVEL_CREDIT')
+  return travelType?.milesRequired || 500
+})
+
+const normalizedTravelCreditMiles = computed(() => {
+  const parsed = Number(travelCreditMiles.value)
+  if (!Number.isFinite(parsed)) return travelCreditMinMiles.value
+  return Math.max(0, Math.floor(parsed))
+})
+
+function getVoucherMilesNeeded(voucher) {
+  if (!voucher) return 0
+  if (voucher.type === 'TRAVEL_CREDIT') {
+    return Math.max(travelCreditMinMiles.value, normalizedTravelCreditMiles.value)
+  }
+  return voucher.milesValue || voucher.milesRequired || 0
+}
+
 const totalMilesNeeded = computed(() => {
-  return selectedVoucherDetails.value.reduce((sum, v) => sum + v.milesRequired, 0)
+  return selectedVoucherDetails.value.reduce((sum, v) => sum + getVoucherMilesNeeded(v), 0)
 })
 
 const totalMilesAfter = computed(() => {
   return (currentBalance.value || 0) - totalMilesNeeded.value
+})
+
+const isSelectionValid = computed(() => {
+  if (selectedVouchers.value.length === 0) return false
+  if (selectedVouchers.value.includes('TRAVEL_CREDIT') && normalizedTravelCreditMiles.value < travelCreditMinMiles.value) {
+    return false
+  }
+  return totalMilesAfter.value >= 0
 })
 
 onMounted(async () => {
@@ -99,6 +127,11 @@ async function fetchVoucherTypes() {
       icon: type.icon || '🎁',
       benefits: type.benefits || [],
     })) : []
+
+    const travelType = voucherTypes.value.find(v => v.type === 'TRAVEL_CREDIT')
+    if (travelType && travelCreditMiles.value < travelType.milesRequired) {
+      travelCreditMiles.value = travelType.milesRequired
+    }
   } catch (error) {
     console.error('Voucher types fetch error:', error)
     // Empty array - no voucher types available
@@ -112,6 +145,9 @@ function toggleVoucherSelection(type) {
     selectedVouchers.value.splice(index, 1)
   } else {
     selectedVouchers.value.push(type)
+    if (type === 'TRAVEL_CREDIT' && travelCreditMiles.value < travelCreditMinMiles.value) {
+      travelCreditMiles.value = travelCreditMinMiles.value
+    }
   }
 }
 
@@ -129,7 +165,7 @@ function goBack() {
 }
 
 function proceedToConfirmation() {
-  if (selectedVouchers.value.length > 0 && totalMilesAfter.value >= 0) {
+  if (isSelectionValid.value) {
     currentStep.value = 3
   }
 }
@@ -140,6 +176,10 @@ async function executeConversion() {
   
   try {
     const passengerID = currentPassenger.value?.passenger_id
+    const firstName = currentPassenger.value?.FirstName || currentPassenger.value?.firstName || ''
+    const lastName = currentPassenger.value?.LastName || currentPassenger.value?.lastName || ''
+    const passengerName = `${firstName} ${lastName}`.trim()
+    const passengerEmail = currentPassenger.value?.Email || currentPassenger.value?.email || ''
     const loyaltyUrl = import.meta.env.VITE_LOYALTY_SERVICE_URL || 'http://localhost:5004'
     
     let response
@@ -151,8 +191,10 @@ async function executeConversion() {
         `${loyaltyUrl}/api/loyalty/convert`,
         {
           passengerID,
+          passengerEmail,
+          passengerName,
           voucherType: voucher.type,
-          milesToConvert: voucher.milesRequired
+          milesToConvert: getVoucherMilesNeeded(voucher)
         }
       )
       generatedVouchers.value = [response.data.voucher]
@@ -162,11 +204,13 @@ async function executeConversion() {
         `${loyaltyUrl}/api/loyalty/convert-bundle`,
         {
           passengerID,
+          passengerEmail,
+          passengerName,
           items: selectedVouchers.value.map(type => {
             const voucher = selectedVoucherDetails.value.find(v => v.type === type)
             return {
               voucherType: type,
-              milesToConvert: voucher.milesRequired
+              milesToConvert: getVoucherMilesNeeded(voucher)
             }
           })
         }
@@ -232,7 +276,9 @@ function viewMyVouchers() {
               >
                 <p class="text-3xl">{{ voucher.icon }}</p>
                 <p class="mt-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">{{ voucher.name }}</p>
-                <p class="mt-1 text-lg font-semibold text-[#1d1d1f]">{{ voucher.milesRequired?.toLocaleString() }} miles</p>
+                <p class="mt-1 text-lg font-semibold text-[#1d1d1f]">
+                  {{ voucher.type === 'TRAVEL_CREDIT' ? `From ${voucher.milesRequired?.toLocaleString()} miles` : `${(voucher.milesValue || voucher.milesRequired)?.toLocaleString()} miles` }}
+                </p>
               </div>
             </div>
           </div>
@@ -277,7 +323,22 @@ function viewMyVouchers() {
               <div v-if="voucher.benefits.length > 0" class="mt-4 flex flex-wrap gap-2">
                 <span v-for="benefit in voucher.benefits" :key="benefit" class="inline-block rounded-lg bg-[#f5f5f7] px-3 py-1 text-xs text-[#6e6e73]">{{ benefit }}</span>
               </div>
-              <p class="mt-4 text-lg font-semibold text-[#1d1d1f]">{{ voucher.milesRequired.toLocaleString() }} miles</p>
+
+              <div v-if="voucher.type === 'TRAVEL_CREDIT' && isVoucherSelected(voucher.type)" class="mt-4 rounded-xl border border-black/10 bg-white p-4">
+                <p class="text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">Choose miles to convert</p>
+                <input
+                  v-model.number="travelCreditMiles"
+                  type="number"
+                  :min="travelCreditMinMiles"
+                  step="100"
+                  class="mt-2 w-full rounded-xl border border-black/10 bg-[#f5f5f7] px-3 py-2 text-sm text-[#1d1d1f] outline-none transition focus:border-[#e63946]/65 focus:ring-2 focus:ring-[#e63946]/20"
+                />
+                <p class="mt-2 text-xs text-[#6e6e73]">Minimum: {{ travelCreditMinMiles.toLocaleString() }} miles</p>
+              </div>
+
+              <p class="mt-4 text-lg font-semibold text-[#1d1d1f]">
+                {{ voucher.type === 'TRAVEL_CREDIT' ? `From ${voucher.milesRequired.toLocaleString()} miles` : `${(voucher.milesValue || voucher.milesRequired).toLocaleString()} miles` }}
+              </p>
             </div>
           </label>
         </div>
@@ -288,7 +349,7 @@ function viewMyVouchers() {
           <div class="mt-4 space-y-2">
             <div v-for="voucher in selectedVoucherDetails" :key="voucher.type" class="flex justify-between">
               <span class="text-sm text-[#1d1d1f]">{{ voucher.name }}</span>
-              <span class="text-sm font-semibold text-[#1d1d1f]">{{ voucher.milesRequired.toLocaleString() }} miles</span>
+              <span class="text-sm font-semibold text-[#1d1d1f]">{{ getVoucherMilesNeeded(voucher).toLocaleString() }} miles</span>
             </div>
           </div>
           <div class="mt-4 border-t border-black/10 pt-4 flex justify-between">
@@ -311,11 +372,15 @@ function viewMyVouchers() {
           <button
             class="rounded-2xl bg-gradient-to-r from-[#e63946] to-[#f43f5e] px-5 py-3 text-sm font-semibold uppercase tracking-[0.14em] text-white transition hover:shadow-[0_8px_30px_rgba(230,57,70,0.35)] disabled:opacity-50"
             @click="proceedToConfirmation"
-            :disabled="selectedVouchers.length === 0 || totalMilesAfter < 0"
+            :disabled="!isSelectionValid"
           >
             {{ selectedVouchers.length === 0 ? 'Select at least one' : 'Continue to Confirm' }}
           </button>
         </div>
+
+        <p v-if="selectedVouchers.includes('TRAVEL_CREDIT') && normalizedTravelCreditMiles < travelCreditMinMiles" class="mt-4 text-sm font-medium text-red-600">
+          Travel Credit requires at least {{ travelCreditMinMiles.toLocaleString() }} miles.
+        </p>
       </section>
 
       <!-- Step 3: Confirm Conversion -->
@@ -330,7 +395,7 @@ function viewMyVouchers() {
               <div class="flex-1">
                 <p class="text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">Item {{ index + 1 }}: {{ voucher.type }}</p>
                 <h3 class="mt-1 text-xl font-semibold text-[#1d1d1f]">{{ voucher.name }}</h3>
-                <p class="mt-2 text-sm text-[#6e6e73]">{{ voucher.milesRequired.toLocaleString() }} miles</p>
+                <p class="mt-2 text-sm text-[#6e6e73]">{{ getVoucherMilesNeeded(voucher).toLocaleString() }} miles</p>
               </div>
             </div>
           </div>
@@ -392,6 +457,15 @@ function viewMyVouchers() {
               <span class="font-semibold">Value:</span> {{ voucher.voucherValue || 'N/A' }} 
               <span class="ml-4"><span class="font-semibold">Expires:</span> {{ voucher.expiryDate || 'N/A' }}</span>
             </p>
+            <a
+              v-if="voucher.redemptionUrl"
+              :href="voucher.redemptionUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="mt-4 inline-flex rounded-xl border border-black/10 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#1d1d1f] transition hover:bg-[#efefef]"
+            >
+              Open Redemption Link
+            </a>
           </div>
         </div>
 

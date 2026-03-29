@@ -2,6 +2,7 @@ const express = require('express');
 const mysql = require('mysql2');
 const cors = require('cors');
 const crypto = require('crypto');
+const axios = require('axios');
 const app = express();
 
 app.use(cors());
@@ -13,6 +14,12 @@ const db = mysql.createConnection({
   password: process.env.DB_PASSWORD || 'rootpassword',
   database: process.env.DB_NAME || 'voucher_db'
 });
+
+const EXTERNAL_VOUCHER_MODE = process.env.EXTERNAL_VOUCHER_MODE || 'tremendous';
+const TREMENDOUS_API_URL = process.env.TREMENDOUS_API_URL || 'https://testflight.tremendous.com/api/v2';
+const TREMENDOUS_API_KEY = process.env.TREMENDOUS_API_KEY || '';
+const TREMENDOUS_CAMPAIGN_ID = process.env.TREMENDOUS_CAMPAIGN_ID || '';
+const TREMENDOUS_FUNDING_SOURCE_ID = process.env.TREMENDOUS_FUNDING_SOURCE_ID || '';
 
 // Helper function to generate unique voucher code
 function generateVoucherCode() {
@@ -26,25 +33,124 @@ const VOUCHER_TYPES = {
   TRAVEL_CREDIT: {
     name: 'Travel Credit',
     rate: 100,  // 100 miles = $1
-    minMiles: 1000,
+    minMiles: 500,
     expiryDays: 365,
     calculateValue: (miles) => miles / 100
   },
   UPGRADE: {
     name: 'Cabin Upgrade',
-    rate: 500,  // 500 miles per upgrade
+    rate: 2000,  // 2000 miles per upgrade
     minMiles: 2000,
     expiryDays: 180,
     calculateValue: () => 1  // 1 upgrade
   },
   LOUNGE_PASS: {
     name: 'Lounge Pass',
-    rate: 2000,  // 2000 miles per pass
-    minMiles: 2000,
+    rate: 500,  // 500 miles per pass
+    minMiles: 500,
     expiryDays: 90,
     calculateValue: () => 1  // 1 pass
+  },
+  PARTNER_GIFT: {
+    name: 'Partner Gift Card',
+    rate: 1500,
+    minMiles: 1500,
+    expiryDays: 365,
+    provider: 'tremendous',
+    providerProduct: 'partner-gift-sandbox',
+    description: 'External partner e-gift voucher via provider integration',
+    calculateValue: () => 15
   }
 };
+
+function ensureSchema() {
+  const addColumnStatements = [
+    'ALTER TABLE vouchers ADD COLUMN providerName VARCHAR(50) NULL',
+    'ALTER TABLE vouchers ADD COLUMN providerProductId VARCHAR(100) NULL',
+    'ALTER TABLE vouchers ADD COLUMN externalOrderId VARCHAR(100) NULL',
+    'ALTER TABLE vouchers ADD COLUMN redemptionUrl VARCHAR(500) NULL'
+  ];
+
+  addColumnStatements.forEach((sql) => {
+    db.query(sql, (err) => {
+      if (!err) return;
+      // ER_DUP_FIELDNAME = 1060 (column already exists), ignore this case
+      if (err.errno !== 1060) {
+        console.error('Schema migration warning:', err.message);
+      }
+    });
+  });
+
+  console.log('Voucher schema migration check complete');
+}
+
+async function createPartnerReward({ passengerID, voucherType, voucherValue, passengerEmail, passengerName }) {
+  if (EXTERNAL_VOUCHER_MODE === 'mock') {
+    const mockOrderId = `MOCK-${Date.now()}-${passengerID}`;
+    return {
+      providerName: 'tremendous-mock',
+      providerProductId: VOUCHER_TYPES[voucherType]?.providerProduct || 'partner-gift-sandbox',
+      externalOrderId: mockOrderId,
+      redemptionUrl: `https://sandbox.rewards.example/redeem/${mockOrderId}`
+    };
+  }
+
+  if (EXTERNAL_VOUCHER_MODE !== 'tremendous') {
+    throw new Error(`Unsupported EXTERNAL_VOUCHER_MODE: ${EXTERNAL_VOUCHER_MODE}`);
+  }
+
+  if (!TREMENDOUS_API_KEY) {
+    throw new Error('TREMENDOUS_API_KEY is required when EXTERNAL_VOUCHER_MODE=tremendous');
+  }
+
+  if (!TREMENDOUS_CAMPAIGN_ID) {
+    throw new Error('TREMENDOUS_CAMPAIGN_ID is required when EXTERNAL_VOUCHER_MODE=tremendous');
+  }
+
+  if (!TREMENDOUS_FUNDING_SOURCE_ID) {
+    throw new Error('TREMENDOUS_FUNDING_SOURCE_ID is required when EXTERNAL_VOUCHER_MODE=tremendous');
+  }
+
+  try {
+    const payload = {
+      payment: { funding_source_id: TREMENDOUS_FUNDING_SOURCE_ID },
+      rewards: [
+        {
+          campaign_id: TREMENDOUS_CAMPAIGN_ID,
+          value: { denomination: voucherValue, currency_code: 'USD' },
+          delivery: { method: 'LINK' },
+          recipient: {
+            name: passengerName,
+            email: passengerEmail
+          }
+        }
+      ]
+    };
+
+    const response = await axios.post(`${TREMENDOUS_API_URL}/orders`, payload, {
+      headers: {
+        Authorization: `Bearer ${TREMENDOUS_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      timeout: 10000
+    });
+
+    const order = response.data?.order || response.data || {};
+    const reward = order?.rewards?.[0] || {};
+    const redemptionLink = reward?.delivery?.link || reward?.reward_url || reward?.claim_url || '';
+
+    return {
+      providerName: 'tremendous',
+      providerProductId: TREMENDOUS_CAMPAIGN_ID,
+      externalOrderId: order.id || order.order_id || '',
+      redemptionUrl: redemptionLink
+    };
+  } catch (error) {
+    const providerBody = error.response?.data;
+    const details = providerBody ? JSON.stringify(providerBody) : error.message;
+    throw new Error(`External provider create reward failed: ${details}`);
+  }
+}
 
 // Health check
 app.get('/health', (req, res) => {
@@ -58,7 +164,8 @@ app.get('/vouchers/types', (req, res) => {
     name: value.name,
     rate: value.rate,
     minMiles: value.minMiles,
-    expiryDays: value.expiryDays
+    expiryDays: value.expiryDays,
+    description: value.description || ''
   }));
 
   res.json({ voucherTypes: types });
@@ -78,13 +185,14 @@ app.get('/vouchers/types/:type', (req, res) => {
     name: voucherType.name,
     rate: voucherType.rate,
     minMiles: voucherType.minMiles,
-    expiryDays: voucherType.expiryDays
+    expiryDays: voucherType.expiryDays,
+    description: voucherType.description || ''
   });
 });
 
 // POST /vouchers - Generate new voucher
-app.post('/vouchers', (req, res) => {
-  const { passengerID, voucherType, milesRedeemed, voucherValue } = req.body;
+app.post('/vouchers', async (req, res) => {
+  const { passengerID, voucherType, milesRedeemed, voucherValue, passengerEmail, passengerName } = req.body;
 
   if (!passengerID || !voucherType || !milesRedeemed) {
     return res.status(400).json({ error: 'Missing required fields: passengerID, voucherType, milesRedeemed' });
@@ -95,9 +203,6 @@ app.post('/vouchers', (req, res) => {
     return res.status(400).json({ error: 'Invalid voucher type' });
   }
 
-  // Validation rules mirror loyalty-composite:
-  // - TRAVEL_CREDIT uses a min threshold
-  // - Fixed vouchers require their fixed rate amount
   if (voucherType === 'TRAVEL_CREDIT') {
     if (milesRedeemed < typeConfig.minMiles) {
       return res.status(400).json({
@@ -122,10 +227,44 @@ app.post('/vouchers', (req, res) => {
     finalValue = typeConfig.calculateValue(milesRedeemed);
   }
 
+  let external = {
+    providerName: null,
+    providerProductId: null,
+    externalOrderId: null,
+    redemptionUrl: null
+  };
+
+  try {
+    if (voucherType === 'PARTNER_GIFT') {
+      external = await createPartnerReward({
+        passengerID,
+        voucherType,
+        voucherValue: finalValue,
+        passengerEmail,
+        passengerName
+      });
+    }
+  } catch (providerError) {
+    return res.status(502).json({ error: providerError.message });
+  }
+
   db.query(
-    `INSERT INTO vouchers (passengerID, voucherCode, voucherType, voucherValue, milesRedeemed, expiryDate, status) 
-     VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE')`,
-    [passengerID, voucherCode, voucherType, finalValue, milesRedeemed, expiryDate.toISOString().split('T')[0]],
+    `INSERT INTO vouchers (
+      passengerID, voucherCode, voucherType, voucherValue, milesRedeemed, expiryDate, status,
+      providerName, providerProductId, externalOrderId, redemptionUrl
+    ) VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?)`,
+    [
+      passengerID,
+      voucherCode,
+      voucherType,
+      finalValue,
+      milesRedeemed,
+      expiryDate.toISOString().split('T')[0],
+      external.providerName,
+      external.providerProductId,
+      external.externalOrderId,
+      external.redemptionUrl
+    ],
     (err, result) => {
       if (err) {
         console.error(err);
@@ -140,15 +279,19 @@ app.post('/vouchers', (req, res) => {
         voucherValue: finalValue,
         milesRedeemed,
         expiryDate: expiryDate.toISOString().split('T')[0],
-        status: 'ACTIVE'
+        status: 'ACTIVE',
+        providerName: external.providerName,
+        providerProductId: external.providerProductId,
+        externalOrderId: external.externalOrderId,
+        redemptionUrl: external.redemptionUrl
       });
     }
   );
 });
 
 // POST /vouchers/bundle - Generate multiple vouchers in one call
-app.post('/vouchers/bundle', (req, res) => {
-  const { passengerID, items } = req.body;
+app.post('/vouchers/bundle', async (req, res) => {
+  const { passengerID, items, passengerEmail, passengerName } = req.body;
 
   if (!passengerID || !items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'Missing required fields: passengerID, items array' });
@@ -158,7 +301,7 @@ app.post('/vouchers/bundle', (req, res) => {
   const errors = [];
 
   // Process each item sequentially
-  const processItem = (index, callback) => {
+  const processItem = async (index, callback) => {
     if (index >= items.length) {
       return callback(null, results);
     }
@@ -194,10 +337,45 @@ app.post('/vouchers/bundle', (req, res) => {
     expiryDate.setDate(expiryDate.getDate() + typeConfig.expiryDays);
     const voucherValue = typeConfig.calculateValue(item.milesRedeemed);
 
+    let external = {
+      providerName: null,
+      providerProductId: null,
+      externalOrderId: null,
+      redemptionUrl: null
+    };
+
+    try {
+      if (item.voucherType === 'PARTNER_GIFT') {
+        external = await createPartnerReward({
+          passengerID,
+          voucherType: item.voucherType,
+          voucherValue,
+          passengerEmail,
+          passengerName
+        });
+      }
+    } catch (providerError) {
+      errors.push({ item, error: providerError.message });
+      return processItem(index + 1, callback);
+    }
+
     db.query(
-      `INSERT INTO vouchers (passengerID, voucherCode, voucherType, voucherValue, milesRedeemed, expiryDate, status) 
-       VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE')`,
-      [passengerID, voucherCode, item.voucherType, voucherValue, item.milesRedeemed, expiryDate.toISOString().split('T')[0]],
+      `INSERT INTO vouchers (
+        passengerID, voucherCode, voucherType, voucherValue, milesRedeemed, expiryDate, status,
+        providerName, providerProductId, externalOrderId, redemptionUrl
+      ) VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?)`,
+      [
+        passengerID,
+        voucherCode,
+        item.voucherType,
+        voucherValue,
+        item.milesRedeemed,
+        expiryDate.toISOString().split('T')[0],
+        external.providerName,
+        external.providerProductId,
+        external.externalOrderId,
+        external.redemptionUrl
+      ],
       (err, result) => {
         if (err) {
           errors.push({ item, error: err.message });
@@ -208,7 +386,11 @@ app.post('/vouchers/bundle', (req, res) => {
             voucherType: item.voucherType,
             voucherValue,
             milesRedeemed: item.milesRedeemed,
-            expiryDate: expiryDate.toISOString().split('T')[0]
+            expiryDate: expiryDate.toISOString().split('T')[0],
+            providerName: external.providerName,
+            providerProductId: external.providerProductId,
+            externalOrderId: external.externalOrderId,
+            redemptionUrl: external.redemptionUrl
           });
         }
         processItem(index + 1, callback);
@@ -319,5 +501,7 @@ app.put('/vouchers/:voucherID/status', (req, res) => {
 
 const PORT = process.env.PORT || 5003;
 app.listen(PORT, () => {
+  ensureSchema();
+  console.log(`External voucher mode: ${EXTERNAL_VOUCHER_MODE}`);
   console.log(`Voucher Service running on port ${PORT}`);
 });

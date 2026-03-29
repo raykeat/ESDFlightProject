@@ -20,7 +20,7 @@ import urllib.error
 
 import pika
 from dotenv import load_dotenv
-from flask import Flask
+from flask import Flask, request
 
 load_dotenv()
 
@@ -174,6 +174,137 @@ def booking_confirmation_template(data: dict) -> dict:
 
 
 # =============================================================================
+# EMAIL TEMPLATE — Scenario 3 (Voucher Conversion)
+# =============================================================================
+
+def _display_name(data: dict) -> str:
+    if data.get("passengerName"):
+        return data["passengerName"]
+    first = data.get("firstName") or ""
+    last = data.get("lastName") or ""
+    full = f"{first} {last}".strip()
+    return full or "Valued Passenger"
+
+
+def voucher_confirmation_template(data: dict) -> dict:
+    voucher_type = data.get("voucherType", "VOUCHER")
+    voucher_code = data.get("voucherCode", "N/A")
+    voucher_value = data.get("voucherValue", "N/A")
+    expiry_date = data.get("expiryDate", "N/A")
+    miles_redeemed = data.get("milesRedeemed", "N/A")
+    remaining_miles = data.get("remainingMiles", "N/A")
+    provider_name = data.get("providerName") or "-"
+    redemption_url = data.get("redemptionUrl") or ""
+    external_order_id = data.get("externalOrderId") or "-"
+    passenger_name = _display_name(data)
+
+    subject = f"Voucher Created: {voucher_type}"
+    html = f"""
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;max-width:700px;margin:20px auto;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;background:#ffffff;">
+        <div style="background:linear-gradient(135deg,#0f766e,#0d9488);padding:24px 28px;color:#ffffff;">
+            <h2 style="margin:0;font-size:28px;line-height:1.2;">Your Voucher is Ready</h2>
+            <p style="margin:10px 0 0;font-size:14px;opacity:0.95;">Hi {passenger_name}, your miles-to-voucher conversion was successful.</p>
+        </div>
+        <div style="padding:24px 28px;">
+            <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
+                <tr><td style="padding:10px 12px;color:#6b7280;">Voucher Type</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{voucher_type}</td></tr>
+                <tr><td style="padding:10px 12px;color:#6b7280;">Voucher Code</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{voucher_code}</td></tr>
+                <tr><td style="padding:10px 12px;color:#6b7280;">Voucher Value</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{voucher_value}</td></tr>
+                <tr><td style="padding:10px 12px;color:#6b7280;">Miles Redeemed</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{miles_redeemed}</td></tr>
+                <tr><td style="padding:10px 12px;color:#6b7280;">Remaining Miles</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{remaining_miles}</td></tr>
+                <tr><td style="padding:10px 12px;color:#6b7280;">Expiry Date</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{expiry_date}</td></tr>
+                <tr><td style="padding:10px 12px;color:#6b7280;">Provider</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{provider_name}</td></tr>
+                <tr><td style="padding:10px 12px;color:#6b7280;">External Order ID</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{external_order_id}</td></tr>
+            </table>
+            {f'<p style="margin:14px 0 0;"><a href="{redemption_url}" style="display:inline-block;background:#0f766e;color:#ffffff;text-decoration:none;padding:10px 14px;border-radius:8px;font-weight:700;">Redeem Voucher</a></p>' if redemption_url else ''}
+            <p style="margin:18px 0 0;color:#4b5563;font-size:13px;">Keep your voucher code safe and apply it during checkout.</p>
+        </div>
+    </div>
+    """
+    text = (
+        f"Voucher conversion successful. Type: {voucher_type}. "
+        f"Code: {voucher_code}. Value: {voucher_value}. "
+        f"Miles Redeemed: {miles_redeemed}. Remaining Miles: {remaining_miles}. "
+        f"Expiry: {expiry_date}. Provider: {provider_name}. "
+        + (f"Redeem here: {redemption_url}." if redemption_url else "")
+    )
+
+    return {"subject": subject, "html": html, "text": text}
+
+
+def voucher_bundle_confirmation_template(data: dict) -> dict:
+    vouchers = data.get("vouchers") or []
+    passenger_name = _display_name(data)
+    total_redeemed = data.get("totalMilesRedeemed", "N/A")
+    remaining_miles = data.get("remainingMiles", "N/A")
+
+    rows = []
+    text_rows = []
+    for index, voucher in enumerate(vouchers, start=1):
+        voucher_type = voucher.get("voucherType") or voucher.get("type") or "VOUCHER"
+        voucher_code = voucher.get("voucherCode") or voucher.get("code") or "N/A"
+        voucher_value = voucher.get("voucherValue", "N/A")
+        expiry_date = voucher.get("expiryDate", "N/A")
+        miles_redeemed = voucher.get("milesRedeemed", "N/A")
+        provider_name = voucher.get("providerName") or "-"
+        redemption_url = voucher.get("redemptionUrl") or "-"
+
+        rows.append(
+            f"<tr>"
+            f"<td style='padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#111827;'>{index}</td>"
+            f"<td style='padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#111827;'>{voucher_type}</td>"
+            f"<td style='padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#111827;'>{voucher_code}</td>"
+            f"<td style='padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#111827;'>{voucher_value}</td>"
+            f"<td style='padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#111827;'>{miles_redeemed}</td>"
+            f"<td style='padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#111827;'>{expiry_date}</td>"
+            f"<td style='padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#111827;'>{provider_name}</td>"
+            f"<td style='padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#111827;'>{redemption_url}</td>"
+            f"</tr>"
+        )
+        text_rows.append(
+            f"{index}) {voucher_type} | Code: {voucher_code} | Value: {voucher_value} | Miles: {miles_redeemed} | Expiry: {expiry_date} | Provider: {provider_name} | Link: {redemption_url}"
+        )
+
+    html = f"""
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;max-width:760px;margin:20px auto;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;background:#ffffff;">
+        <div style="background:linear-gradient(135deg,#0f766e,#0d9488);padding:24px 28px;color:#ffffff;">
+            <h2 style="margin:0;font-size:28px;line-height:1.2;">Your Voucher Bundle is Ready</h2>
+            <p style="margin:10px 0 0;font-size:14px;opacity:0.95;">Hi {passenger_name}, your bundle conversion completed successfully.</p>
+        </div>
+        <div style="padding:24px 28px;">
+            <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
+                <thead>
+                    <tr style="background:#f3f4f6;">
+                        <th style="text-align:left;padding:10px 12px;font-size:12px;color:#6b7280;">#</th>
+                        <th style="text-align:left;padding:10px 12px;font-size:12px;color:#6b7280;">Type</th>
+                        <th style="text-align:left;padding:10px 12px;font-size:12px;color:#6b7280;">Code</th>
+                        <th style="text-align:left;padding:10px 12px;font-size:12px;color:#6b7280;">Value</th>
+                        <th style="text-align:left;padding:10px 12px;font-size:12px;color:#6b7280;">Miles</th>
+                        <th style="text-align:left;padding:10px 12px;font-size:12px;color:#6b7280;">Expiry</th>
+                        <th style="text-align:left;padding:10px 12px;font-size:12px;color:#6b7280;">Provider</th>
+                        <th style="text-align:left;padding:10px 12px;font-size:12px;color:#6b7280;">Redemption</th>
+                    </tr>
+                </thead>
+                <tbody>{''.join(rows)}</tbody>
+            </table>
+            <table style="width:100%;border-collapse:collapse;margin-top:16px;">
+                <tr><td style="padding:8px 0;color:#6b7280;">Total Miles Redeemed</td><td style="padding:8px 0;text-align:right;font-weight:700;color:#111827;">{total_redeemed}</td></tr>
+                <tr><td style="padding:8px 0;color:#6b7280;">Remaining Miles</td><td style="padding:8px 0;text-align:right;font-weight:700;color:#111827;">{remaining_miles}</td></tr>
+            </table>
+        </div>
+    </div>
+    """
+
+    text = (
+        "Voucher bundle conversion successful. "
+        + " ".join(text_rows)
+        + f" Total Miles Redeemed: {total_redeemed}. Remaining Miles: {remaining_miles}."
+    )
+
+    return {"subject": f"Voucher Bundle Created ({len(vouchers)})", "html": html, "text": text}
+
+
+# =============================================================================
 # NOTIFICATION HANDLER
 # =============================================================================
 
@@ -289,6 +420,56 @@ def start_rabbitmq_consumer():
 # =============================================================================
 
 app = Flask(__name__)
+
+
+@app.post("/notifications/voucher")
+def notify_voucher_conversion():
+    data = request.get_json(silent=True) or {}
+
+    passenger_email = data.get("passengerEmail")
+    if not passenger_email:
+        return {"success": False, "error": "Missing passengerEmail"}, 400
+
+    template = voucher_confirmation_template(data)
+    result = send_email(
+        passenger_email,
+        _display_name(data),
+        template["subject"],
+        template["html"],
+        template["text"],
+    )
+
+    if not result.get("success"):
+        return {"success": False, "error": result.get("error", "email send failed")}, 500
+
+    return {"success": True, "message": "Voucher confirmation email sent"}, 200
+
+
+@app.post("/notifications/voucher-bundle")
+def notify_voucher_bundle_conversion():
+    data = request.get_json(silent=True) or {}
+
+    passenger_email = data.get("passengerEmail")
+    vouchers = data.get("vouchers") or []
+
+    if not passenger_email:
+        return {"success": False, "error": "Missing passengerEmail"}, 400
+    if not isinstance(vouchers, list) or not vouchers:
+        return {"success": False, "error": "Missing vouchers list"}, 400
+
+    template = voucher_bundle_confirmation_template(data)
+    result = send_email(
+        passenger_email,
+        _display_name(data),
+        template["subject"],
+        template["html"],
+        template["text"],
+    )
+
+    if not result.get("success"):
+        return {"success": False, "error": result.get("error", "email send failed")}, 500
+
+    return {"success": True, "message": "Voucher bundle confirmation email sent"}, 200
 
 
 @app.get("/health")

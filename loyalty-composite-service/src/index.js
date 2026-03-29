@@ -10,27 +10,33 @@ app.use(express.json());
 const MILES_BALANCE_URL = process.env.MILES_BALANCE_URL || 'http://miles-balance-service:5001';
 const MILES_TRANSACTION_URL = process.env.MILES_TRANSACTION_URL || 'http://miles-transaction-service:5002';
 const VOUCHER_URL = process.env.VOUCHER_URL || 'http://voucher-service:5003';
-const NOTIFICATION_URL = process.env.NOTIFICATION_URL || 'http://notification-service:3000';
+const NOTIFICATION_URL = process.env.NOTIFICATION_URL || 'http://notification-service:3004';
 
 // Voucher type definitions (consistent with Voucher Service)
 const VOUCHER_TYPES = {
   TRAVEL_CREDIT: {
     name: 'Travel Credit',
     rate: 100,
-    minMiles: 1000,
+    minMiles: 500,
     calculateValue: (miles) => miles / 100
   },
   UPGRADE: {
     name: 'Cabin Upgrade',
-    rate: 500,
+    rate: 2000,
     minMiles: 2000,
     calculateValue: () => 1
   },
   LOUNGE_PASS: {
     name: 'Lounge Pass',
-    rate: 2000,
-    minMiles: 2000,
+    rate: 500,
+    minMiles: 500,
     calculateValue: () => 1
+  },
+  PARTNER_GIFT: {
+    name: 'Partner Gift Card',
+    rate: 1500,
+    minMiles: 1500,
+    calculateValue: () => 15
   }
 };
 
@@ -71,7 +77,7 @@ app.get('/api/loyalty/balance/:passengerID', async (req, res) => {
 // Convert miles to a single voucher
 // ==========================================
 app.post('/api/loyalty/convert', async (req, res) => {
-  const { passengerID, voucherType, milesToConvert, upgradeClass } = req.body;
+  const { passengerID, voucherType, milesToConvert, passengerEmail, passengerName, upgradeClass } = req.body;
 
   // Validation
   if (!passengerID || !voucherType) {
@@ -150,7 +156,9 @@ app.post('/api/loyalty/convert', async (req, res) => {
       passengerID,
       voucherType,
       milesRedeemed: milesNeeded,
-      voucherValue
+      voucherValue,
+      passengerEmail,
+      passengerName
     });
 
     const voucher = voucherResponse.data;
@@ -160,23 +168,29 @@ app.post('/api/loyalty/convert', async (req, res) => {
       referenceID: voucher.voucherCode
     });
 
-    // Step 6: Send notification (async, don't fail if it errors)
+    // Step 6: Get new balance
+    const newBalanceResponse = await axios.get(`${MILES_BALANCE_URL}/miles-balance/${passengerID}`);
+    const newBalance = newBalanceResponse.data.currentBalance;
+
+    // Step 7: Send notification (async, don't fail if it errors)
     try {
       await axios.post(`${NOTIFICATION_URL}/notifications/voucher`, {
         passengerID,
+        passengerEmail,
+        passengerName,
         voucherCode: voucher.voucherCode,
         voucherValue: voucher.voucherValue,
         voucherType,
         expiryDate: voucher.expiryDate,
-        milesRedeemed: milesNeeded
+        milesRedeemed: milesNeeded,
+        remainingMiles: newBalance,
+        providerName: voucher.providerName,
+        externalOrderId: voucher.externalOrderId,
+        redemptionUrl: voucher.redemptionUrl
       });
     } catch (emailError) {
       console.warn('Email notification failed, but voucher was created:', emailError.message);
     }
-
-    // Step 7: Get new balance
-    const newBalanceResponse = await axios.get(`${MILES_BALANCE_URL}/miles-balance/${passengerID}`);
-    const newBalance = newBalanceResponse.data.currentBalance;
 
     // Calculate next voucher suggestion
     const nextVoucherSuggestion = calculateNextVoucherSuggestion(newBalance);
@@ -189,7 +203,10 @@ app.post('/api/loyalty/convert', async (req, res) => {
         code: voucher.voucherCode,
         type: voucherType,
         value: voucher.voucherValue,
-        expiryDate: voucher.expiryDate
+        expiryDate: voucher.expiryDate,
+        providerName: voucher.providerName,
+        externalOrderId: voucher.externalOrderId,
+        redemptionUrl: voucher.redemptionUrl
       },
       milesRedeemed: milesNeeded,
       remainingMiles: newBalance,
@@ -245,7 +262,7 @@ app.post('/api/loyalty/convert', async (req, res) => {
 // Convert multiple vouchers in one transaction
 // ==========================================
 app.post('/api/loyalty/convert-bundle', async (req, res) => {
-  const { passengerID, items } = req.body;
+  const { passengerID, items, passengerEmail, passengerName } = req.body;
 
   if (!passengerID || !items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({
@@ -322,6 +339,8 @@ app.post('/api/loyalty/convert-bundle', async (req, res) => {
     // Step 4: Generate all vouchers via bundle endpoint
     const voucherBundleResponse = await axios.post(`${VOUCHER_URL}/vouchers/bundle`, {
       passengerID,
+      passengerEmail,
+      passengerName,
       items: itemDetails.map(item => ({
         voucherType: item.voucherType,
         milesRedeemed: item.milesNeeded
@@ -336,25 +355,30 @@ app.post('/api/loyalty/convert-bundle', async (req, res) => {
       referenceID: referenceIDs
     });
 
-    // Step 6: Send notification (async)
+    // Step 6: Get new balance
+    const newBalanceResponse = await axios.get(`${MILES_BALANCE_URL}/miles-balance/${passengerID}`);
+    const newBalance = newBalanceResponse.data.currentBalance;
+
+    // Step 7: Send notification (async)
     try {
       await axios.post(`${NOTIFICATION_URL}/notifications/voucher-bundle`, {
         passengerID,
-        vouchers
+        passengerEmail,
+        passengerName,
+        vouchers,
+        totalMilesRedeemed: totalMilesNeeded,
+        remainingMiles: newBalance
       });
     } catch (emailError) {
       console.warn('Email notification failed:', emailError.message);
     }
-
-    // Step 7: Get new balance
-    const newBalanceResponse = await axios.get(`${MILES_BALANCE_URL}/miles-balance/${passengerID}`);
 
     return res.status(200).json({
       success: true,
       message: 'Bundle converted successfully',
       vouchers,
       totalMilesRedeemed: totalMilesNeeded,
-      remainingMiles: newBalanceResponse.data.currentBalance
+      remainingMiles: newBalance
     });
 
   } catch (error) {
