@@ -8,6 +8,6 @@ RUN npm install --only=production
 COPY src/ ./src/
 COPY init.sql ./
 
-EXPOSE 5001
+EXPOSE 5006
 
 CMD ["node", "src/index.js"]

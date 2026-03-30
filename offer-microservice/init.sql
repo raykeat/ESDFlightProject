@@ -23,9 +23,6 @@ CREATE TABLE IF NOT EXISTS offer (
     updatedTime  TIMESTAMP       NULL        ON UPDATE CURRENT_TIMESTAMP -- auto-updated on any row change
 );
 
-  ALTER TABLE offer
-    ADD COLUMN IF NOT EXISTS newSeatID INT NULL;
-
 -- ==========================================
 -- INDEXES — speed up common query patterns
 -- ==========================================

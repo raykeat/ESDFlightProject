@@ -9,7 +9,7 @@ app.use(express.json());
 // Service URLs
 const MILES_BALANCE_URL = process.env.MILES_BALANCE_URL || 'http://miles-balance-service:5001';
 const MILES_TRANSACTION_URL = process.env.MILES_TRANSACTION_URL || 'http://miles-transaction-service:5002';
-const VOUCHER_URL = process.env.VOUCHER_URL || 'http://voucher-service:5003';
+const VOUCHER_URL = process.env.VOUCHER_URL || 'http://voucher-service:5005';
 const NOTIFICATION_URL = process.env.NOTIFICATION_URL || 'http://notification-service:3004';
 
 // Voucher type definitions (consistent with Voucher Service)
@@ -469,7 +469,7 @@ function calculateNextVoucherSuggestion(remainingMiles) {
   return suggestions.length > 0 ? suggestions[0] : null;
 }
 
-const PORT = process.env.PORT || 5004;
+const PORT = process.env.PORT || 5008;
 app.listen(PORT, () => {
   console.log(`Loyalty Composite Service running on port ${PORT}`);
 });

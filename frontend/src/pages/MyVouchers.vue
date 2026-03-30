@@ -37,7 +37,7 @@ async function fetchVouchers() {
   errorMessage.value = ''
   try {
     const passengerID = currentPassenger.value?.passenger_id
-    const loyaltyUrl = import.meta.env.VITE_LOYALTY_SERVICE_URL || 'http://localhost:5004'
+    const loyaltyUrl = import.meta.env.VITE_LOYALTY_SERVICE_URL || 'http://localhost:5008'
 
     const response = await axios.get(
       `${loyaltyUrl}/api/loyalty/vouchers/${passengerID}`

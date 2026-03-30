@@ -8,11 +8,14 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const db = mysql.createConnection({
+const db = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || 'rootpassword',
-  database: process.env.DB_NAME || 'voucher_db'
+  database: process.env.DB_NAME || 'voucher_db',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
 });
 
 const EXTERNAL_VOUCHER_MODE = process.env.EXTERNAL_VOUCHER_MODE || 'tremendous';
@@ -499,7 +502,7 @@ app.put('/vouchers/:voucherID/status', (req, res) => {
   );
 });
 
-const PORT = process.env.PORT || 5003;
+const PORT = process.env.PORT || 5005;
 app.listen(PORT, () => {
   ensureSchema();
   console.log(`External voucher mode: ${EXTERNAL_VOUCHER_MODE}`);

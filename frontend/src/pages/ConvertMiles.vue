@@ -81,7 +81,7 @@ async function fetchBalance() {
   errorMessage.value = ''
   try {
     const passengerID = currentPassenger.value?.passenger_id
-    const milesBalanceUrl = import.meta.env.VITE_MILES_BALANCE_SERVICE_URL || 'http://localhost:5001'
+    const milesBalanceUrl = import.meta.env.VITE_MILES_BALANCE_SERVICE_URL || 'http://localhost:5006'
     
     try {
       // Try to fetch existing balance from miles-balance service
@@ -111,7 +111,7 @@ async function fetchBalance() {
 
 async function fetchVoucherTypes() {
   try {
-    const voucherUrl = import.meta.env.VITE_VOUCHER_SERVICE_URL || 'http://localhost:5003'
+    const voucherUrl = import.meta.env.VITE_VOUCHER_SERVICE_URL || 'http://localhost:5005'
     const response = await axios.get(
       `${voucherUrl}/vouchers/types`
     )
@@ -180,7 +180,7 @@ async function executeConversion() {
     const lastName = currentPassenger.value?.LastName || currentPassenger.value?.lastName || ''
     const passengerName = `${firstName} ${lastName}`.trim()
     const passengerEmail = currentPassenger.value?.Email || currentPassenger.value?.email || ''
-    const loyaltyUrl = import.meta.env.VITE_LOYALTY_SERVICE_URL || 'http://localhost:5004'
+    const loyaltyUrl = import.meta.env.VITE_LOYALTY_SERVICE_URL || 'http://localhost:5008'
     
     let response
     
