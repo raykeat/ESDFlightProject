@@ -105,7 +105,7 @@ app.get('/transactions/:passengerID/summary', (req, res) => {
   );
 });
 
-const PORT = process.env.PORT || 5002;
+const PORT = process.env.PORT || 5007;
 app.listen(PORT, () => {
   console.log(`Miles Transaction Service running on port ${PORT}`);
 });

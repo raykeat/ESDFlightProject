@@ -20,6 +20,7 @@ services:
   record-db:
     image: mysql:8.0
     container_name: record-db
+    command: --innodb-buffer-pool-size=128M
     environment:
       - MYSQL_ROOT_PASSWORD=rootpassword
       - MYSQL_DATABASE=recorddb
@@ -29,6 +30,7 @@ services:
       - ./record-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - app-network
+    mem_limit: 512m
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -76,6 +78,7 @@ services:
   flight-db:
     image: mysql:8.0
     container_name: flight-db
+    command: --innodb-buffer-pool-size=128M
     environment:
       - MYSQL_ROOT_PASSWORD=rootpassword
       - MYSQL_DATABASE=flightdb
@@ -85,6 +88,7 @@ services:
       - ./flight-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - app-network
+    mem_limit: 512m
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -112,6 +116,7 @@ services:
   seats-db:
     image: mysql:8.0
     container_name: seats-db
+    command: --innodb-buffer-pool-size=128M
     environment:
       - MYSQL_ROOT_PASSWORD=rootpassword          # fixed: was 'root', now consistent with all other DBs
       - MYSQL_DATABASE=seats
@@ -123,6 +128,7 @@ services:
       - ./seats-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - app-network
+    mem_limit: 512m
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -151,6 +157,7 @@ services:
   payment-db:
     image: mysql:8.0
     container_name: payment-db
+    command: --innodb-buffer-pool-size=128M
     environment:
       - MYSQL_ROOT_PASSWORD=rootpassword
       - MYSQL_DATABASE=paymentdb
@@ -160,6 +167,7 @@ services:
       - ./payment-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - app-network
+    mem_limit: 512m
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -187,6 +195,7 @@ services:
   offer-db:
     image: mysql:8.0
     container_name: offer-db
+    command: --innodb-buffer-pool-size=128M
     environment:
       - MYSQL_ROOT_PASSWORD=rootpassword
       - MYSQL_DATABASE=offerdb
@@ -196,6 +205,7 @@ services:
       - ./offer-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - app-network
+    mem_limit: 512m
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -259,6 +269,7 @@ services:
   coupon-db:
     image: mysql:8.0
     container_name: coupon-db
+    command: --innodb-buffer-pool-size=128M
     environment:
       - MYSQL_ROOT_PASSWORD=rootpassword
       - MYSQL_DATABASE=coupondb
@@ -268,6 +279,7 @@ services:
       - ./coupon-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - app-network
+    mem_limit: 512m
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -459,7 +471,7 @@ services:
     build: ./miles-balance-microservice           # ✅ Changed from miles-balance-service
     container_name: miles-balance-app
     ports:
-      - "5001:5001"
+      - "5006:5006"
     environment:
       - DB_HOST=miles-balance-db
       - DB_USER=root
@@ -475,6 +487,7 @@ services:
   miles-balance-db:
     image: mysql:8.0
     container_name: miles-balance-db
+    command: --innodb-buffer-pool-size=128M
     environment:
       - MYSQL_ROOT_PASSWORD=rootpassword
       - MYSQL_DATABASE=miles_balance_db
@@ -483,6 +496,7 @@ services:
       - ./miles-balance-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql   # ✅ Changed
     networks:
       - app-network
+    mem_limit: 512m
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -494,7 +508,7 @@ services:
     build: ./miles-transaction-microservice       # ✅ Changed
     container_name: miles-transaction-app
     ports:
-      - "5002:5002"
+      - "5007:5007"
     environment:
       - DB_HOST=miles-transaction-db
       - DB_USER=root
@@ -510,6 +524,7 @@ services:
   miles-transaction-db:
     image: mysql:8.0
     container_name: miles-transaction-db
+    command: --innodb-buffer-pool-size=128M
     environment:
       - MYSQL_ROOT_PASSWORD=rootpassword
       - MYSQL_DATABASE=miles_transaction_db
@@ -518,6 +533,7 @@ services:
       - ./miles-transaction-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql   # ✅ Changed
     networks:
       - app-network
+    mem_limit: 512m
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -529,7 +545,7 @@ services:
     build: ./voucher-microservice                 # ✅ Changed
     container_name: voucher-app
     ports:
-      - "5003:5003"
+      - "5005:5005"
     environment:
       - DB_HOST=voucher-db
       - DB_USER=root
@@ -550,6 +566,7 @@ services:
   voucher-db:
     image: mysql:8.0
     container_name: voucher-db
+    command: --innodb-buffer-pool-size=128M
     environment:
       - MYSQL_ROOT_PASSWORD=rootpassword
       - MYSQL_DATABASE=voucher_db
@@ -558,6 +575,7 @@ services:
       - ./voucher-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql   # ✅ Changed
     networks:
       - app-network
+    mem_limit: 512m
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -569,11 +587,11 @@ services:
     build: ./loyalty-composite-service           # ✅ This one matches your folder name
     container_name: loyalty-composite-app
     ports:
-      - "5004:5004"
+      - "5008:5008"
     environment:
-      - MILES_BALANCE_URL=http://miles-balance-service:5001
-      - MILES_TRANSACTION_URL=http://miles-transaction-service:5002
-      - VOUCHER_URL=http://voucher-service:5003
+      - MILES_BALANCE_URL=http://miles-balance-service:5006
+      - MILES_TRANSACTION_URL=http://miles-transaction-service:5007
+      - VOUCHER_URL=http://voucher-service:5005
       - NOTIFICATION_URL=http://notification-service:3004
     depends_on:
       - miles-balance-service

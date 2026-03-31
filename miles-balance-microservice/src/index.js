@@ -138,7 +138,7 @@ app.post('/miles-balance/:passengerID/initialize', (req, res) => {
   );
 });
 
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 5006;
 app.listen(PORT, () => {
   console.log(`Miles Balance Service running on port ${PORT}`);
 });
