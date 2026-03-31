@@ -3,6 +3,7 @@ import logging
 import os
 from datetime import datetime, timedelta
 
+import pika
 import requests
 from dotenv import load_dotenv
 from kafka import KafkaConsumer
@@ -21,6 +22,8 @@ PASSENGER_SERVICE_URL = os.getenv("PASSENGER_SERVICE_URL", "https://personal-4wh
 COUPON_SERVICE_URL = os.getenv("COUPON_SERVICE_URL", "http://coupon-service:5000")
 OFFER_SERVICE_URL = os.getenv("OFFER_SERVICE_URL", "http://offer-service:5000")
 RECORD_SERVICE_URL = os.getenv("RECORD_SERVICE_URL", "http://record-service:3000")
+FLIGHT_SERVICE_URL = os.getenv("FLIGHT_SERVICE_URL", "http://flight-service:3000")
+RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672")
 
 
 
@@ -32,15 +35,15 @@ def get_json_or_none(response):
 
 
 
-def process_path_a_message(payload):
-    passenger_id = payload.get("PassengerID")
-    booking_id = payload.get("BookingID")
-    amount_paid = payload.get("AmountPaid")
-    orig_flight_id = payload.get("OrigFlightID")
-    new_flight_id = payload.get("NewFlightID")
-    assigned_seat_id = payload.get("AssignedSeatID")
-    assigned_seat_number = payload.get("AssignedSeatNumber")
-    hours_until_departure = payload.get("HoursUntilDeparture")
+def process_path_a_message(msg):
+    passenger_id = msg.get("PassengerID")
+    booking_id = msg.get("BookingID")
+    amount_paid = msg.get("AmountPaid")
+    orig_flight_id = msg.get("OrigFlightID")
+    new_flight_id = msg.get("NewFlightID")
+    assigned_seat_id = msg.get("AssignedSeatID")
+    assigned_seat_number = msg.get("AssignedSeatNumber")
+    hours_until_departure = msg.get("HoursUntilDeparture")
 
     hold_response = requests.put(
         f"{SEAT_SERVICE_URL}/seats/{assigned_seat_id}/hold",
@@ -56,6 +59,7 @@ def process_path_a_message(payload):
     if passenger_response.status_code >= 400:
         raise RuntimeError(f"Passenger lookup failed: {passenger_response.status_code} {passenger_response.text}")
     passenger_data = get_json_or_none(passenger_response) or {}
+    passenger_email = passenger_data.get("Email", "")
 
     coupon_response = requests.post(
         f"{COUPON_SERVICE_URL}/coupons",
@@ -68,6 +72,8 @@ def process_path_a_message(payload):
     if coupon_response.status_code >= 400:
         raise RuntimeError(f"Coupon generation failed: {coupon_response.status_code} {coupon_response.text}")
     coupon_data = get_json_or_none(coupon_response) or {}
+    coupon_code = coupon_data.get("CouponCode", "")
+    discount_amount = coupon_data.get("DiscountAmount", 0)
 
     expiry_time = (datetime.now() + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -87,6 +93,7 @@ def process_path_a_message(payload):
     if offer_response.status_code >= 400:
         raise RuntimeError(f"Offer creation failed: {offer_response.status_code} {offer_response.text}")
     offer_data = get_json_or_none(offer_response) or {}
+    offer_id = offer_data.get("OfferID") or offer_data.get("offerID")
 
     record_response = requests.put(
         f"{RECORD_SERVICE_URL}/records/{booking_id}",
@@ -96,33 +103,52 @@ def process_path_a_message(payload):
     if record_response.status_code >= 400:
         raise RuntimeError(f"Record status update failed: {record_response.status_code} {record_response.text}")
 
-    # TODO: Publish to RabbitMQ exchange
-    # Routing Key: flight.cancelled.alt
-    # Payload: {
-    #   "type": "flight.cancelled.alt",
-    #   "email": <passenger email>,
-    #   "data": {
-    #     "PassengerID": <int>,
-    #     "BookingID": <int>,
-    #     "OfferID": <int>,
-    #     "OriginalFlight": <original flight number>,
-    #     "NewFlight": <new flight number>,
-    #     "NewDate": <new flight date>,
-    #     "NewDepartureTime": <new flight departure time>,
-    #     "SeatNumber": <AssignedSeatNumber>,
-    #     "CouponCode": <str>,
-    #     "DiscountAmount": <float>,
-    #     "AcceptRejectLink": "https://blazeair.com/offer?offerID=<OfferID>"
-    #   }
-    # }
-    pass
+    orig_flight_response = requests.get(f"{FLIGHT_SERVICE_URL}/flights/{orig_flight_id}", timeout=10)
+    orig_flight_data = get_json_or_none(orig_flight_response) or {}
+    original_flight_number = orig_flight_data.get("FlightNumber", "")
+
+    new_flight_response = requests.get(f"{FLIGHT_SERVICE_URL}/flights/{new_flight_id}", timeout=10)
+    new_flight_data = get_json_or_none(new_flight_response) or {}
+    new_flight_number = new_flight_data.get("FlightNumber", "")
+    new_flight_date = new_flight_data.get("FlightDate", "")
+    new_departure_time = new_flight_data.get("DepartureTime", "")
+
+    notification_payload = {
+        "type":  "flight.cancelled.alt",
+        "email": passenger_email,
+        "data": {
+            "PassengerID":      passenger_id,
+            "BookingID":        booking_id,
+            "OfferID":          offer_id,
+            "OriginalFlight":   original_flight_number,
+            "NewFlight":        new_flight_number,
+            "NewDate":          new_flight_date,
+            "NewDepartureTime": new_departure_time,
+            "SeatNumber":       assigned_seat_number,
+            "CouponCode":       coupon_code,
+            "DiscountAmount":   discount_amount,
+            "AcceptRejectLink": f"https://blazeair.com/offer?offerID={offer_id}",
+        },
+    }
+
+    params = pika.URLParameters(RABBITMQ_URL)
+    connection = pika.BlockingConnection(params)
+    channel = connection.channel()
+    channel.exchange_declare(exchange="airline_events", exchange_type="topic", durable=True)
+    channel.basic_publish(
+        exchange="airline_events",
+        routing_key="flight.cancelled.alt",
+        body=json.dumps(notification_payload),
+        properties=pika.BasicProperties(delivery_mode=2),
+    )
+    connection.close()
 
     logger.info(
         "Path A processed for BookingID=%s PassengerID=%s SeatID=%s OfferID=%s BookingStatus=Pending",
         booking_id,
         passenger_id,
         assigned_seat_id,
-        offer_data.get("OfferID") or offer_data.get("offerID"),
+        offer_id,
     )
 
 

@@ -304,7 +304,7 @@ services:
       - RABBITMQ_PASSWORD=guest
       - RABBITMQ_VHOST=/
       - RABBITMQ_EXCHANGE=airline_events
-      - EMAIL_SERVICE_URL=http://email-service:3005
+      # - EMAIL_SERVICE_URL=http://email-service:3005
       - SENDGRID_API_KEY=${SENDGRID_API_KEY}
       - SENDGRID_FROM_EMAIL=${SENDGRID_FROM_EMAIL}
       - SENDGRID_FROM_NAME=${SENDGRID_FROM_NAME}
@@ -423,6 +423,7 @@ services:
       - COUPON_SERVICE_URL=http://coupon-service:5000
       - OFFER_SERVICE_URL=http://offer-service:5000
       - RECORD_SERVICE_URL=http://record-service:3000
+      - FLIGHT_SERVICE_URL=http://flight-service:3000
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
     depends_on:
       kafka:
@@ -449,6 +450,7 @@ services:
       - PAYMENT_SERVICE_URL=http://payment-service:5000
       - RECORD_SERVICE_URL=http://record-service:3000
       - COUPON_SERVICE_URL=http://coupon-service:5000
+      - FLIGHT_SERVICE_URL=http://flight-service:3000
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
     depends_on:
       kafka:

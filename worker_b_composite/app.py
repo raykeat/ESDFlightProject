@@ -2,6 +2,7 @@ import json
 import logging
 import os
 
+import pika
 import requests
 from dotenv import load_dotenv
 from kafka import KafkaConsumer
@@ -19,6 +20,8 @@ PASSENGER_SERVICE_URL = os.getenv("PASSENGER_SERVICE_URL", "https://personal-4wh
 PAYMENT_SERVICE_URL = os.getenv("PAYMENT_SERVICE_URL", "http://payment-service:5000")
 RECORD_SERVICE_URL = os.getenv("RECORD_SERVICE_URL", "http://record-service:3000")
 COUPON_SERVICE_URL = os.getenv("COUPON_SERVICE_URL", "http://coupon-service:5000")
+FLIGHT_SERVICE_URL = os.getenv("FLIGHT_SERVICE_URL", "http://flight-service:3000")
+RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672")
 
 
 
@@ -41,12 +44,12 @@ def update_record_status(booking_id, status):
 
 
 
-def process_path_b_message(payload):
-    passenger_id = payload.get("PassengerID")
-    booking_id = payload.get("BookingID")
-    amount_paid = payload.get("AmountPaid")
-    orig_flight_id = payload.get("OrigFlightID")
-    hours_until_departure = payload.get("HoursUntilDeparture")
+def process_path_b_message(msg):
+    passenger_id = msg.get("PassengerID")
+    booking_id = msg.get("BookingID")
+    amount_paid = msg.get("AmountPaid")
+    orig_flight_id = msg.get("OrigFlightID")
+    hours_until_departure = msg.get("HoursUntilDeparture")
 
     passenger_endpoint = f"{PASSENGER_SERVICE_URL.rstrip('/')}/getpassenger/{passenger_id}/"
     passenger_response = requests.get(passenger_endpoint, timeout=10)
@@ -55,6 +58,7 @@ def process_path_b_message(payload):
     if passenger_response.status_code >= 400:
         raise RuntimeError(f"Passenger lookup failed: {passenger_response.status_code} {passenger_response.text}")
     passenger_data = get_json_or_none(passenger_response) or {}
+    passenger_email = passenger_data.get("Email", "")
 
     refund_response = requests.post(
         f"{PAYMENT_SERVICE_URL}/payments/refund",
@@ -83,6 +87,7 @@ def process_path_b_message(payload):
         return
 
     update_record_status(booking_id, "Cancelled")
+    refund_amount = refund_payload.get("RefundAmount", amount_paid)
 
     coupon_response = requests.post(
         f"{COUPON_SERVICE_URL}/coupons",
@@ -95,23 +100,39 @@ def process_path_b_message(payload):
     if coupon_response.status_code >= 400:
         raise RuntimeError(f"Coupon generation failed: {coupon_response.status_code} {coupon_response.text}")
     coupon_payload = get_json_or_none(coupon_response) or {}
+    coupon_code = coupon_payload.get("CouponCode", "")
+    discount_amount = coupon_payload.get("DiscountAmount", 0)
 
-    # TODO: Publish to RabbitMQ exchange
-    # Routing Key: flight.cancelled.noalt
-    # Payload: {
-    #   "type": "flight.cancelled.noalt",
-    #   "email": <passenger email>,
-    #   "data": {
-    #     "PassengerID": <int>,
-    #     "BookingID": <int>,
-    #     "OriginalFlight": <original flight number>,
-    #     "CancelledDate": <original flight date>,
-    #     "RefundAmount": <float>,
-    #     "CouponCode": <str>,
-    #     "DiscountAmount": <float>
-    #   }
-    # }
-    pass
+    orig_flight_response = requests.get(f"{FLIGHT_SERVICE_URL}/flights/{orig_flight_id}", timeout=10)
+    orig_flight_data = get_json_or_none(orig_flight_response) or {}
+    original_flight_number = orig_flight_data.get("FlightNumber", "")
+    cancelled_date = orig_flight_data.get("FlightDate", "")
+
+    notification_payload = {
+        "type":  "flight.cancelled.noalt",
+        "email": passenger_email,
+        "data": {
+            "PassengerID":    passenger_id,
+            "BookingID":      booking_id,
+            "OriginalFlight": original_flight_number,
+            "CancelledDate":  cancelled_date,
+            "RefundAmount":   refund_amount,
+            "CouponCode":     coupon_code,
+            "DiscountAmount": discount_amount,
+        },
+    }
+
+    params = pika.URLParameters(RABBITMQ_URL)
+    connection = pika.BlockingConnection(params)
+    channel = connection.channel()
+    channel.exchange_declare(exchange="airline_events", exchange_type="topic", durable=True)
+    channel.basic_publish(
+        exchange="airline_events",
+        routing_key="flight.cancelled.noalt",
+        body=json.dumps(notification_payload),
+        properties=pika.BasicProperties(delivery_mode=2),
+    )
+    connection.close()
 
     logger.info(
         "Path B processed for BookingID=%s PassengerID=%s RefundID=%s",

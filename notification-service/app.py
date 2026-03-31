@@ -4,7 +4,7 @@ Notification Service
 Atomic microservice — consumes booking.confirmed from RabbitMQ
 and sends booking confirmation email directly via SendGrid REST API.
 
-Scenario 1 only: booking confirmation email after successful payment.
+Scenarios 1 & 2: booking confirmation + flight cancellation emails.
 
 Usage:
     python app.py
@@ -17,10 +17,17 @@ import threading
 import time
 import urllib.request
 import urllib.error
+import base64
+import io
 
 import pika
 from dotenv import load_dotenv
 from flask import Flask, request
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import cm
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 load_dotenv()
 
@@ -35,19 +42,17 @@ logger = logging.getLogger(__name__)
 # SENDGRID — calls REST API directly (bypasses latin-1 encoding issue)
 # =============================================================================
 
-def send_email(to_email: str, to_name: str, subject: str, html: str, text: str) -> dict:
-    """Sends email via SendGrid REST API using UTF-8 encoding."""
-
+def send_email(to_email: str, to_name: str, subject: str, html: str, text: str, pdf_bytes: bytes = None, pdf_filename: str = "booking_confirmation.pdf") -> dict:
+    """
+    Sends email via SendGrid REST API using UTF-8 encoding.
+    Optionally attaches a PDF if pdf_bytes is provided.
+    """
     api_key    = os.environ["SENDGRID_API_KEY"]
     from_email = os.environ["SENDGRID_FROM_EMAIL"]
     from_name  = os.environ.get("SENDGRID_FROM_NAME", "YourAirline")
 
     payload = {
-        "personalizations": [
-            {
-                "to": [{"email": to_email, "name": to_name}]
-            }
-        ],
+        "personalizations": [{"to": [{"email": to_email, "name": to_name}]}],
         "from":    {"email": from_email, "name": from_name},
         "subject": subject,
         "content": [
@@ -55,6 +60,15 @@ def send_email(to_email: str, to_name: str, subject: str, html: str, text: str) 
             {"type": "text/html",  "value": html}
         ]
     }
+
+    if pdf_bytes:
+        payload["attachments"] = [{
+            "content":     base64.b64encode(pdf_bytes).decode("utf-8"),
+            "type":        "application/pdf",
+            "filename":    pdf_filename,
+            "disposition": "attachment",
+        }]
+        logger.info("PDF attachment added: %s (%d bytes)", pdf_filename, len(pdf_bytes))
 
     try:
         data = json.dumps(payload).encode("utf-8")
@@ -82,7 +96,7 @@ def send_email(to_email: str, to_name: str, subject: str, html: str, text: str) 
 
 
 # =============================================================================
-# EMAIL TEMPLATE — Scenario 1
+# HELPERS
 # =============================================================================
 
 def _format_money(amount) -> str:
@@ -92,20 +106,206 @@ def _format_money(amount) -> str:
         return str(amount)
 
 
-def _normalize_flights(data: dict) -> list[dict]:
+def _display_name(data: dict) -> str:
+    if data.get("passengerName"):
+        return data["passengerName"]
+    first = data.get("firstName") or ""
+    last  = data.get("lastName")  or ""
+    full  = f"{first} {last}".strip()
+    return full or "Valued Passenger"
+
+
+def _normalize_flights(data: dict) -> list:
     flights = data.get("flights")
     if isinstance(flights, list) and flights:
         return flights
-
     return [{
-        "leg": "outbound",
-        "flight_number": data.get("flight_number", "N/A"),
-        "origin": data.get("origin", "Origin"),
-        "destination": data.get("destination", "Destination"),
+        "leg":            "outbound",
+        "flight_number":  data.get("flight_number", "N/A"),
+        "origin":         data.get("origin", "Origin"),
+        "destination":    data.get("destination", "Destination"),
         "departure_date": data.get("departure_date", "N/A"),
-        "seat_number": data.get("seat_number", "N/A"),
-        "booking_id": data.get("booking_id"),
+        "seat_number":    data.get("seat_number", "N/A"),
+        "booking_id":     data.get("booking_id"),
     }]
+
+
+# =============================================================================
+# PDF HELPERS
+# =============================================================================
+
+def _pdf_build(story: list) -> bytes:
+    """Builds the PDF from a story list and returns bytes."""
+    buffer = io.BytesIO()
+    doc    = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.read()
+
+
+def _make_styles():
+    """Returns commonly used ParagraphStyle objects."""
+    base = getSampleStyleSheet()
+    def ps(name, **kw):
+        return ParagraphStyle(name, parent=base["Normal"], **kw)
+    return ps
+
+
+def _detail_row_table(rows: list, col_l: float, col_r: float) -> Table:
+    """Two-column label/value table used in receipt sections."""
+    BORDER = colors.HexColor("#e2e8f0")
+    ALT    = colors.HexColor("#f8fafc")
+    t = Table(rows, colWidths=[col_l, col_r])
+    t.setStyle(TableStyle([
+        ("ROWBACKGROUNDS", (0, 0), (-1, -1), [ALT, colors.white]),
+        ("GRID",           (0, 0), (-1, -1), 0.5, BORDER),
+        ("LEFTPADDING",    (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING",   (0, 0), (-1, -1), 10),
+        ("TOPPADDING",     (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING",  (0, 0), (-1, -1), 8),
+        ("VALIGN",         (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    return t
+
+
+# =============================================================================
+# PDF GENERATOR — Scenario 1: Boarding-pass style booking confirmation
+# =============================================================================
+
+def generate_booking_pdf(data: dict) -> bytes:
+    """Boarding-pass style booking confirmation PDF for Scenario 1."""
+    PAGE_W  = 17 * cm
+    INNER_W = 16 * cm
+    COL_L   = 5.5 * cm
+    COL_R   = PAGE_W - COL_L
+
+    NAVY    = colors.HexColor("#1e3356")
+    NAVY2   = colors.HexColor("#162a47")
+    WHITE   = colors.white
+    LGRAY   = colors.HexColor("#94a3b8")
+    BORDER  = colors.HexColor("#e2e8f0")
+
+    ps = _make_styles()
+
+    s_brand = ps("s_brand", fontSize=13, fontName="Helvetica-Bold", textColor=WHITE)
+    s_h1    = ps("s_h1",    fontSize=18, fontName="Helvetica-Bold", textColor=WHITE, alignment=1)
+    s_bid   = ps("s_bid",   fontSize=10, textColor=LGRAY, alignment=1)
+    s_orig  = ps("s_orig",  fontSize=26, fontName="Helvetica-Bold", textColor=WHITE, alignment=0)
+    s_dest  = ps("s_dest",  fontSize=26, fontName="Helvetica-Bold", textColor=WHITE, alignment=2)
+    s_mid   = ps("s_mid",   fontSize=10, textColor=LGRAY, alignment=1)
+    s_city  = ps("s_city",  fontSize=9,  textColor=LGRAY, alignment=1)
+    s_lbl_w = ps("s_lbl_w", fontSize=9,  textColor=LGRAY, alignment=1)
+    s_val_w = ps("s_val_w", fontSize=11, fontName="Helvetica-Bold", textColor=WHITE, alignment=1)
+    s_sec   = ps("s_sec",   fontSize=13, fontName="Helvetica-Bold", textColor=colors.HexColor("#1e40af"), spaceBefore=12, spaceAfter=4)
+    s_lbl   = ps("s_lbl",   fontSize=10, textColor=colors.HexColor("#6b7280"))
+    s_val   = ps("s_val",   fontSize=10, fontName="Helvetica-Bold", textColor=colors.HexColor("#111827"), alignment=2)
+    s_foot  = ps("s_foot",  fontSize=9,  textColor=colors.HexColor("#9ca3af"), alignment=1)
+
+    flights       = _normalize_flights(data)
+    passenger     = data.get("passenger_name", "Passenger")
+    booking_id    = data.get("booking_id", "N/A")
+    amount_paid   = data.get("amount_paid", 0)
+    THIRD         = INNER_W / 3
+
+    def _flight_header(flight, show_branding: bool) -> Table:
+        orig       = str(flight.get("origin", "N/A"))
+        dest       = str(flight.get("destination", "N/A"))
+        flight_num = str(flight.get("flight_number", "N/A"))
+        dep_date   = str(flight.get("departure_date", "N/A"))
+        seat       = str(flight.get("seat_number", "N/A"))
+        orig_code  = orig[:3].upper()
+        dest_code  = dest[:3].upper()
+
+        route_sub = Table(
+            [
+                [Paragraph(orig_code, s_orig), Paragraph("————————", s_mid), Paragraph(dest_code, s_dest)],
+                [Paragraph(orig,      s_city), Paragraph(flight_num, s_mid), Paragraph(dest,      s_city)],
+            ],
+            colWidths=[INNER_W * 0.35, INNER_W * 0.30, INNER_W * 0.35],
+        )
+        route_sub.setStyle(TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, -1), NAVY),
+            ("ALIGN",         (0, 0), (0, -1), "LEFT"),
+            ("ALIGN",         (1, 0), (1, -1), "CENTER"),
+            ("ALIGN",         (2, 0), (2, -1), "RIGHT"),
+            ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING",    (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 0),
+        ]))
+
+        details_sub = Table(
+            [
+                [Paragraph("Date",    s_lbl_w), Paragraph("Seat",    s_lbl_w), Paragraph("Class",   s_lbl_w)],
+                [Paragraph(dep_date,  s_val_w), Paragraph(seat,      s_val_w), Paragraph("Economy", s_val_w)],
+            ],
+            colWidths=[THIRD, THIRD, THIRD],
+        )
+        details_sub.setStyle(TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, -1), NAVY2),
+            ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING",    (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
+            ("LINEABOVE",     (0, 0), (-1, 0), 0.5, LGRAY),
+        ]))
+
+        rows = []
+        if show_branding:
+            rows += [
+                [Paragraph("BlazeAir", s_brand)],
+                [Paragraph("Your flight is confirmed!", s_h1)],
+                [Paragraph(f"Booking ID: {booking_id}", s_bid)],
+            ]
+        else:
+            rows += [[Paragraph("Return Flight", s_h1)]]
+
+        rows += [[route_sub], [details_sub]]
+
+        t = Table(rows, colWidths=[PAGE_W])
+        t.setStyle(TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, -1), NAVY),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 0.5 * cm),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 0.5 * cm),
+            ("TOPPADDING",    (0, 0), (0, 0), 0.4 * cm),
+            ("BOTTOMPADDING", (0, -1), (0, -1), 0),
+            ("TOPPADDING",    (0, 1), (0, -2), 0.15 * cm),
+            ("BOTTOMPADDING", (0, 0), (0, -2), 0.15 * cm),
+        ]))
+        return t
+
+    story = []
+    story.append(_flight_header(flights[0], show_branding=True))
+    for flight in flights[1:]:
+        story.append(Spacer(1, 0.3 * cm))
+        story.append(_flight_header(flight, show_branding=False))
+
+    story.append(Spacer(1, 0.5 * cm))
+    story.append(Paragraph("Your Receipt", s_sec))
+
+    receipt_rows = [
+        [Paragraph("Passenger Name", s_lbl), Paragraph(str(passenger), s_val)],
+        [Paragraph("Booking ID",     s_lbl), Paragraph(str(booking_id), s_val)],
+    ]
+    if data.get("return_booking_id"):
+        receipt_rows.append([Paragraph("Return Booking ID", s_lbl), Paragraph(str(data["return_booking_id"]), s_val)])
+    receipt_rows.append([Paragraph("Amount Paid", s_lbl), Paragraph(f"SGD ${_format_money(amount_paid)}", s_val)])
+    receipt_rows.append([Paragraph("Status",      s_lbl), Paragraph("Confirmed", s_val)])
+
+    story.append(_detail_row_table(receipt_rows, COL_L, COL_R))
+    story.append(Spacer(1, 0.4 * cm))
+    story.append(HRFlowable(width=PAGE_W, thickness=0.5, color=BORDER))
+    story.append(Paragraph("Thank you for flying with BlazeAir. Please keep this document for your records.", s_foot))
+
+    return _pdf_build(story)
+
+
+# =============================================================================
+# EMAIL TEMPLATE — Scenario 1
+# =============================================================================
 
 def booking_confirmation_template(data: dict) -> dict:
         """Scenario 1: Booking confirmed after successful payment."""
@@ -172,19 +372,126 @@ def booking_confirmation_template(data: dict) -> dict:
                 ),
         }
 
+# =============================================================================
+# EMAIL TEMPLATE — Scenario 2 (Flight cancellation)
+# =============================================================================
+
+def flight_cancelled_alt_template(data: dict) -> dict:
+    """
+    Scenario 2 Path A: Flight cancelled, alternative flight found.
+    RabbitMQ routing key: flight.cancelled.alt
+    Payload structure: { "type": "...", "email": "...", "data": { ... } }
+    """
+    inner        = data.get("data", data)
+    orig_flight  = inner.get("OriginalFlight", "N/A")
+    new_flight   = inner.get("NewFlight", "N/A")
+    new_date     = inner.get("NewDate", "N/A")
+    new_dep_time = inner.get("NewDepartureTime", "N/A")
+    seat_number  = inner.get("SeatNumber", "N/A")
+    coupon_code  = inner.get("CouponCode", "N/A")
+    discount     = inner.get("DiscountAmount", 0)
+    accept_link  = inner.get("AcceptRejectLink", "#")
+    booking_id   = inner.get("BookingID", "N/A")
+
+    return {
+        "subject": "Your Flight Has Been Cancelled - Rebooking Offer Inside",
+        "html": f"""
+        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;max-width:700px;margin:20px auto;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;background:#ffffff;">
+            <div style="background:#b45309;padding:24px 28px;color:#ffffff;">
+                <h2 style="margin:0;font-size:28px;line-height:1.2;">Your Flight Has Been Cancelled</h2>
+                <p style="margin:10px 0 0;font-size:14px;opacity:0.95;">We have found an alternative flight for you at no extra charge.</p>
+            </div>
+            <div style="padding:24px 28px;">
+                <h3 style="color:#dc2626;margin-top:0;">Cancelled Flight</h3>
+                <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:20px;">
+                    <tr><td style="padding:10px 12px;color:#6b7280;">Flight Number</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{orig_flight}</td></tr>
+                    <tr><td style="padding:10px 12px;color:#6b7280;">Booking ID</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{booking_id}</td></tr>
+                </table>
+                <h3 style="color:#1d4ed8;">Proposed Alternative Flight</h3>
+                <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:20px;">
+                    <tr><td style="padding:10px 12px;color:#6b7280;">Flight Number</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{new_flight}</td></tr>
+                    <tr><td style="padding:10px 12px;color:#6b7280;">Date</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{new_date}</td></tr>
+                    <tr><td style="padding:10px 12px;color:#6b7280;">Departure Time</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{new_dep_time}</td></tr>
+                    <tr><td style="padding:10px 12px;color:#6b7280;">Seat Number</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{seat_number}</td></tr>
+                    <tr><td style="padding:10px 12px;color:#6b7280;">Fare Difference</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#059669;">None - covered by airline</td></tr>
+                </table>
+                <h3 style="color:#0f766e;">Your Compensation Coupon</h3>
+                <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:24px;">
+                    <tr><td style="padding:10px 12px;color:#6b7280;">Coupon Code</td><td style="padding:10px 12px;text-align:right;font-weight:700;font-size:18px;letter-spacing:2px;color:#0f766e;">{coupon_code}</td></tr>
+                    <tr><td style="padding:10px 12px;color:#6b7280;">Discount Amount</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#0f766e;">${_format_money(discount)}</td></tr>
+                </table>
+                <p style="margin-bottom:16px;color:#374151;">Please respond to this offer within 24 hours:</p>
+                <div style="text-align:center;margin:20px 0;">
+                    <a href="{accept_link}&decision=accept" style="display:inline-block;background:#1d4ed8;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;margin-right:12px;">Accept Rebooking</a>
+                    <a href="{accept_link}&decision=reject" style="display:inline-block;background:#dc2626;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;">Reject and Refund</a>
+                </div>
+                <p style="margin-top:16px;color:#6b7280;font-size:12px;">If you reject, you will receive a full refund for your original booking.</p>
+            </div>
+        </div>
+        """,
+        "text": (
+            f"Your flight {orig_flight} has been cancelled. "
+            f"Alternative: {new_flight} on {new_date} at {new_dep_time} (Seat: {seat_number}) at no extra charge. "
+            f"Compensation coupon: {coupon_code} (${_format_money(discount)} off). "
+            f"Accept or reject: {accept_link}"
+        ),
+    }
+
+
+def flight_cancelled_noalt_template(data: dict) -> dict:
+    """
+    Scenario 2 Path B: Flight cancelled, no alternative found.
+    RabbitMQ routing key: flight.cancelled.noalt
+    Payload structure: { "type": "...", "email": "...", "data": { ... } }
+    """
+    inner        = data.get("data", data)
+    orig_flight  = inner.get("OriginalFlight", "N/A")
+    cancelled_dt = inner.get("CancelledDate", "N/A")
+    refund_amt   = inner.get("RefundAmount", 0)
+    coupon_code  = inner.get("CouponCode", "N/A")
+    discount     = inner.get("DiscountAmount", 0)
+    booking_id   = inner.get("BookingID", "N/A")
+
+    return {
+        "subject": "Your Flight Has Been Cancelled - Full Refund Issued",
+        "html": f"""
+        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;max-width:700px;margin:20px auto;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;background:#ffffff;">
+            <div style="background:#dc2626;padding:24px 28px;color:#ffffff;">
+                <h2 style="margin:0;font-size:28px;line-height:1.2;">Your Flight Has Been Cancelled</h2>
+                <p style="margin:10px 0 0;font-size:14px;opacity:0.95;">We sincerely apologise. No alternative flight is available and a full refund has been issued.</p>
+            </div>
+            <div style="padding:24px 28px;">
+                <h3 style="color:#dc2626;margin-top:0;">Cancelled Flight</h3>
+                <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:20px;">
+                    <tr><td style="padding:10px 12px;color:#6b7280;">Flight Number</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{orig_flight}</td></tr>
+                    <tr><td style="padding:10px 12px;color:#6b7280;">Booking ID</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{booking_id}</td></tr>
+                    <tr><td style="padding:10px 12px;color:#6b7280;">Date</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{cancelled_dt}</td></tr>
+                </table>
+                <h3 style="color:#059669;">Refund Confirmation</h3>
+                <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:20px;">
+                    <tr><td style="padding:10px 12px;color:#6b7280;">Refund Amount</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#059669;">${_format_money(refund_amt)}</td></tr>
+                    <tr><td style="padding:10px 12px;color:#6b7280;">Refund Status</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#059669;">Processed - allow 5 to 7 business days</td></tr>
+                </table>
+                <h3 style="color:#0f766e;">Your Compensation Coupon</h3>
+                <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
+                    <tr><td style="padding:10px 12px;color:#6b7280;">Coupon Code</td><td style="padding:10px 12px;text-align:right;font-weight:700;font-size:18px;letter-spacing:2px;color:#0f766e;">{coupon_code}</td></tr>
+                    <tr><td style="padding:10px 12px;color:#6b7280;">Discount Amount</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#0f766e;">${_format_money(discount)}</td></tr>
+                </table>
+                <p style="margin-top:18px;color:#4b5563;font-size:13px;">We apologise for the inconvenience and hope to see you on board again soon.</p>
+            </div>
+        </div>
+        """,
+        "text": (
+            f"Your flight {orig_flight} on {cancelled_dt} has been cancelled. "
+            f"No alternative flight is available. "
+            f"Full refund of ${_format_money(refund_amt)} issued. Allow 5 to 7 business days. "
+            f"Compensation coupon: {coupon_code} (${_format_money(discount)} off)."
+        ),
+    }
 
 # =============================================================================
 # EMAIL TEMPLATE — Scenario 3 (Voucher Conversion)
 # =============================================================================
-
-def _display_name(data: dict) -> str:
-    if data.get("passengerName"):
-        return data["passengerName"]
-    first = data.get("firstName") or ""
-    last = data.get("lastName") or ""
-    full = f"{first} {last}".strip()
-    return full or "Valued Passenger"
-
 
 def voucher_confirmation_template(data: dict) -> dict:
     voucher_type = data.get("voucherType", "VOUCHER")
@@ -305,19 +612,414 @@ def voucher_bundle_confirmation_template(data: dict) -> dict:
 
 
 # =============================================================================
+# PDF GENERATOR — Scenario 2 Path A: Rebooking offer (boarding-pass style)
+# =============================================================================
+
+def generate_rebooking_offer_pdf(data: dict) -> bytes:
+    """Scenario 2 Path A — boarding-pass style rebooking offer PDF."""
+    inner = data.get("data", data)
+
+    PAGE_W  = 17 * cm
+    INNER_W = 16 * cm
+    COL_L   = 5.5 * cm
+    COL_R   = PAGE_W - COL_L
+
+    AMBER   = colors.HexColor("#b45309")
+    NAVY    = colors.HexColor("#1e3356")
+    NAVY2   = colors.HexColor("#162a47")
+    WHITE   = colors.white
+    LGRAY   = colors.HexColor("#94a3b8")
+    BORDER  = colors.HexColor("#e2e8f0")
+
+    ps = _make_styles()
+
+    s_brand  = ps("rb_brand",  fontSize=13, fontName="Helvetica-Bold", textColor=WHITE)
+    s_h1     = ps("rb_h1",     fontSize=17, fontName="Helvetica-Bold", textColor=WHITE, alignment=1)
+    s_sub    = ps("rb_sub",    fontSize=10, textColor=colors.HexColor("#fde68a"), alignment=1)
+    s_fn     = ps("rb_fn",     fontSize=26, fontName="Helvetica-Bold", textColor=WHITE, alignment=1)
+    s_lbl_w  = ps("rb_lbl_w",  fontSize=9,  textColor=LGRAY, alignment=1)
+    s_val_w  = ps("rb_val_w",  fontSize=11, fontName="Helvetica-Bold", textColor=WHITE, alignment=1)
+    s_sec_r  = ps("rb_sec_r",  fontSize=12, fontName="Helvetica-Bold", textColor=colors.HexColor("#dc2626"), spaceBefore=12, spaceAfter=4)
+    s_sec_t  = ps("rb_sec_t",  fontSize=12, fontName="Helvetica-Bold", textColor=colors.HexColor("#0f766e"), spaceBefore=12, spaceAfter=4)
+    s_lbl    = ps("rb_lbl",    fontSize=10, textColor=colors.HexColor("#6b7280"))
+    s_val    = ps("rb_val",    fontSize=10, fontName="Helvetica-Bold", textColor=colors.HexColor("#111827"), alignment=2)
+    s_coupon = ps("rb_coupon", fontSize=14, fontName="Helvetica-Bold", textColor=colors.HexColor("#0f766e"), alignment=2)
+    s_link   = ps("rb_link",   fontSize=10, textColor=colors.HexColor("#1d4ed8"), alignment=1, spaceBefore=6)
+    s_foot   = ps("rb_foot",   fontSize=9,  textColor=colors.HexColor("#9ca3af"), alignment=1)
+
+    orig_flight  = str(inner.get("OriginalFlight", "N/A"))
+    new_flight   = str(inner.get("NewFlight", "N/A"))
+    new_date     = str(inner.get("NewDate", "N/A"))
+    new_dep_time = str(inner.get("NewDepartureTime", "N/A"))
+    seat_number  = str(inner.get("SeatNumber", "N/A"))
+    coupon_code  = str(inner.get("CouponCode", "N/A"))
+    discount     = inner.get("DiscountAmount", 0)
+    accept_link  = str(inner.get("AcceptRejectLink", "N/A"))
+    booking_id   = str(inner.get("BookingID", "N/A"))
+    THIRD        = INNER_W / 3
+
+    story = []
+
+    # Amber warning header
+    header_t = Table(
+        [
+            [Paragraph("BlazeAir", s_brand)],
+            [Paragraph("Your Flight Has Been Cancelled", s_h1)],
+            [Paragraph("An alternative flight has been arranged for you at no extra charge.", s_sub)],
+        ],
+        colWidths=[PAGE_W],
+    )
+    header_t.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, -1), AMBER),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 0.5 * cm),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 0.5 * cm),
+        ("TOPPADDING",    (0, 0), (0, 0), 0.4 * cm),
+        ("BOTTOMPADDING", (0, -1), (0, -1), 0.4 * cm),
+        ("TOPPADDING",    (0, 1), (0, -1), 0.15 * cm),
+        ("BOTTOMPADDING", (0, 0), (0, -2), 0.15 * cm),
+    ]))
+    story.append(header_t)
+
+    # Cancelled flight details
+    story.append(Spacer(1, 0.4 * cm))
+    story.append(Paragraph("Cancelled Flight", s_sec_r))
+    story.append(_detail_row_table(
+        [
+            [Paragraph("Flight Number", s_lbl), Paragraph(orig_flight, s_val)],
+            [Paragraph("Booking ID",    s_lbl), Paragraph(booking_id,  s_val)],
+        ],
+        COL_L, COL_R,
+    ))
+
+    # Alternative flight (navy boarding-pass block)
+    details_sub = Table(
+        [
+            [Paragraph("Date",    s_lbl_w), Paragraph("Dep. Time",   s_lbl_w), Paragraph("Seat", s_lbl_w)],
+            [Paragraph(new_date,  s_val_w), Paragraph(new_dep_time,  s_val_w), Paragraph(seat_number, s_val_w)],
+        ],
+        colWidths=[THIRD, THIRD, THIRD],
+    )
+    details_sub.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, -1), NAVY2),
+        ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING",    (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
+        ("LINEABOVE",     (0, 0), (-1, 0), 0.5, LGRAY),
+    ]))
+
+    alt_t = Table(
+        [
+            [Paragraph("Proposed Alternative Flight", ps("rb_alt_h", fontSize=13, fontName="Helvetica-Bold", textColor=WHITE, alignment=1))],
+            [Paragraph(new_flight, s_fn)],
+            [details_sub],
+        ],
+        colWidths=[PAGE_W],
+    )
+    alt_t.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, -1), NAVY),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 0.5 * cm),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 0.5 * cm),
+        ("TOPPADDING",    (0, 0), (0, 0), 0.4 * cm),
+        ("TOPPADDING",    (0, 1), (0, -2), 0.15 * cm),
+        ("BOTTOMPADDING", (0, 0), (0, -2), 0.15 * cm),
+        ("BOTTOMPADDING", (0, -1), (0, -1), 0),
+    ]))
+    story.append(Spacer(1, 0.4 * cm))
+    story.append(alt_t)
+
+    # Coupon
+    story.append(Spacer(1, 0.4 * cm))
+    story.append(Paragraph("Compensation Coupon", s_sec_t))
+    story.append(_detail_row_table(
+        [
+            [Paragraph("Coupon Code",     s_lbl), Paragraph(coupon_code, s_coupon)],
+            [Paragraph("Discount Amount", s_lbl), Paragraph(f"SGD ${_format_money(discount)}", s_val)],
+        ],
+        COL_L, COL_R,
+    ))
+
+    story.append(Spacer(1, 0.3 * cm))
+    story.append(Paragraph("Please respond to this offer within 24 hours.", s_lbl))
+    story.append(Paragraph(f"Accept or reject at: {accept_link}", s_link))
+    story.append(Spacer(1, 0.3 * cm))
+    story.append(HRFlowable(width=PAGE_W, thickness=0.5, color=BORDER))
+    story.append(Paragraph("If you reject, a full refund will be issued to your original payment method.", s_foot))
+
+    return _pdf_build(story)
+
+
+# =============================================================================
+# PDF GENERATOR — Scenario 2 Path B: Refund confirmation (boarding-pass style)
+# =============================================================================
+
+def generate_refund_noalt_pdf(data: dict) -> bytes:
+    """Scenario 2 Path B — boarding-pass style refund confirmation PDF."""
+    inner = data.get("data", data)
+
+    PAGE_W = 17 * cm
+    COL_L  = 5.5 * cm
+    COL_R  = PAGE_W - COL_L
+
+    RED    = colors.HexColor("#dc2626")
+    WHITE  = colors.white
+    BORDER = colors.HexColor("#e2e8f0")
+
+    ps = _make_styles()
+
+    s_brand  = ps("rn_brand",  fontSize=13, fontName="Helvetica-Bold", textColor=WHITE)
+    s_h1     = ps("rn_h1",     fontSize=17, fontName="Helvetica-Bold", textColor=WHITE, alignment=1)
+    s_sub    = ps("rn_sub",    fontSize=10, textColor=colors.HexColor("#fca5a5"), alignment=1)
+    s_sec_r  = ps("rn_sec_r",  fontSize=12, fontName="Helvetica-Bold", textColor=colors.HexColor("#dc2626"), spaceBefore=12, spaceAfter=4)
+    s_sec_g  = ps("rn_sec_g",  fontSize=12, fontName="Helvetica-Bold", textColor=colors.HexColor("#059669"), spaceBefore=12, spaceAfter=4)
+    s_sec_t  = ps("rn_sec_t",  fontSize=12, fontName="Helvetica-Bold", textColor=colors.HexColor("#0f766e"), spaceBefore=12, spaceAfter=4)
+    s_lbl    = ps("rn_lbl",    fontSize=10, textColor=colors.HexColor("#6b7280"))
+    s_val    = ps("rn_val",    fontSize=10, fontName="Helvetica-Bold", textColor=colors.HexColor("#111827"), alignment=2)
+    s_refund = ps("rn_refund", fontSize=11, fontName="Helvetica-Bold", textColor=colors.HexColor("#059669"), alignment=2)
+    s_coupon = ps("rn_coupon", fontSize=14, fontName="Helvetica-Bold", textColor=colors.HexColor("#0f766e"), alignment=2)
+    s_foot   = ps("rn_foot",   fontSize=9,  textColor=colors.HexColor("#9ca3af"), alignment=1)
+
+    orig_flight  = str(inner.get("OriginalFlight", "N/A"))
+    cancelled_dt = str(inner.get("CancelledDate", "N/A"))
+    refund_amt   = inner.get("RefundAmount", 0)
+    coupon_code  = str(inner.get("CouponCode", "N/A"))
+    discount     = inner.get("DiscountAmount", 0)
+    booking_id   = str(inner.get("BookingID", "N/A"))
+
+    story = []
+
+    # Red cancellation header
+    header_t = Table(
+        [
+            [Paragraph("BlazeAir", s_brand)],
+            [Paragraph("Your Flight Has Been Cancelled", s_h1)],
+            [Paragraph("No alternative flight is available. A full refund has been issued.", s_sub)],
+        ],
+        colWidths=[PAGE_W],
+    )
+    header_t.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, -1), RED),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 0.5 * cm),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 0.5 * cm),
+        ("TOPPADDING",    (0, 0), (0, 0), 0.4 * cm),
+        ("BOTTOMPADDING", (0, -1), (0, -1), 0.4 * cm),
+        ("TOPPADDING",    (0, 1), (0, -1), 0.15 * cm),
+        ("BOTTOMPADDING", (0, 0), (0, -2), 0.15 * cm),
+    ]))
+    story.append(header_t)
+
+    # Cancelled flight
+    story.append(Spacer(1, 0.4 * cm))
+    story.append(Paragraph("Cancelled Flight", s_sec_r))
+    story.append(_detail_row_table(
+        [
+            [Paragraph("Flight Number", s_lbl), Paragraph(orig_flight,  s_val)],
+            [Paragraph("Booking ID",    s_lbl), Paragraph(booking_id,   s_val)],
+            [Paragraph("Date",          s_lbl), Paragraph(cancelled_dt, s_val)],
+        ],
+        COL_L, COL_R,
+    ))
+
+    # Refund details
+    story.append(Paragraph("Refund Details", s_sec_g))
+    story.append(_detail_row_table(
+        [
+            [Paragraph("Refund Amount", s_lbl), Paragraph(f"SGD ${_format_money(refund_amt)}", s_refund)],
+            [Paragraph("Refund Status", s_lbl), Paragraph("Processed — allow 5 to 7 business days", s_val)],
+        ],
+        COL_L, COL_R,
+    ))
+
+    # Coupon
+    story.append(Paragraph("Compensation Coupon", s_sec_t))
+    story.append(_detail_row_table(
+        [
+            [Paragraph("Coupon Code",     s_lbl), Paragraph(coupon_code, s_coupon)],
+            [Paragraph("Discount Amount", s_lbl), Paragraph(f"SGD ${_format_money(discount)}", s_val)],
+        ],
+        COL_L, COL_R,
+    ))
+
+    story.append(Spacer(1, 0.4 * cm))
+    story.append(HRFlowable(width=PAGE_W, thickness=0.5, color=BORDER))
+    story.append(Paragraph("We apologise for the inconvenience and hope to see you on board again soon.", s_foot))
+
+    return _pdf_build(story)
+
+
+# =============================================================================
+# PDF GENERATOR — Scenario 3: Voucher PDFs (unchanged)
+# =============================================================================
+
+def _pdf_table(data_rows: list, col_widths=None) -> Table:
+    """Helper — builds a styled two-column label/value table."""
+    col_widths = col_widths or [5*cm, 11*cm]
+    t = Table(data_rows, colWidths=col_widths)
+    t.setStyle(TableStyle([
+        ("BACKGROUND",     (0, 0), (-1, -1), colors.white),
+        ("TEXTCOLOR",      (0, 0), (0, -1), colors.HexColor("#6b7280")),
+        ("TEXTCOLOR",      (1, 0), (1, -1), colors.HexColor("#111827")),
+        ("FONTNAME",       (1, 0), (1, -1), "Helvetica-Bold"),
+        ("FONTSIZE",       (0, 0), (-1, -1), 10),
+        ("ROWBACKGROUNDS", (0, 0), (-1, -1), [colors.HexColor("#f9fafb"), colors.white]),
+        ("GRID",           (0, 0), (-1, -1), 0.5, colors.HexColor("#e5e7eb")),
+        ("LEFTPADDING",    (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING",   (0, 0), (-1, -1), 10),
+        ("TOPPADDING",     (0, 0), (-1, -1), 7),
+        ("BOTTOMPADDING",  (0, 0), (-1, -1), 7),
+    ]))
+    return t
+
+
+def _pdf_styles() -> dict:
+    """Returns a dict of common paragraph styles."""
+    base = getSampleStyleSheet()
+    return {
+        "header": ParagraphStyle("header", parent=base["Normal"], fontSize=20, fontName="Helvetica-Bold", textColor=colors.HexColor("#1d4ed8"), spaceAfter=4),
+        "sub":    ParagraphStyle("sub",    parent=base["Normal"], fontSize=11, textColor=colors.HexColor("#6b7280"), spaceAfter=2),
+        "section":ParagraphStyle("section",parent=base["Normal"], fontSize=12, fontName="Helvetica-Bold", textColor=colors.HexColor("#1d4ed8"), spaceBefore=14, spaceAfter=6),
+        "footer": ParagraphStyle("footer", parent=base["Normal"], fontSize=9,  textColor=colors.HexColor("#9ca3af")),
+        "warn":   ParagraphStyle("warn",   parent=base["Normal"], fontSize=12, fontName="Helvetica-Bold", textColor=colors.HexColor("#dc2626"), spaceBefore=14, spaceAfter=6),
+        "success":ParagraphStyle("success",parent=base["Normal"], fontSize=12, fontName="Helvetica-Bold", textColor=colors.HexColor("#059669"), spaceBefore=14, spaceAfter=6),
+        "teal":   ParagraphStyle("teal",   parent=base["Normal"], fontSize=12, fontName="Helvetica-Bold", textColor=colors.HexColor("#0f766e"), spaceBefore=14, spaceAfter=6),
+    }
+
+
+def generate_voucher_pdf(data: dict) -> bytes:
+    """Scenario 3 — single voucher confirmation PDF."""
+    s     = _pdf_styles()
+    story = []
+
+    story.append(Paragraph("Voucher Confirmation", s["header"]))
+    story.append(Paragraph(f"Hi {_display_name(data)}, your miles-to-voucher conversion was successful.", s["sub"]))
+    story.append(Spacer(1, 0.3*cm))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#e5e7eb")))
+
+    story.append(Paragraph("Voucher Details", s["teal"]))
+    story.append(_pdf_table([
+        ["Voucher Type",     str(data.get("voucherType", "N/A"))],
+        ["Voucher Code",     str(data.get("voucherCode", "N/A"))],
+        ["Voucher Value",    str(data.get("voucherValue", "N/A"))],
+        ["Miles Redeemed",   str(data.get("milesRedeemed", "N/A"))],
+        ["Remaining Miles",  str(data.get("remainingMiles", "N/A"))],
+        ["Expiry Date",      str(data.get("expiryDate", "N/A"))],
+        ["Provider",         str(data.get("providerName") or "-")],
+        ["External Order ID",str(data.get("externalOrderId") or "-")],
+    ]))
+
+    story.append(Spacer(1, 0.4*cm))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#e5e7eb")))
+    story.append(Spacer(1, 0.3*cm))
+    story.append(Paragraph("Keep your voucher code safe and apply it during checkout.", s["footer"]))
+
+    return _pdf_build(story)
+
+
+def generate_voucher_bundle_pdf(data: dict) -> bytes:
+    """Scenario 3 — voucher bundle confirmation PDF."""
+    vouchers        = data.get("vouchers") or []
+    total_redeemed  = data.get("totalMilesRedeemed", "N/A")
+    remaining_miles = data.get("remainingMiles", "N/A")
+    s               = _pdf_styles()
+    story           = []
+
+    story.append(Paragraph("Voucher Bundle Confirmation", s["header"]))
+    story.append(Paragraph(f"Hi {_display_name(data)}, your bundle conversion completed successfully.", s["sub"]))
+    story.append(Spacer(1, 0.3*cm))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#e5e7eb")))
+
+    story.append(Paragraph("Voucher Details", s["teal"]))
+
+    header = ["#", "Type", "Code", "Value", "Miles", "Expiry", "Provider"]
+    rows   = [header]
+    for i, v in enumerate(vouchers, start=1):
+        rows.append([
+            str(i),
+            str(v.get("voucherType") or v.get("type") or "VOUCHER"),
+            str(v.get("voucherCode") or v.get("code") or "N/A"),
+            str(v.get("voucherValue", "N/A")),
+            str(v.get("milesRedeemed", "N/A")),
+            str(v.get("expiryDate", "N/A")),
+            str(v.get("providerName") or "-"),
+        ])
+
+    bundle_table = Table(rows, colWidths=[1*cm, 2.5*cm, 3*cm, 2*cm, 2*cm, 2.5*cm, 3*cm])
+    bundle_table.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, 0),  colors.HexColor("#f3f4f6")),
+        ("TEXTCOLOR",     (0, 0), (-1, 0),  colors.HexColor("#6b7280")),
+        ("FONTNAME",      (0, 0), (-1, 0),  "Helvetica-Bold"),
+        ("FONTSIZE",      (0, 0), (-1, -1), 9),
+        ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.HexColor("#f9fafb"), colors.white]),
+        ("GRID",          (0, 0), (-1, -1), 0.5, colors.HexColor("#e5e7eb")),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 6),
+        ("TOPPADDING",    (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(bundle_table)
+
+    story.append(Paragraph("Summary", s["section"]))
+    story.append(_pdf_table([
+        ["Total Miles Redeemed", str(total_redeemed)],
+        ["Remaining Miles",      str(remaining_miles)],
+    ]))
+
+    story.append(Spacer(1, 0.4*cm))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#e5e7eb")))
+    story.append(Spacer(1, 0.3*cm))
+    story.append(Paragraph("Keep your voucher codes safe and apply them during checkout.", s["footer"]))
+
+    return _pdf_build(story)
+
+
+def _safe_pdf(generator_fn, data: dict, filename: str):
+    """Safely calls a PDF generator — returns (pdf_bytes, filename) or (None, filename) on error."""
+    try:
+        pdf_bytes = generator_fn(data)
+        logger.info("PDF generated: %s (%d bytes)", filename, len(pdf_bytes))
+        return pdf_bytes, filename
+    except Exception as e:
+        logger.error("PDF generation failed for %s: %s", filename, str(e))
+        return None, filename
+
+# =============================================================================
 # NOTIFICATION HANDLER
 # =============================================================================
 
 def notify_booking_confirmation(data: dict) -> dict:
-    """Handles booking.confirmed event from RabbitMQ."""
+    """Scenario 1 - RabbitMQ: booking.confirmed"""
     tpl = booking_confirmation_template(data)
-    return send_email(
-        data["passenger_email"],
-        data["passenger_name"],
-        tpl["subject"],
-        tpl["html"],
-        tpl["text"]
-    )
+    try:
+        pdf_bytes    = generate_booking_pdf(data)
+        booking_id   = data.get("booking_id", "booking")
+        pdf_filename = f"booking_{booking_id}_confirmation.pdf"
+        logger.info("PDF generated successfully for booking %s", booking_id)
+    except Exception as e:
+        logger.error("Failed to generate PDF for booking %s: %s", data.get("booking_id"), str(e))
+        pdf_bytes    = None
+        pdf_filename = "booking_confirmation.pdf"
+    return send_email(data["passenger_email"], data["passenger_name"], tpl["subject"], tpl["html"], tpl["text"], pdf_bytes=pdf_bytes, pdf_filename=pdf_filename)
+
+def notify_flight_cancelled_alt(data: dict) -> dict:
+    """Scenario 2 Path A - RabbitMQ: flight.cancelled.alt"""
+    tpl          = flight_cancelled_alt_template(data)
+    email        = data.get("email", "")
+    name         = str(data.get("data", {}).get("PassengerID", "Passenger"))
+    booking_id   = data.get("data", {}).get("BookingID", "booking")
+    pdf_bytes, pdf_filename = _safe_pdf(generate_rebooking_offer_pdf, data, f"rebooking_offer_{booking_id}.pdf")
+    return send_email(email, name, tpl["subject"], tpl["html"], tpl["text"], pdf_bytes=pdf_bytes, pdf_filename=pdf_filename)
+
+
+def notify_flight_cancelled_noalt(data: dict) -> dict:
+    """Scenario 2 Path B - RabbitMQ: flight.cancelled.noalt"""
+    tpl          = flight_cancelled_noalt_template(data)
+    email        = data.get("email", "")
+    name         = str(data.get("data", {}).get("PassengerID", "Passenger"))
+    booking_id   = data.get("data", {}).get("BookingID", "booking")
+    pdf_bytes, pdf_filename = _safe_pdf(generate_refund_noalt_pdf, data, f"refund_confirmation_{booking_id}.pdf")
+    return send_email(email, name, tpl["subject"], tpl["html"], tpl["text"], pdf_bytes=pdf_bytes, pdf_filename=pdf_filename)
 
 
 # =============================================================================
@@ -326,7 +1028,16 @@ def notify_booking_confirmation(data: dict) -> dict:
 
 RABBITMQ_EXCHANGE = os.environ.get("RABBITMQ_EXCHANGE", "airline_events")
 RABBITMQ_QUEUE    = "notification_booking_queue"
-RABBITMQ_BINDING  = "booking.confirmed"
+RABBITMQ_BINDINGS = [
+    "booking.confirmed",       # Scenario 1
+    "flight.cancelled.alt",    # Scenario 2 Path A
+    "flight.cancelled.noalt",  # Scenario 2 Path B
+]
+RABBITMQ_HANDLERS = {
+    "booking.confirmed":      notify_booking_confirmation,
+    "flight.cancelled.alt":   notify_flight_cancelled_alt,
+    "flight.cancelled.noalt": notify_flight_cancelled_noalt,
+}
 
 
 def _get_rabbitmq_params():
@@ -355,21 +1066,22 @@ def _on_message(channel, method, properties, body):
         channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
         return
 
-    if routing_key != "booking.confirmed":
-        logger.warning("[RabbitMQ] Unexpected routing key '%s' - skipped", routing_key)
+    handler = RABBITMQ_HANDLERS.get(routing_key)
+    if handler is None:
+        logger.warning("[RabbitMQ] No handler for '%s' - skipped", routing_key)
         channel.basic_ack(delivery_tag=method.delivery_tag)
         return
 
     try:
-        result = notify_booking_confirmation(data)
+        result = handler(data)
         if result.get("success"):
-            logger.info("[RabbitMQ] Booking confirmation email sent successfully")
+            logger.info("[RabbitMQ] Email sent for '%s'", routing_key)
             channel.basic_ack(delivery_tag=method.delivery_tag)
         else:
-            logger.error("[RabbitMQ] Email failed: %s - requeued", result.get("error"))
+            logger.error("[RabbitMQ] Email failed for '%s': %s - requeued", routing_key, result.get("error"))
             channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
     except Exception as exc:
-        logger.exception("[RabbitMQ] Unexpected error: %s - requeued", exc)
+        logger.exception("[RabbitMQ] Unexpected error for '%s': %s - requeued", routing_key, exc)
         channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
 
 
@@ -378,28 +1090,28 @@ def _consume():
     while True:
         try:
             connection = pika.BlockingConnection(_get_rabbitmq_params())
-            channel = connection.channel()
+            channel    = connection.channel()
+
             channel.exchange_declare(
                 exchange=RABBITMQ_EXCHANGE,
                 exchange_type="topic",
                 durable=True
             )
             channel.queue_declare(queue=RABBITMQ_QUEUE, durable=True)
-            channel.queue_bind(
-                queue=RABBITMQ_QUEUE,
-                exchange=RABBITMQ_EXCHANGE,
-                routing_key=RABBITMQ_BINDING
-            )
+
+            for binding_key in RABBITMQ_BINDINGS:
+                channel.queue_bind(
+                    queue=RABBITMQ_QUEUE,
+                    exchange=RABBITMQ_EXCHANGE,
+                    routing_key=binding_key
+                )
+                logger.info("[RabbitMQ] Bound queue to routing key: %s", binding_key)
+
             channel.basic_qos(prefetch_count=1)
-            channel.basic_consume(
-                queue=RABBITMQ_QUEUE,
-                on_message_callback=_on_message
-            )
-            logger.info(
-                "[RabbitMQ] Consumer started | queue=%s | binding=%s",
-                RABBITMQ_QUEUE, RABBITMQ_BINDING
-            )
+            channel.basic_consume(queue=RABBITMQ_QUEUE, on_message_callback=_on_message)
+            logger.info("[RabbitMQ] Consumer started | queue=%s", RABBITMQ_QUEUE)
             channel.start_consuming()
+
         except pika.exceptions.AMQPConnectionError as exc:
             logger.warning("[RabbitMQ] Connection lost: %s - retrying in 5s", exc)
             time.sleep(5)
@@ -414,9 +1126,8 @@ def start_rabbitmq_consumer():
     thread.start()
     logger.info("[RabbitMQ] Consumer thread started")
 
-
 # =============================================================================
-# FLASK APP — health check only
+# FLASK APP — health check + Scenario 3 HTTP endpoints
 # =============================================================================
 
 app = Flask(__name__)
@@ -431,13 +1142,15 @@ def notify_voucher_conversion():
         return {"success": False, "error": "Missing passengerEmail"}, 400
 
     template = voucher_confirmation_template(data)
+    pdf_bytes, pdf_filename = _safe_pdf(generate_voucher_pdf, data, "voucher_confirmation.pdf")
     result = send_email(
         passenger_email,
         _display_name(data),
         template["subject"],
         template["html"],
         template["text"],
-    )
+        pdf_bytes=pdf_bytes,
+        pdf_filename=pdf_filename)
 
     if not result.get("success"):
         return {"success": False, "error": result.get("error", "email send failed")}, 500
@@ -458,13 +1171,15 @@ def notify_voucher_bundle_conversion():
         return {"success": False, "error": "Missing vouchers list"}, 400
 
     template = voucher_bundle_confirmation_template(data)
+    pdf_bytes, pdf_filename = _safe_pdf(generate_voucher_bundle_pdf, data, "voucher_bundle_confirmation.pdf")
     result = send_email(
         passenger_email,
         _display_name(data),
         template["subject"],
         template["html"],
         template["text"],
-    )
+        pdf_bytes=pdf_bytes,
+        pdf_filename=pdf_filename)
 
     if not result.get("success"):
         return {"success": False, "error": result.get("error", "email send failed")}, 500
