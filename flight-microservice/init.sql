@@ -49,6 +49,10 @@ VALUES
 (60003, 'BA810', 'Singapore', 'Edinburgh', '2026-05-05', '13:15:00', '15:30:00', '04:45:00', 1250.00, 'available', '3 Hot Meals', 'Free-flow', True, '40kg'),
 (60004, 'BA811', 'Edinburgh', 'Singapore', '2026-05-15', '23:45:00', '15:30:00', '15:15:00', 1150.00, 'available', '3 Hot Meals', 'Free-flow', True, '40kg');
 
+<<<<<<< Updated upstream
+=======
+ALTER TABLE flight ADD COLUMN IF NOT EXISTS CancellationReason VARCHAR(255) NULL;
+>>>>>>> Stashed changes
 UPDATE flights
 SET FlightNumber = CONCAT('BA', SUBSTRING(FlightNumber, 3))
 WHERE FlightNumber NOT LIKE 'BA%';
