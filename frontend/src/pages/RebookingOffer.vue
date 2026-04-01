@@ -16,7 +16,6 @@ const offer        = ref(null)
 const origFlight   = ref(null)
 const newFlight    = ref(null)
 const passenger    = ref(null)
-const couponCode   = ref(null)   // fetched from Coupon Service using offer.couponID
 const loading      = ref(true)
 const error        = ref(null)
 const submitting   = ref(false)
@@ -36,18 +35,6 @@ async function loadOffer() {
     // Step 1: Load offer details from Offer Service
     const offerRes = await axios.get(`http://localhost:5002/offer/${offerID}`)
     offer.value = offerRes.data
-
-    // Step 2: Fetch coupon code from Coupon Service if offer has a coupon
-    // TODO: Replace port with actual Coupon Service port when available
-    if (offer.value.couponID) {
-      try {
-        const couponRes = await axios.get()
-        couponCode.value = couponRes.data.couponCode
-      } catch {
-        // Coupon Service not yet built — fail silently, coupon section just won't show
-        console.warn('Coupon Service unavailable — coupon code not displayed')
-      }
-    }
 
     // Check offer is still actionable
     if (offer.value.status !== 'Pending Response') {
@@ -360,27 +347,6 @@ function formatExpiry(expiryStr) {
             </p>
           </div>
 
-        </div>
-
-        <!-- Coupon code -->
-        <div v-if="offer.couponID"
-          style="background:white; border:1px solid rgba(0,0,0,0.08); border-radius:20px; padding:20px 24px; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
-          <div style="display:flex; align-items:center; gap:14px;">
-            <div style="width:40px; height:40px; background:#fef9c3; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-              <svg width="20" height="20" fill="none" stroke="#ca8a04" stroke-width="2" viewBox="0 0 24 24">
-                <path d="M7 7h.01M17 17h.01M7.5 17.5l9-9M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-              </svg>
-            </div>
-            <div>
-              <p style="font-size:12px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#6e6e73; margin:0 0 3px;">Compensation Coupon</p>
-              <p style="font-size:13px; color:#6e6e73; margin:0;">As an apology for the inconvenience, please enjoy this discount on your next booking.</p>
-            </div>
-          </div>
-          <div style="background:#fefce8; border:1.5px dashed #fde047; border-radius:12px; padding:10px 20px; text-align:center; flex-shrink:0;">
-            <p style="font-size:11px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#a16207; margin:0 0 2px;">Coupon Code</p>
-            <p style="font-size:18px; font-weight:800; font-family:monospace; color:#1d1d1f; margin:0; letter-spacing:0.05em;">{{ couponCode || 'COUPON-' + offer.couponID }}</p>
-            <p v-if="!couponCode" style="font-size:10px; color:#a16207; margin:4px 0 0; font-weight:600;">Full code available once Coupon Service is ready</p>
-          </div>
         </div>
 
         <!-- What happens section -->

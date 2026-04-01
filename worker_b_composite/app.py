@@ -19,7 +19,6 @@ KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:29092")
 PASSENGER_SERVICE_URL = os.getenv("PASSENGER_SERVICE_URL", "https://personal-4whagfbm.outsystemscloud.com/Passenger_Srv/rest/PassengerAPI")
 PAYMENT_SERVICE_URL = os.getenv("PAYMENT_SERVICE_URL", "http://payment-service:5000")
 RECORD_SERVICE_URL = os.getenv("RECORD_SERVICE_URL", "http://record-service:3000")
-COUPON_SERVICE_URL = os.getenv("COUPON_SERVICE_URL", "http://coupon-service:5000")
 FLIGHT_SERVICE_URL = os.getenv("FLIGHT_SERVICE_URL", "http://flight-service:3000")
 RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672")
 
@@ -49,7 +48,6 @@ def process_path_b_message(msg):
     booking_id = msg.get("BookingID")
     amount_paid = msg.get("AmountPaid")
     orig_flight_id = msg.get("OrigFlightID")
-    hours_until_departure = msg.get("HoursUntilDeparture")
 
     passenger_endpoint = f"{PASSENGER_SERVICE_URL.rstrip('/')}/getpassenger/{passenger_id}/"
     passenger_response = requests.get(passenger_endpoint, timeout=10)
@@ -89,20 +87,6 @@ def process_path_b_message(msg):
     update_record_status(booking_id, "Cancelled")
     refund_amount = refund_payload.get("RefundAmount", amount_paid)
 
-    coupon_response = requests.post(
-        f"{COUPON_SERVICE_URL}/coupons",
-        json={
-            "FlightPrice": amount_paid,
-            "HoursUntilDeparture": hours_until_departure,
-        },
-        timeout=10,
-    )
-    if coupon_response.status_code >= 400:
-        raise RuntimeError(f"Coupon generation failed: {coupon_response.status_code} {coupon_response.text}")
-    coupon_payload = get_json_or_none(coupon_response) or {}
-    coupon_code = coupon_payload.get("CouponCode", "")
-    discount_amount = coupon_payload.get("DiscountAmount", 0)
-
     orig_flight_response = requests.get(f"{FLIGHT_SERVICE_URL}/flights/{orig_flight_id}", timeout=10)
     orig_flight_data = get_json_or_none(orig_flight_response) or {}
     original_flight_number = orig_flight_data.get("FlightNumber", "")
@@ -117,8 +101,6 @@ def process_path_b_message(msg):
             "OriginalFlight": original_flight_number,
             "CancelledDate":  cancelled_date,
             "RefundAmount":   refund_amount,
-            "CouponCode":     coupon_code,
-            "DiscountAmount": discount_amount,
         },
     }
 

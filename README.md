@@ -13,7 +13,7 @@ To use the frontend,
 2. npm install
 3. npm run dev
 
-Under the api documentation folder lies the YAML files of the microservices (currently includes record, payment, and coupon microservices). to view the api documents,
+Under the api documentation folder lies the YAML files of the microservices (currently includes record and payment microservices). to view the api documents,
 1. Open https://editor.swagger.io
 2. Copy-paste the YAML of the microservice you want to see
 

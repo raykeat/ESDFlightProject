@@ -69,7 +69,6 @@ class Offer(db.Model):
     origFlightID = db.Column(db.Integer,  nullable=False)   # FK → Flight DB (cancelled)
     newFlightID  = db.Column(db.Integer,  nullable=True)    # FK → Flight DB (alternative); always populated since Offer is Path A only
     newSeatID    = db.Column(db.Integer,  nullable=True)    # logical Seat Service reference
-    couponID     = db.Column(db.Integer,  nullable=True)    # FK → Coupon DB; populated after coupon created
     # fareDiff removed — airline absorbs all fare differences per disruption policy
     status       = db.Column(db.String(50),  nullable=False, default='Pending Response')
     expiryTime   = db.Column(db.DateTime,    nullable=True)  # now+24h for Path A offers
@@ -86,7 +85,6 @@ class Offer(db.Model):
             'origFlightID': self.origFlightID,
             'newFlightID':  self.newFlightID,
             'newSeatID':    self.newSeatID,
-            'couponID':     self.couponID,
             'status':       self.status,
             'expiryTime':   self.expiryTime.strftime("%Y-%m-%d %H:%M:%S SGT")  if self.expiryTime  else None,
             'respondedAt':  self.respondedAt.strftime("%Y-%m-%d %H:%M:%S SGT") if self.respondedAt else None,
@@ -257,7 +255,7 @@ def get_offer(offerID):
 # Called by: Rebooking Composite (Path A and Path B)
 #
 # Required: bookingID, passengerID, origFlightID, status
-# Optional: newFlightID, couponID, expiryTime
+# Optional: newFlightID, expiryTime
 #
 # Edge cases:
 #   - Non-JSON / empty body                          → 400 INVALID_JSON
@@ -291,7 +289,6 @@ def create_offer():
         orig_flight_id = data.get('origFlightID', data.get('OrigFlightID'))
         new_flight_id  = data.get('newFlightID', data.get('NewFlightID', None))
         new_seat_id    = data.get('newSeatID', data.get('NewSeatID', None))
-        coupon_id      = data.get('couponID', data.get('CouponID', None))
         status         = data.get('status', data.get('Status', 'Pending Response'))
         expiry_time    = data.get('expiryTime', data.get('ExpiryTime', None))
 
@@ -403,7 +400,6 @@ def create_offer():
             origFlightID = orig_flight_id,
             newFlightID  = new_flight_id,
             newSeatID    = new_seat_id,
-            couponID     = coupon_id,
             status       = status,
             expiryTime   = parsed_expiry
         )
@@ -456,8 +452,6 @@ def create_offer():
 # Called by: Rebooking Composite (Scenario 3)
 #
 # Required: status
-# Optional: couponID
-#
 # Edge cases:
 #   - Non-JSON / empty body          → 400 INVALID_JSON
 #   - Missing status                 → 400 MISSING_FIELDS
@@ -482,8 +476,7 @@ def update_offer(offerID):
                 'message': 'Request body must be valid JSON'
             }), 400
 
-        status       = data.get('status')
-        coupon_id    = data.get('couponID')
+        status = data.get('status')
 
         # ── Validate status ─────────────────────────────────────────
         if not status:
@@ -531,9 +524,6 @@ def update_offer(offerID):
         # Populate respondedAt when passenger makes a decision
         if status in ['Accepted', 'Rejected']:
             offer.respondedAt = get_sgt_now()
-
-        if coupon_id is not None:
-            offer.couponID = coupon_id
 
         db.session.commit()
 

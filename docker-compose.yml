@@ -248,44 +248,6 @@ services:
     networks:
       - app-network
 
-  # ========== COUPON MICROSERVICE ==========
-  coupon-service:
-    build: ./coupon-microservice
-    container_name: coupon-app
-    restart: unless-stopped
-    ports:
-      - "5004:5000"                               # Access at localhost:5004
-    environment:
-      - DB_HOST=coupon-db
-      - DB_USER=root
-      - DB_PASSWORD=rootpassword
-      - DB_NAME=coupondb
-    depends_on:
-      coupon-db:
-        condition: service_healthy
-    networks:
-      - app-network
-
-  coupon-db:
-    image: mysql:8.0
-    container_name: coupon-db
-    command: --innodb-buffer-pool-size=128M
-    environment:
-      - MYSQL_ROOT_PASSWORD=rootpassword
-      - MYSQL_DATABASE=coupondb
-      - TZ=Asia/Singapore
-    volumes:
-      - coupon-data:/var/lib/mysql
-      - ./coupon-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql
-    networks:
-      - app-network
-    mem_limit: 512m
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # ========== NOTIFICATION SERVICE (Atomic) ==========
   # Subscribes to RabbitMQ (booking.confirmed) and Kafka (flight.cancelled.alt/noalt)
   # Calls Email Service via HTTP — does NOT call SendGrid directly
@@ -420,7 +382,6 @@ services:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - SEAT_SERVICE_URL=http://seats-service:5003
       - PASSENGER_SERVICE_URL=https://personal-4whagfbm.outsystemscloud.com/Passenger_Srv/rest/PassengerAPI
-      - COUPON_SERVICE_URL=http://coupon-service:5000
       - OFFER_SERVICE_URL=http://offer-service:5000
       - RECORD_SERVICE_URL=http://record-service:3000
       - FLIGHT_SERVICE_URL=http://flight-service:3000
@@ -429,8 +390,6 @@ services:
       kafka:
         condition: service_healthy
       seats-service:
-        condition: service_started
-      coupon-service:
         condition: service_started
       offer-service:
         condition: service_started
@@ -449,7 +408,6 @@ services:
       - PASSENGER_SERVICE_URL=https://personal-4whagfbm.outsystemscloud.com/Passenger_Srv/rest/PassengerAPI
       - PAYMENT_SERVICE_URL=http://payment-service:5000
       - RECORD_SERVICE_URL=http://record-service:3000
-      - COUPON_SERVICE_URL=http://coupon-service:5000
       - FLIGHT_SERVICE_URL=http://flight-service:3000
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
     depends_on:
@@ -458,8 +416,6 @@ services:
       payment-service:
         condition: service_started
       record-service:
-        condition: service_started
-      coupon-service:
         condition: service_started
       kafka-init:
         condition: service_completed_successfully
@@ -615,7 +571,6 @@ volumes:
   seats-data:
   payment-data:
   offer-data:
-  coupon-data:
   miles-balance-data:
   miles-transaction-data:
   voucher-data:

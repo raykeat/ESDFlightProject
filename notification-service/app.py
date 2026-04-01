@@ -388,8 +388,6 @@ def flight_cancelled_alt_template(data: dict) -> dict:
     new_date     = inner.get("NewDate", "N/A")
     new_dep_time = inner.get("NewDepartureTime", "N/A")
     seat_number  = inner.get("SeatNumber", "N/A")
-    coupon_code  = inner.get("CouponCode", "N/A")
-    discount     = inner.get("DiscountAmount", 0)
     accept_link  = inner.get("AcceptRejectLink", "#")
     booking_id   = inner.get("BookingID", "N/A")
 
@@ -415,11 +413,6 @@ def flight_cancelled_alt_template(data: dict) -> dict:
                     <tr><td style="padding:10px 12px;color:#6b7280;">Seat Number</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{seat_number}</td></tr>
                     <tr><td style="padding:10px 12px;color:#6b7280;">Fare Difference</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#059669;">None - covered by airline</td></tr>
                 </table>
-                <h3 style="color:#0f766e;">Your Compensation Coupon</h3>
-                <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:24px;">
-                    <tr><td style="padding:10px 12px;color:#6b7280;">Coupon Code</td><td style="padding:10px 12px;text-align:right;font-weight:700;font-size:18px;letter-spacing:2px;color:#0f766e;">{coupon_code}</td></tr>
-                    <tr><td style="padding:10px 12px;color:#6b7280;">Discount Amount</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#0f766e;">${_format_money(discount)}</td></tr>
-                </table>
                 <p style="margin-bottom:16px;color:#374151;">Please respond to this offer within 24 hours:</p>
                 <div style="text-align:center;margin:20px 0;">
                     <a href="{accept_link}&decision=accept" style="display:inline-block;background:#1d4ed8;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;margin-right:12px;">Accept Rebooking</a>
@@ -432,7 +425,6 @@ def flight_cancelled_alt_template(data: dict) -> dict:
         "text": (
             f"Your flight {orig_flight} has been cancelled. "
             f"Alternative: {new_flight} on {new_date} at {new_dep_time} (Seat: {seat_number}) at no extra charge. "
-            f"Compensation coupon: {coupon_code} (${_format_money(discount)} off). "
             f"Accept or reject: {accept_link}"
         ),
     }
@@ -448,8 +440,6 @@ def flight_cancelled_noalt_template(data: dict) -> dict:
     orig_flight  = inner.get("OriginalFlight", "N/A")
     cancelled_dt = inner.get("CancelledDate", "N/A")
     refund_amt   = inner.get("RefundAmount", 0)
-    coupon_code  = inner.get("CouponCode", "N/A")
-    discount     = inner.get("DiscountAmount", 0)
     booking_id   = inner.get("BookingID", "N/A")
 
     return {
@@ -472,11 +462,6 @@ def flight_cancelled_noalt_template(data: dict) -> dict:
                     <tr><td style="padding:10px 12px;color:#6b7280;">Refund Amount</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#059669;">${_format_money(refund_amt)}</td></tr>
                     <tr><td style="padding:10px 12px;color:#6b7280;">Refund Status</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#059669;">Processed - allow 5 to 7 business days</td></tr>
                 </table>
-                <h3 style="color:#0f766e;">Your Compensation Coupon</h3>
-                <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
-                    <tr><td style="padding:10px 12px;color:#6b7280;">Coupon Code</td><td style="padding:10px 12px;text-align:right;font-weight:700;font-size:18px;letter-spacing:2px;color:#0f766e;">{coupon_code}</td></tr>
-                    <tr><td style="padding:10px 12px;color:#6b7280;">Discount Amount</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#0f766e;">${_format_money(discount)}</td></tr>
-                </table>
                 <p style="margin-top:18px;color:#4b5563;font-size:13px;">We apologise for the inconvenience and hope to see you on board again soon.</p>
             </div>
         </div>
@@ -485,7 +470,7 @@ def flight_cancelled_noalt_template(data: dict) -> dict:
             f"Your flight {orig_flight} on {cancelled_dt} has been cancelled. "
             f"No alternative flight is available. "
             f"Full refund of ${_format_money(refund_amt)} issued. Allow 5 to 7 business days. "
-            f"Compensation coupon: {coupon_code} (${_format_money(discount)} off)."
+            "We apologise for the inconvenience."
         ),
     }
 
@@ -640,10 +625,8 @@ def generate_rebooking_offer_pdf(data: dict) -> bytes:
     s_lbl_w  = ps("rb_lbl_w",  fontSize=9,  textColor=LGRAY, alignment=1)
     s_val_w  = ps("rb_val_w",  fontSize=11, fontName="Helvetica-Bold", textColor=WHITE, alignment=1)
     s_sec_r  = ps("rb_sec_r",  fontSize=12, fontName="Helvetica-Bold", textColor=colors.HexColor("#dc2626"), spaceBefore=12, spaceAfter=4)
-    s_sec_t  = ps("rb_sec_t",  fontSize=12, fontName="Helvetica-Bold", textColor=colors.HexColor("#0f766e"), spaceBefore=12, spaceAfter=4)
     s_lbl    = ps("rb_lbl",    fontSize=10, textColor=colors.HexColor("#6b7280"))
     s_val    = ps("rb_val",    fontSize=10, fontName="Helvetica-Bold", textColor=colors.HexColor("#111827"), alignment=2)
-    s_coupon = ps("rb_coupon", fontSize=14, fontName="Helvetica-Bold", textColor=colors.HexColor("#0f766e"), alignment=2)
     s_link   = ps("rb_link",   fontSize=10, textColor=colors.HexColor("#1d4ed8"), alignment=1, spaceBefore=6)
     s_foot   = ps("rb_foot",   fontSize=9,  textColor=colors.HexColor("#9ca3af"), alignment=1)
 
@@ -652,8 +635,6 @@ def generate_rebooking_offer_pdf(data: dict) -> bytes:
     new_date     = str(inner.get("NewDate", "N/A"))
     new_dep_time = str(inner.get("NewDepartureTime", "N/A"))
     seat_number  = str(inner.get("SeatNumber", "N/A"))
-    coupon_code  = str(inner.get("CouponCode", "N/A"))
-    discount     = inner.get("DiscountAmount", 0)
     accept_link  = str(inner.get("AcceptRejectLink", "N/A"))
     booking_id   = str(inner.get("BookingID", "N/A"))
     THIRD        = INNER_W / 3
@@ -730,17 +711,6 @@ def generate_rebooking_offer_pdf(data: dict) -> bytes:
     story.append(Spacer(1, 0.4 * cm))
     story.append(alt_t)
 
-    # Coupon
-    story.append(Spacer(1, 0.4 * cm))
-    story.append(Paragraph("Compensation Coupon", s_sec_t))
-    story.append(_detail_row_table(
-        [
-            [Paragraph("Coupon Code",     s_lbl), Paragraph(coupon_code, s_coupon)],
-            [Paragraph("Discount Amount", s_lbl), Paragraph(f"SGD ${_format_money(discount)}", s_val)],
-        ],
-        COL_L, COL_R,
-    ))
-
     story.append(Spacer(1, 0.3 * cm))
     story.append(Paragraph("Please respond to this offer within 24 hours.", s_lbl))
     story.append(Paragraph(f"Accept or reject at: {accept_link}", s_link))
@@ -774,18 +744,14 @@ def generate_refund_noalt_pdf(data: dict) -> bytes:
     s_sub    = ps("rn_sub",    fontSize=10, textColor=colors.HexColor("#fca5a5"), alignment=1)
     s_sec_r  = ps("rn_sec_r",  fontSize=12, fontName="Helvetica-Bold", textColor=colors.HexColor("#dc2626"), spaceBefore=12, spaceAfter=4)
     s_sec_g  = ps("rn_sec_g",  fontSize=12, fontName="Helvetica-Bold", textColor=colors.HexColor("#059669"), spaceBefore=12, spaceAfter=4)
-    s_sec_t  = ps("rn_sec_t",  fontSize=12, fontName="Helvetica-Bold", textColor=colors.HexColor("#0f766e"), spaceBefore=12, spaceAfter=4)
     s_lbl    = ps("rn_lbl",    fontSize=10, textColor=colors.HexColor("#6b7280"))
     s_val    = ps("rn_val",    fontSize=10, fontName="Helvetica-Bold", textColor=colors.HexColor("#111827"), alignment=2)
     s_refund = ps("rn_refund", fontSize=11, fontName="Helvetica-Bold", textColor=colors.HexColor("#059669"), alignment=2)
-    s_coupon = ps("rn_coupon", fontSize=14, fontName="Helvetica-Bold", textColor=colors.HexColor("#0f766e"), alignment=2)
     s_foot   = ps("rn_foot",   fontSize=9,  textColor=colors.HexColor("#9ca3af"), alignment=1)
 
     orig_flight  = str(inner.get("OriginalFlight", "N/A"))
     cancelled_dt = str(inner.get("CancelledDate", "N/A"))
     refund_amt   = inner.get("RefundAmount", 0)
-    coupon_code  = str(inner.get("CouponCode", "N/A"))
-    discount     = inner.get("DiscountAmount", 0)
     booking_id   = str(inner.get("BookingID", "N/A"))
 
     story = []
@@ -828,16 +794,6 @@ def generate_refund_noalt_pdf(data: dict) -> bytes:
         [
             [Paragraph("Refund Amount", s_lbl), Paragraph(f"SGD ${_format_money(refund_amt)}", s_refund)],
             [Paragraph("Refund Status", s_lbl), Paragraph("Processed — allow 5 to 7 business days", s_val)],
-        ],
-        COL_L, COL_R,
-    ))
-
-    # Coupon
-    story.append(Paragraph("Compensation Coupon", s_sec_t))
-    story.append(_detail_row_table(
-        [
-            [Paragraph("Coupon Code",     s_lbl), Paragraph(coupon_code, s_coupon)],
-            [Paragraph("Discount Amount", s_lbl), Paragraph(f"SGD ${_format_money(discount)}", s_val)],
         ],
         COL_L, COL_R,
     ))

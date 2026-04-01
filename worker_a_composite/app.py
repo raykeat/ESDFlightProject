@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-from datetime import datetime, timedelta
 
 import pika
 import requests
@@ -19,7 +18,6 @@ logger = logging.getLogger("worker-a-composite")
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:29092")
 SEAT_SERVICE_URL = os.getenv("SEAT_SERVICE_URL", "http://seats-service:5003")
 PASSENGER_SERVICE_URL = os.getenv("PASSENGER_SERVICE_URL", "https://personal-4whagfbm.outsystemscloud.com/Passenger_Srv/rest/PassengerAPI")
-COUPON_SERVICE_URL = os.getenv("COUPON_SERVICE_URL", "http://coupon-service:5000")
 OFFER_SERVICE_URL = os.getenv("OFFER_SERVICE_URL", "http://offer-service:5000")
 RECORD_SERVICE_URL = os.getenv("RECORD_SERVICE_URL", "http://record-service:3000")
 FLIGHT_SERVICE_URL = os.getenv("FLIGHT_SERVICE_URL", "http://flight-service:3000")
@@ -43,7 +41,6 @@ def process_path_a_message(msg):
     new_flight_id = msg.get("NewFlightID")
     assigned_seat_id = msg.get("AssignedSeatID")
     assigned_seat_number = msg.get("AssignedSeatNumber")
-    hours_until_departure = msg.get("HoursUntilDeparture")
 
     hold_response = requests.put(
         f"{SEAT_SERVICE_URL}/seats/{assigned_seat_id}/hold",
@@ -61,22 +58,6 @@ def process_path_a_message(msg):
     passenger_data = get_json_or_none(passenger_response) or {}
     passenger_email = passenger_data.get("Email", "")
 
-    coupon_response = requests.post(
-        f"{COUPON_SERVICE_URL}/coupons",
-        json={
-            "FlightPrice": amount_paid,
-            "HoursUntilDeparture": hours_until_departure,
-        },
-        timeout=10,
-    )
-    if coupon_response.status_code >= 400:
-        raise RuntimeError(f"Coupon generation failed: {coupon_response.status_code} {coupon_response.text}")
-    coupon_data = get_json_or_none(coupon_response) or {}
-    coupon_code = coupon_data.get("CouponCode", "")
-    discount_amount = coupon_data.get("DiscountAmount", 0)
-
-    expiry_time = (datetime.now() + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
-
     offer_response = requests.post(
         f"{OFFER_SERVICE_URL}/offers",
         json={
@@ -85,8 +66,6 @@ def process_path_a_message(msg):
             "OrigFlightID": orig_flight_id,
             "NewFlightID": new_flight_id,
             "NewSeatID": assigned_seat_id,
-            "CouponID": coupon_data.get("CouponID"),
-            "ExpiryTime": expiry_time,
         },
         timeout=10,
     )
@@ -125,8 +104,6 @@ def process_path_a_message(msg):
             "NewDate":          new_flight_date,
             "NewDepartureTime": new_departure_time,
             "SeatNumber":       assigned_seat_number,
-            "CouponCode":       coupon_code,
-            "DiscountAmount":   discount_amount,
             "AcceptRejectLink": f"https://blazeair.com/offer?offerID={offer_id}",
         },
     }
