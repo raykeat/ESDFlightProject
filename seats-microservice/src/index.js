@@ -85,6 +85,15 @@ async function releaseExpiredHolds() {
     }
 })();
 
+app.get("/health", async (req, res) => {
+    try {
+        await runQuery("SELECT 1");
+        res.json({ status: "OK", service: "seats-service" });
+    } catch (err) {
+        res.status(503).json({ status: "ERROR", service: "seats-service", error: err.code || err.message });
+    }
+});
+
 app.get("/seats/:flightID", async (req, res) => {
     const flightID = req.params.flightID;
     const query = "SELECT * FROM seats WHERE FlightID = ?";
