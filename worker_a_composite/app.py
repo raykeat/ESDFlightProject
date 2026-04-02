@@ -24,7 +24,6 @@ FLIGHT_SERVICE_URL = os.getenv("FLIGHT_SERVICE_URL", "http://flight-service:3000
 RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672")
 
 
-
 def get_json_or_none(response):
     try:
         return response.json()
@@ -32,22 +31,26 @@ def get_json_or_none(response):
         return None
 
 
+def update_record_status(booking_id, status):
+    response = requests.put(
+        f"{RECORD_SERVICE_URL}/records/{booking_id}",
+        json={"BookingStatus": status},
+        timeout=10,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"Record status update failed ({status}): {response.status_code} {response.text}")
+
 
 def process_path_a_message(msg):
     passenger_id = msg.get("PassengerID")
     booking_id = msg.get("BookingID")
-    amount_paid = msg.get("AmountPaid")
     orig_flight_id = msg.get("OrigFlightID")
     new_flight_id = msg.get("NewFlightID")
-    assigned_seat_id = msg.get("AssignedSeatID")
-    assigned_seat_number = msg.get("AssignedSeatNumber")
+    group_booking_ids = msg.get("GroupBookingIDs") or []
+    group_size = msg.get("GroupSize") or len(group_booking_ids)
 
-    hold_response = requests.put(
-        f"{SEAT_SERVICE_URL}/seats/{assigned_seat_id}/hold",
-        timeout=10,
-    )
-    if hold_response.status_code >= 400:
-        raise RuntimeError(f"Seat hold failed: {hold_response.status_code} {hold_response.text}")
+    if not passenger_id or not booking_id or not new_flight_id:
+      raise RuntimeError("Missing required group Path A fields")
 
     passenger_endpoint = f"{PASSENGER_SERVICE_URL.rstrip('/')}/getpassenger/{passenger_id}/"
     passenger_response = requests.get(passenger_endpoint, timeout=10)
@@ -62,11 +65,10 @@ def process_path_a_message(msg):
     offer_response = requests.post(
         f"{OFFER_SERVICE_URL}/offers",
         json={
-            "BookingID": booking_id,
-            "PassengerID": passenger_id,
-            "OrigFlightID": orig_flight_id,
-            "NewFlightID": new_flight_id,
-            "NewSeatID": assigned_seat_id,
+            "BookingID": int(booking_id),
+            "PassengerID": int(passenger_id),
+            "OrigFlightID": int(orig_flight_id),
+            "NewFlightID": int(new_flight_id),
         },
         timeout=10,
     )
@@ -75,13 +77,8 @@ def process_path_a_message(msg):
     offer_data = get_json_or_none(offer_response) or {}
     offer_id = offer_data.get("OfferID") or offer_data.get("offerID")
 
-    record_response = requests.put(
-        f"{RECORD_SERVICE_URL}/records/{booking_id}",
-        json={"BookingStatus": "Pending"},
-        timeout=10,
-    )
-    if record_response.status_code >= 400:
-        raise RuntimeError(f"Record status update failed: {record_response.status_code} {record_response.text}")
+    for group_booking_id in group_booking_ids:
+        update_record_status(group_booking_id, "Pending")
 
     orig_flight_response = requests.get(f"{FLIGHT_SERVICE_URL}/flights/{orig_flight_id}", timeout=10)
     orig_flight_data = get_json_or_none(orig_flight_response) or {}
@@ -94,19 +91,19 @@ def process_path_a_message(msg):
     new_departure_time = new_flight_data.get("DepartureTime", "")
 
     notification_payload = {
-        "type":  "flight.cancelled.alt",
+        "type": "flight.cancelled.alt",
         "email": passenger_email,
         "data": {
-            "PassengerID":      passenger_id,
-            "PassengerName":    passenger_name,
-            "BookingID":        booking_id,
-            "OfferID":          offer_id,
-            "OriginalFlight":   original_flight_number,
-            "NewFlight":        new_flight_number,
-            "NewDate":          new_flight_date,
+            "PassengerID": passenger_id,
+            "PassengerName": passenger_name,
+            "BookingID": booking_id,
+            "OfferID": offer_id,
+            "OriginalFlight": original_flight_number,
+            "NewFlight": new_flight_number,
+            "NewDate": new_flight_date,
             "NewDepartureTime": new_departure_time,
-            "SeatNumber":       assigned_seat_number,
-            "AcceptRejectLink": f"http://localhost:5173/offer?offerID={offer_id}",
+            "GroupSize": group_size,
+            "AcceptRejectLink": f"http://localhost:5173/rebooking-offer?offerID={offer_id}",
         },
     }
 
@@ -123,13 +120,12 @@ def process_path_a_message(msg):
     connection.close()
 
     logger.info(
-        "Path A processed for BookingID=%s PassengerID=%s SeatID=%s OfferID=%s BookingStatus=Pending",
+        "Path A processed for BookingID=%s PassengerID=%s GroupSize=%s OfferID=%s",
         booking_id,
         passenger_id,
-        assigned_seat_id,
+        group_size,
         offer_id,
     )
-
 
 
 def run_consumer_loop():
@@ -149,7 +145,7 @@ def run_consumer_loop():
                 payload = json.loads(message.value.decode("utf-8"))
                 process_path_a_message(payload)
             except Exception as exc:
-                logger.error("Worker A failed for one passenger: %s", str(exc))
+                logger.error("Worker A failed for one group: %s", str(exc))
             finally:
                 consumer.commit()
 

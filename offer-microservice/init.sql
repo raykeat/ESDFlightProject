@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS offer (
     origFlightID INT             NOT NULL,                              -- FK -> Flight DB (cancelled flight)
     newFlightID  INT             NOT NULL,                              -- FK -> Flight DB (alternative); always populated since Offer is Path A only
     newSeatID    INT             NULL,                                  -- logical reference to Seat Service; no DB-level FK
+    -- coupon-era fields removed; miles/vouchers are handled outside Offer Service
     -- fareDiff removed - airline absorbs all fare differences per disruption policy
     status       ENUM(
                    'Pending Response',

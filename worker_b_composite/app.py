@@ -48,6 +48,7 @@ def process_path_b_message(msg):
     booking_id = msg.get("BookingID")
     amount_paid = msg.get("AmountPaid")
     orig_flight_id = msg.get("OrigFlightID")
+    group_booking_ids = msg.get("GroupBookingIDs") or []
 
     passenger_endpoint = f"{PASSENGER_SERVICE_URL.rstrip('/')}/getpassenger/{passenger_id}/"
     passenger_response = requests.get(passenger_endpoint, timeout=10)
@@ -60,10 +61,13 @@ def process_path_b_message(msg):
     passenger_name = f"{passenger_data.get('FirstName', '')} {passenger_data.get('LastName', '')}".strip() or "Valued Passenger"
 
     refund_response = requests.post(
-        f"{PAYMENT_SERVICE_URL}/payments/refund",
+        f"{PAYMENT_SERVICE_URL}/payment/refund",
         json={
             "BookingID": booking_id,
             "PassengerID": passenger_id,
+            "Amount": amount_paid,
+            "refundType": "partial",
+            "refundAmount": amount_paid,
         },
         timeout=10,
     )
@@ -74,6 +78,9 @@ def process_path_b_message(msg):
     if refund_response.status_code >= 400 or refund_status != "Refunded":
         try:
             update_record_status(booking_id, "Refund Failed")
+            for group_booking_id in group_booking_ids:
+                if int(group_booking_id) != int(booking_id):
+                    update_record_status(group_booking_id, "Refund Failed")
         except Exception as exc:
             logger.error("Failed to set Refund Failed for BookingID=%s: %s", booking_id, str(exc))
 
@@ -86,6 +93,9 @@ def process_path_b_message(msg):
         return
 
     update_record_status(booking_id, "Cancelled")
+    for group_booking_id in group_booking_ids:
+        if int(group_booking_id) != int(booking_id):
+            update_record_status(group_booking_id, "Cancelled")
     refund_amount = refund_payload.get("RefundAmount", amount_paid)
 
     orig_flight_response = requests.get(f"{FLIGHT_SERVICE_URL}/flights/{orig_flight_id}", timeout=10)

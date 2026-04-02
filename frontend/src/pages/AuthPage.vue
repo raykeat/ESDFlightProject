@@ -1,10 +1,11 @@
 <script setup>
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { createPassengerAccount, loginPassenger, getPassengerById } from '../services/passengerApi'
 import { usePassengerSession } from '../composables/usePassengerSession'
 
 const router = useRouter()
+const route = useRoute()
 const { setPassenger } = usePassengerSession()
 
 const activeTab    = ref('signin')
@@ -13,6 +14,18 @@ const errorMessage = ref('')
 
 const signInForm = ref({ email: '', password: '' })
 const createForm = ref({ firstName: '', lastName: '', passportNumber: '', email: '', password: '', nationality: '' })
+const redirectPath = computed(() => route.query.redirect || '/')
+const redirectQuery = computed(() => {
+  const { redirect, ...rest } = route.query
+  return rest
+})
+
+function redirectAfterAuth() {
+  router.push({
+    path: redirectPath.value,
+    query: redirectQuery.value,
+  })
+}
 
 function parsePassportNumber(rawValue) {
   if (!/^\d+$/.test(rawValue)) return null
@@ -34,7 +47,7 @@ async function handleSignIn() {
     if (!passengerId) throw new Error('Login failed: no passenger ID returned.')
     const fullPassengerData = await getPassengerById(passengerId)
     setPassenger(fullPassengerData)
-    router.push('/')
+    redirectAfterAuth()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'Unable to sign in.'
   } finally {
@@ -60,7 +73,7 @@ async function handleCreateAccount() {
     }
     const createdPassenger = await createPassengerAccount(payload)
     setPassenger(createdPassenger)
-    router.push('/')
+    redirectAfterAuth()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'Unable to create account.'
   } finally {

@@ -7,43 +7,98 @@ app.use(express.json());
 app.use(cors());
 
 const PORT = 5003;
-
-const db = mysql.createPool({
-    host:     process.env.DB_HOST     || "seats-db",
-    user:     process.env.DB_USER     || "root",
+const DB_CONFIG = {
+    host: process.env.DB_HOST || "seats-db",
+    user: process.env.DB_USER || "root",
     password: process.env.DB_PASSWORD || "rootpassword",
-    database: process.env.DB_NAME     || "seats",
+    database: process.env.DB_NAME || "seats",
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0
-});
+};
 
-db.getConnection((err, connection) => {
-    if (err) {
-        console.log("Seats DB pool init warning:", err.message);
-    } else {
+let db = createPool();
+
+function createPool() {
+    return mysql.createPool(DB_CONFIG);
+}
+
+function isRecoverableDbError(err) {
+    return ['ECONNREFUSED', 'EAI_AGAIN', 'PROTOCOL_CONNECTION_LOST', 'PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR'].includes(err?.code);
+}
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function runQuery(query, params = [], retries = 5) {
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+        try {
+            const [rows] = await db.promise().query(query, params);
+            return rows;
+        } catch (err) {
+            const shouldRetry = isRecoverableDbError(err) && attempt < retries;
+
+            if (!shouldRetry) {
+                throw err;
+            }
+
+            console.warn(`Seats DB query retry ${attempt + 1}/${retries}: ${err.code}`);
+
+            try {
+                await db.end();
+            } catch (_) {
+                // Ignore pool shutdown errors while rebuilding the connection pool.
+            }
+
+            db = createPool();
+            await sleep(1500);
+        }
+    }
+}
+
+async function ensureHoldExpiryColumn() {
+    try {
+        const columns = await runQuery("SHOW COLUMNS FROM seats LIKE 'HoldExpiresAt'");
+        if (!Array.isArray(columns) || columns.length === 0) {
+            await runQuery("ALTER TABLE seats ADD COLUMN HoldExpiresAt DATETIME NULL");
+            console.log("Added seats.HoldExpiresAt column");
+        }
+    } catch (err) {
+        console.warn("Could not ensure HoldExpiresAt column:", err.message);
+    }
+}
+
+async function releaseExpiredHolds() {
+    await runQuery(
+        "UPDATE seats SET Status='available', PassengerID=NULL, HoldExpiresAt=NULL WHERE Status='hold' AND HoldExpiresAt IS NOT NULL AND HoldExpiresAt <= UTC_TIMESTAMP()"
+    );
+}
+
+(async () => {
+    try {
+        await runQuery("SELECT 1");
+        await ensureHoldExpiryColumn();
         console.log("Seats DB connected");
-        connection.release();
+    } catch (err) {
+        console.log("Seats DB pool init warning:", err.message);
+    }
+})();
+
+app.get("/seats/:flightID", async (req, res) => {
+    const flightID = req.params.flightID;
+    const query = "SELECT * FROM seats WHERE FlightID = ?";
+
+    try {
+        await releaseExpiredHolds();
+        const result = await runQuery(query, [flightID]);
+        res.json(result);
+    } catch (err) {
+        res.status(503).json({ message: "Seats database unavailable", error: err.code || err.message });
     }
 });
 
-app.get("/seats/:flightID", (req, res) => {
-
-    const flightID = req.params.flightID;
-
-    const query = "SELECT * FROM seats WHERE FlightID = ?";
-
-    db.query(query, [flightID], (err, result) => {
-        if (err) {
-            res.status(500).send(err);
-        } else {
-            res.json(result);
-        }
-    });
-
-});
-
-app.post("/seats/hold", (req, res) => {
+app.post("/seats/hold", async (req, res) => {
 
     const { flightID, seatNumber, passengerID } = req.body;
     const seatArray = String(seatNumber).split(',').map(s => s.trim());
@@ -52,72 +107,86 @@ app.post("/seats/hold", (req, res) => {
     const checkQuery =
         `SELECT * FROM seats WHERE FlightID=? AND SeatNumber IN (${placeholders}) AND Status='available'`;
 
-    db.query(checkQuery, [flightID, ...seatArray], (err, result) => {
-
-        if (err) {
-            return res.status(500).send(err);
-        }
+    try {
+        await releaseExpiredHolds();
+        const result = await runQuery(checkQuery, [flightID, ...seatArray]);
 
         if (result.length < seatArray.length) {
             return res.status(400).json({ message: "One or more seats not available" });
         }
 
         const holdQuery =
-            `UPDATE seats SET Status='hold', PassengerID=? WHERE FlightID=? AND SeatNumber IN (${placeholders})`;
+            `UPDATE seats SET Status='hold', PassengerID=?, HoldExpiresAt=DATE_ADD(UTC_TIMESTAMP(), INTERVAL 5 MINUTE) WHERE FlightID=? AND SeatNumber IN (${placeholders})`;
 
-        db.query(holdQuery, [passengerID, flightID, ...seatArray], err => {
-
-            if (err) {
-                res.status(500).send(err);
-            } else {
-                res.json({ message: "Seats placed on hold" });
-            }
-
-        });
-
-    });
+        await runQuery(holdQuery, [passengerID, flightID, ...seatArray]);
+        res.json({ message: "Seats placed on hold for 5 minutes" });
+    } catch (err) {
+        res.status(503).json({ message: "Seats database unavailable", error: err.code || err.message });
+    }
 
 });
 
-app.post("/seats/confirm", (req, res) => {
+app.post("/seats/refresh-hold", async (req, res) => {
+    const { flightID, seatNumber } = req.body;
+    const seatArray = String(seatNumber).split(',').map(s => s.trim()).filter(Boolean);
+
+    if (!flightID || !seatArray.length) {
+        return res.status(400).json({ message: "flightID and seatNumber are required" });
+    }
+
+    const placeholders = seatArray.map(() => '?').join(',');
+    const refreshQuery =
+        `UPDATE seats
+         SET HoldExpiresAt=DATE_ADD(UTC_TIMESTAMP(), INTERVAL 5 MINUTE)
+         WHERE FlightID=? AND SeatNumber IN (${placeholders}) AND Status='hold'`;
+
+    try {
+        await releaseExpiredHolds();
+        const result = await runQuery(refreshQuery, [flightID, ...seatArray]);
+
+        if (result.affectedRows < seatArray.length) {
+            return res.status(409).json({ message: "One or more held seats are no longer reserved" });
+        }
+
+        res.json({ message: "Seat hold extended for 5 minutes" });
+    } catch (err) {
+        res.status(503).json({ message: "Seats database unavailable", error: err.code || err.message });
+    }
+});
+
+app.post("/seats/confirm", async (req, res) => {
 
     const { flightID, seatNumber } = req.body;
     const seatArray = String(seatNumber).split(',').map(s => s.trim());
     const placeholders = seatArray.map(() => '?').join(',');
 
     const query =
-        `UPDATE seats SET Status='unavailable' WHERE FlightID=? AND SeatNumber IN (${placeholders})`;
+        `UPDATE seats SET Status='unavailable', HoldExpiresAt=NULL WHERE FlightID=? AND SeatNumber IN (${placeholders})`;
 
-    db.query(query, [flightID, ...seatArray], err => {
-
-        if (err) {
-            res.status(500).send(err);
-        } else {
-            res.json({ message: "Seat booking confirmed" });
-        }
-
-    });
+    try {
+        await runQuery(query, [flightID, ...seatArray]);
+        res.json({ message: "Seat booking confirmed" });
+    } catch (err) {
+        res.status(503).json({ message: "Seats database unavailable", error: err.code || err.message });
+    }
 
 });
 
-app.post("/seats/release", (req, res) => {
+app.post("/seats/release", async (req, res) => {
 
     const { flightID, seatNumber } = req.body;
     const seatArray = String(seatNumber).split(',').map(s => s.trim());
     const placeholders = seatArray.map(() => '?').join(',');
 
     const query =
-        `UPDATE seats SET Status='available', PassengerID=NULL WHERE FlightID=? AND SeatNumber IN (${placeholders})`;
+        `UPDATE seats SET Status='available', PassengerID=NULL, HoldExpiresAt=NULL WHERE FlightID=? AND SeatNumber IN (${placeholders})`;
 
-    db.query(query, [flightID, ...seatArray], err => {
-
-        if (err) {
-            res.status(500).send(err);
-        } else {
-            res.json({ message: "Seats released" });
-        }
-
-    });
+    try {
+        await runQuery(query, [flightID, ...seatArray]);
+        res.json({ message: "Seats released" });
+    } catch (err) {
+        res.status(503).json({ message: "Seats database unavailable", error: err.code || err.message });
+    }
 
 });
 
@@ -128,19 +197,15 @@ app.post("/seats/release", (req, res) => {
 // Called by: Flight Cancellation Composite (Scenario 2 Phase 1)
 // Sets all seats for the flight to available and clears PassengerID
 // ==========================================
-app.put('/seats/release/:flightID', (req, res) => {
+app.put('/seats/release/:flightID', async (req, res) => {
 
     const flightID = req.params.flightID;
 
     const query =
-        `UPDATE seats SET Status="available", PassengerID=NULL WHERE FlightID=?`;
+        `UPDATE seats SET Status="available", PassengerID=NULL, HoldExpiresAt=NULL WHERE FlightID=?`;
 
-    db.query(query, [flightID], (err, result) => {
-
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
-
+    try {
+        const result = await runQuery(query, [flightID]);
         if (result.affectedRows === 0) {
             return res.status(404).json({ message: `No seats found for flight ${flightID}` });
         }
@@ -149,13 +214,14 @@ app.put('/seats/release/:flightID', (req, res) => {
             message: `All seats released for flight ${flightID}`,
             seatsReleased: result.affectedRows
         });
-
-    });
+    } catch (err) {
+        return res.status(503).json({ message: "Seats database unavailable", error: err.code || err.message });
+    }
 
 });
 
 
-app.get('/seats', (req, res) => {
+app.get('/seats', async (req, res) => {
     const flightID = req.query.FlightID || req.query.flightID;
     const status = req.query.Status || req.query.status;
 
@@ -173,64 +239,61 @@ app.get('/seats', (req, res) => {
 
     query += ' ORDER BY SeatID ASC';
 
-    db.query(query, params, (err, result) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
+    try {
+        await releaseExpiredHolds();
+        const result = await runQuery(query, params);
         res.json(result);
-    });
+    } catch (err) {
+        return res.status(503).json({ message: "Seats database unavailable", error: err.code || err.message });
+    }
 });
 
-app.put('/seats/:seatID/hold', (req, res) => {
+app.put('/seats/:seatID/hold', async (req, res) => {
     const seatID = req.params.seatID;
 
-    const query = 'UPDATE seats SET Status="hold" WHERE SeatID=? AND Status="available"';
+    const query = 'UPDATE seats SET Status="hold", HoldExpiresAt=DATE_ADD(UTC_TIMESTAMP(), INTERVAL 5 MINUTE) WHERE SeatID=? AND Status="available"';
 
-    db.query(query, [seatID], (err, result) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
+    try {
+        await releaseExpiredHolds();
+        const result = await runQuery(query, [seatID]);
 
         if (result.affectedRows === 0) {
             return res.status(409).json({ message: `Seat ${seatID} is not available for hold` });
         }
 
-        db.query('SELECT SeatID, SeatNumber, Status FROM seats WHERE SeatID=?', [seatID], (selectErr, rows) => {
-            if (selectErr) {
-                return res.status(500).json({ error: selectErr.message });
-            }
-            if (!rows.length) {
-                return res.status(404).json({ message: `Seat ${seatID} not found` });
-            }
+        const rows = await runQuery('SELECT SeatID, SeatNumber, Status FROM seats WHERE SeatID=?', [seatID]);
+        if (!rows.length) {
+            return res.status(404).json({ message: `Seat ${seatID} not found` });
+        }
 
-            return res.json({
-                SeatID: rows[0].SeatID,
-                SeatNumber: rows[0].SeatNumber,
-                Status: rows[0].Status.charAt(0).toUpperCase() + rows[0].Status.slice(1)
-            });
+        return res.json({
+            SeatID: rows[0].SeatID,
+            SeatNumber: rows[0].SeatNumber,
+            Status: rows[0].Status.charAt(0).toUpperCase() + rows[0].Status.slice(1)
         });
-    });
+    } catch (err) {
+        return res.status(503).json({ message: "Seats database unavailable", error: err.code || err.message });
+    }
 });
 
-app.put('/seats/cancel', (req, res) => {
+app.put('/seats/cancel', async (req, res) => {
     const flightID = req.query.FlightID || req.query.flightID;
 
     if (!flightID) {
         return res.status(400).json({ message: 'FlightID is required' });
     }
 
-    const query = 'UPDATE seats SET Status="cancelled", PassengerID=NULL WHERE FlightID=?';
+    const query = 'UPDATE seats SET Status="cancelled", PassengerID=NULL, HoldExpiresAt=NULL WHERE FlightID=?';
 
-    db.query(query, [flightID], (err, result) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
-
+    try {
+        const result = await runQuery(query, [flightID]);
         res.json({
             FlightID: Number(flightID),
             SeatsCancelled: result.affectedRows
         });
-    });
+    } catch (err) {
+        return res.status(503).json({ message: "Seats database unavailable", error: err.code || err.message });
+    }
 });
 
 app.listen(PORT, () => {

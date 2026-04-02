@@ -21,6 +21,7 @@ const PAYMENT_SERVICE_URL = (process.env.PAYMENT_SERVICE_URL || 'http://payment-
 const NOTIFICATION_SERVICE_URL = (process.env.NOTIFICATION_SERVICE_URL || 'http://notification-service:3000').replace(/\/$/, '');
 const SEATS_SERVICE_URL = (process.env.SEATS_SERVICE_URL || 'http://seats-service:5003').replace(/\/$/, '');
 const RECORD_SERVICE_URL = (process.env.RECORD_SERVICE_URL || 'http://record-service:3000').replace(/\/$/, '');
+const OFFER_SERVICE_URL = (process.env.OFFER_SERVICE_URL || 'http://offer-service:5000').replace(/\/$/, '');
 const RABBITMQ_URL             = process.env.RABBITMQ_URL            || 'amqp://guest:guest@rabbitmq:5672';
 
 // ==========================================
@@ -80,6 +81,147 @@ function firstNonEmpty(...values) {
   return values.find((value) => value !== undefined && value !== null && String(value).trim() !== '');
 }
 
+function normalizedStatus(status) {
+  return String(status || '').trim();
+}
+
+function parseSeatNumbers(value) {
+  return String(value || '')
+    .split(',')
+    .map((seat) => seat.trim())
+    .filter(Boolean);
+}
+
+function parseIdList(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value.map(Number).filter((id) => Number.isFinite(id) && id > 0);
+  }
+  return String(value)
+    .split(',')
+    .map((id) => Number(id.trim()))
+    .filter((id) => Number.isFinite(id) && id > 0);
+}
+
+function isPendingRecordExpired(createdAt, holdMinutes = 5) {
+  if (!createdAt) return true;
+  const createdTime = new Date(createdAt);
+  if (Number.isNaN(createdTime.getTime())) return true;
+
+  return (Date.now() - createdTime.getTime()) > holdMinutes * 60 * 1000;
+}
+
+function getNormalizedFlightID(record) {
+  return Number(firstNonEmpty(record.flightID, record.FlightID));
+}
+
+function getNormalizedSeatNumber(record) {
+  return firstNonEmpty(record.seatNumber, record.SeatNumber, record.seatID, record.SeatID);
+}
+
+function splitAmount(totalAmount, parts) {
+  const totalCents = Math.round(Number(totalAmount || 0) * 100);
+  const base = Math.floor(totalCents / parts);
+  const remainder = totalCents % parts;
+
+  return Array.from({ length: parts }, (_, index) => ((base + (index < remainder ? 1 : 0)) / 100));
+}
+
+async function getGroupBookingsForOffer(offer) {
+  const primaryBookingResponse = await axios.get(`${RECORD_SERVICE_URL}/records/${offer.bookingID}`);
+  const primaryBooking = primaryBookingResponse.data;
+  const bookerID = Number(firstNonEmpty(
+    primaryBooking.bookedByPassengerID,
+    primaryBooking.BookedByPassengerID,
+    primaryBooking.passengerID,
+    primaryBooking.PassengerID,
+    offer.passengerID
+  ));
+  const createdAt = String(firstNonEmpty(
+    primaryBooking.createdAt,
+    primaryBooking.createdTime,
+    primaryBooking.CreatedTime
+  ) || '');
+
+  const allBookingsResponse = await axios.get(`${RECORD_SERVICE_URL}/records/passenger/${bookerID}`);
+  const allBookings = Array.isArray(allBookingsResponse.data) ? allBookingsResponse.data : [];
+
+  return allBookings
+    .filter((record) => {
+      const sameBooker = Number(firstNonEmpty(
+        record.bookedByPassengerID,
+        record.BookedByPassengerID,
+        record.passengerID,
+        record.PassengerID
+      )) === bookerID;
+      const sameCreatedAt = String(firstNonEmpty(record.createdAt, record.createdTime, record.CreatedTime) || '') === createdAt;
+      const sameFlight = Number(firstNonEmpty(record.flightID, record.FlightID)) === Number(offer.origFlightID);
+      return sameBooker && sameCreatedAt && sameFlight;
+    })
+    .sort((a, b) => Number(firstNonEmpty(a.bookingID, a.BookingID)) - Number(firstNonEmpty(b.bookingID, b.BookingID)));
+}
+
+function buildTravelers(payload) {
+  const {
+    passengerID,
+    seatNumber,
+    returnSeatNumber,
+    travelers,
+  } = payload;
+
+  const outboundSeats = parseSeatNumbers(seatNumber);
+  const returnSeats = parseSeatNumbers(returnSeatNumber);
+  const isRoundTrip = Boolean(payload.returnFlightID && payload.returnSeatNumber);
+
+  if (!outboundSeats.length) {
+    throw new Error('At least one outbound seat is required');
+  }
+
+  if (isRoundTrip && returnSeats.length !== outboundSeats.length) {
+    throw new Error('Return seat count must match outbound seat count for group bookings');
+  }
+
+  if (!travelers || !Array.isArray(travelers) || !travelers.length) {
+    return [{
+      passengerID: Number(passengerID),
+      bookedByPassengerID: Number(passengerID),
+      isGuest: false,
+      guestFirstName: null,
+      guestLastName: null,
+      guestPassportNumber: null,
+      outboundSeatNumber: outboundSeats[0],
+      returnSeatNumber: isRoundTrip ? returnSeats[0] : null,
+    }];
+  }
+
+  if (travelers.length !== outboundSeats.length) {
+    throw new Error('Traveller count must match the number of selected seats');
+  }
+
+  return travelers.map((traveler, index) => {
+    const normalized = {
+      passengerID: traveler.isGuest ? null : Number(traveler.passengerID || passengerID),
+      bookedByPassengerID: Number(passengerID),
+      isGuest: Boolean(traveler.isGuest),
+      guestFirstName: traveler.guestFirstName || null,
+      guestLastName: traveler.guestLastName || null,
+      guestPassportNumber: traveler.guestPassportNumber || null,
+      outboundSeatNumber: outboundSeats[index],
+      returnSeatNumber: isRoundTrip ? returnSeats[index] : null,
+    };
+
+    if (!normalized.isGuest && !normalized.passengerID) {
+      throw new Error('Primary traveller PassengerID is missing');
+    }
+
+    if (normalized.isGuest && (!normalized.guestFirstName || !normalized.guestLastName || !normalized.guestPassportNumber)) {
+      throw new Error('Guest travellers require first name, last name, and passport number');
+    }
+
+    return normalized;
+  });
+}
+
 async function getFlightEmailDetails(flightID) {
   try {
     const response = await axios.get(`${FLIGHT_SERVICE_URL}/flight/${flightID}`);
@@ -94,6 +236,32 @@ async function getFlightEmailDetails(flightID) {
   } catch (err) {
     console.warn('Could not fetch flight details for notification:', err.message);
     return {};
+  }
+}
+
+async function cleanupPendingRecords(records) {
+  const uniqueRecords = records.filter(Boolean);
+
+  for (const record of uniqueRecords) {
+    const flightID = getNormalizedFlightID(record);
+    const seatNumber = getNormalizedSeatNumber(record);
+    const bookingID = Number(firstNonEmpty(record.bookingID, record.BookingID));
+
+    if (flightID && seatNumber) {
+      try {
+        await axios.post(`${SEATS_SERVICE_URL}/seats/release`, { flightID, seatNumber });
+      } catch (err) {
+        console.warn(`Could not release held seat for booking ${bookingID}:`, err.response?.data?.message || err.message);
+      }
+    }
+
+    if (bookingID) {
+      try {
+        await axios.delete(`${RECORD_SERVICE_URL}/record/${bookingID}`);
+      } catch (err) {
+        console.warn(`Could not delete expired pending booking ${bookingID}:`, err.response?.data?.message || err.message);
+      }
+    }
   }
 }
 
@@ -113,6 +281,7 @@ app.post('/api/bookings', async (req, res) => {
     flightNumber,
     cancelUrl,
     frontendBaseUrl,
+    travelers,
   } = req.body;
   
   if (!passengerID || !flightID || !seatNumber) {
@@ -128,6 +297,7 @@ app.post('/api/bookings', async (req, res) => {
   }
 
   const isRoundTrip = Boolean(returnFlightID && returnSeatNumber);
+  let travelerManifest = [];
 
   const outboundFare = isRoundTrip
     ? Number(outboundAmount ?? 0)
@@ -145,6 +315,8 @@ app.post('/api/bookings', async (req, res) => {
   let passenger = null;
   let outboundBooking = null;
   let returnBooking = null;
+  const outboundBookings = [];
+  const returnBookings = [];
   let outboundSeatHeld = false;
   let returnSeatHeld = false;
   let userBookingCount = 1;
@@ -152,6 +324,8 @@ app.post('/api/bookings', async (req, res) => {
   console.log(`Starting booking flow for passenger ${passengerID}, flight ${flightID}, seat ${seatNumber}, returnFlight ${returnFlightID || 'N/A'}, amount ${amount}`);
  
   try {
+    travelerManifest = buildTravelers(req.body);
+
     // Step 1: Validate passenger exists (OutSystems External API)
     console.log('Step 1: Validating passenger...');
     // Correct endpoint from Swagger: /getpassenger/{passenger_id}/
@@ -172,31 +346,10 @@ app.post('/api/bookings', async (req, res) => {
       console.warn('Could not fetch existing bookings for count, defaulting to 1', err.message);
     }
 
-    // Step 3: Create outbound pending booking in Record Service
-    console.log('Step 3: Creating outbound pending booking...');
-    const outboundBookingResponse = await axios.post(`${RECORD_SERVICE_URL}/records`, {
-      passengerID,
-      flightID,
-      amount: outboundFare,
-      seatNumber,
-    });
-    outboundBooking = outboundBookingResponse.data;
-    console.log(`✓ Outbound pending booking created with ID: ${outboundBooking.bookingID}`);
+    const outboundFareSplits = splitAmount(outboundFare, travelerManifest.length);
+    const returnFareSplits = isRoundTrip ? splitAmount(returnFare, travelerManifest.length) : [];
 
-    // Step 4: Optional return pending booking in Record Service
-    if (isRoundTrip) {
-      console.log('Step 4: Creating return pending booking...');
-      const returnBookingResponse = await axios.post(`${RECORD_SERVICE_URL}/records`, {
-        passengerID,
-        flightID: returnFlightID,
-        amount: returnFare,
-        seatNumber: returnSeatNumber,
-      });
-      returnBooking = returnBookingResponse.data;
-      console.log(`✓ Return pending booking created with ID: ${returnBooking.bookingID}`);
-    }
-
-    // Step 5: Hold outbound seat(s)
+    // Step 3: Hold outbound seat(s)
     console.log('Step 5: Holding outbound seat(s)...');
     await axios.post(`${SEATS_SERVICE_URL}/seats/hold`, {
       flightID,
@@ -217,6 +370,56 @@ app.post('/api/bookings', async (req, res) => {
     }
     console.log('✓ Seat(s) held successfully');
 
+    // Step 5: Create outbound pending booking records
+    console.log('Step 5b: Creating outbound pending booking records...');
+    for (let i = 0; i < travelerManifest.length; i += 1) {
+      const traveler = travelerManifest[i];
+      const outboundBookingResponse = await axios.post(`${RECORD_SERVICE_URL}/records`, {
+        passengerID: traveler.passengerID,
+        bookedByPassengerID: traveler.bookedByPassengerID,
+        flightID,
+        amount: outboundFareSplits[i],
+        seatNumber: traveler.outboundSeatNumber,
+        isGuest: traveler.isGuest,
+        guestFirstName: traveler.guestFirstName,
+        guestLastName: traveler.guestLastName,
+        guestPassportNumber: traveler.guestPassportNumber,
+      });
+      outboundBookings.push({
+        ...outboundBookingResponse.data,
+        seatNumber: traveler.outboundSeatNumber,
+        traveler,
+      });
+    }
+    outboundBooking = outboundBookings[0];
+    console.log(`✓ Created ${outboundBookings.length} outbound pending booking record(s)`);
+
+    // Step 6b: Create return pending booking records
+    if (isRoundTrip) {
+      console.log('Step 6b: Creating return pending booking records...');
+      for (let i = 0; i < travelerManifest.length; i += 1) {
+        const traveler = travelerManifest[i];
+        const returnBookingResponse = await axios.post(`${RECORD_SERVICE_URL}/records`, {
+          passengerID: traveler.passengerID,
+          bookedByPassengerID: traveler.bookedByPassengerID,
+          flightID: returnFlightID,
+          amount: returnFareSplits[i],
+          seatNumber: traveler.returnSeatNumber,
+          isGuest: traveler.isGuest,
+          guestFirstName: traveler.guestFirstName,
+          guestLastName: traveler.guestLastName,
+          guestPassportNumber: traveler.guestPassportNumber,
+        });
+        returnBookings.push({
+          ...returnBookingResponse.data,
+          seatNumber: traveler.returnSeatNumber,
+          traveler,
+        });
+      }
+      returnBooking = returnBookings[0];
+      console.log(`✓ Created ${returnBookings.length} return pending booking record(s)`);
+    }
+
     // Step 7: Create Stripe checkout session via Payment Service
     console.log('Step 7: Creating checkout session in Payment Service...');
     const frontendOrigin = (frontendBaseUrl || 'http://localhost:5173').replace(/\/$/, '');
@@ -224,19 +427,25 @@ app.post('/api/bookings', async (req, res) => {
       + `?session_id={CHECKOUT_SESSION_ID}`
       + `&flightID=${encodeURIComponent(String(flightID))}`
       + `&seatNumber=${encodeURIComponent(String(seatNumber))}`;
+    successUrl += `&groupBookingIDs=${encodeURIComponent(outboundBookings.map((booking) => booking.bookingID).join(','))}`;
     if (returnBooking) {
       successUrl += `&returnBookingID=${encodeURIComponent(String(returnBooking.bookingID))}`;
       successUrl += `&returnFlightID=${encodeURIComponent(String(returnFlightID))}`;
       successUrl += `&returnSeatNumber=${encodeURIComponent(String(returnSeatNumber))}`;
+      successUrl += `&returnGroupBookingIDs=${encodeURIComponent(returnBookings.map((booking) => booking.bookingID).join(','))}`;
     }
 
     const totalAmount = outboundFare + returnFare;
-    const finalCancelUrl = buildCancelUrl(
+    const finalCancelUrl = new URL(buildCancelUrl(
       cancelUrl,
       frontendOrigin,
       outboundBooking.bookingID,
       returnBooking?.bookingID || null
-    );
+    ));
+    finalCancelUrl.searchParams.set('groupBookingIDs', outboundBookings.map((booking) => booking.bookingID).join(','));
+    if (returnBookings.length) {
+      finalCancelUrl.searchParams.set('returnGroupBookingIDs', returnBookings.map((booking) => booking.bookingID).join(','));
+    }
 
     const paymentPayload = {
       bookingID: outboundBooking.bookingID,
@@ -245,7 +454,7 @@ app.post('/api/bookings', async (req, res) => {
       amount: totalAmount,
       flightNumber: flightNumber || (isRoundTrip ? `SQ${flightID} & SQ${returnFlightID}` : `SQ${flightID}`),
       successUrl,
-      cancelUrl: finalCancelUrl,
+      cancelUrl: finalCancelUrl.toString(),
     };
 
     const paymentResponse = await axios.post(`${PAYMENT_SERVICE_URL}/payment/checkout`, paymentPayload);
@@ -257,8 +466,10 @@ app.post('/api/bookings', async (req, res) => {
       bookingID: outboundBooking.bookingID,
       returnBookingID: returnBooking?.bookingID || null,
       bookingIDs: returnBooking
-        ? [outboundBooking.bookingID, returnBooking.bookingID]
-        : [outboundBooking.bookingID],
+        ? [...outboundBookings.map((booking) => booking.bookingID), ...returnBookings.map((booking) => booking.bookingID)]
+        : outboundBookings.map((booking) => booking.bookingID),
+      outboundBookingIDs: outboundBookings.map((booking) => booking.bookingID),
+      returnBookingIDs: returnBookings.map((booking) => booking.bookingID),
       userBookingCount,
       paymentID: paymentResponse.data.paymentID,
       stripeSessionID: paymentResponse.data.stripeSessionID,
@@ -270,11 +481,11 @@ app.post('/api/bookings', async (req, res) => {
 
     // Best-effort cleanup for partially created records/holds
     try {
-      if (typeof outboundBooking !== 'undefined' && outboundBooking?.bookingID) {
-        await axios.put(`${RECORD_SERVICE_URL}/records/${outboundBooking.bookingID}/status`, { status: 'Failed' });
+      for (const booking of outboundBookings) {
+        await axios.put(`${RECORD_SERVICE_URL}/records/${booking.bookingID}/status`, { status: 'Failed' });
       }
-      if (typeof returnBooking !== 'undefined' && returnBooking?.bookingID) {
-        await axios.put(`${RECORD_SERVICE_URL}/records/${returnBooking.bookingID}/status`, { status: 'Failed' });
+      for (const booking of returnBookings) {
+        await axios.put(`${RECORD_SERVICE_URL}/records/${booking.bookingID}/status`, { status: 'Failed' });
       }
       if (typeof outboundSeatHeld !== 'undefined' && outboundSeatHeld) {
         await axios.post(`${SEATS_SERVICE_URL}/seats/release`, { flightID, seatNumber });
@@ -301,6 +512,8 @@ app.post('/api/bookings/finalize', async (req, res) => {
   const {
     bookingID,
     returnBookingID,
+    groupBookingIDs,
+    returnGroupBookingIDs,
     sessionID,
     flightID,
     seatNumber,
@@ -335,10 +548,15 @@ app.post('/api/bookings/finalize', async (req, res) => {
       });
     }
 
+    const outboundBookingIDs = parseIdList(groupBookingIDs);
+    if (!outboundBookingIDs.length) outboundBookingIDs.push(Number(bookingID));
+    const inboundBookingIDs = parseIdList(returnGroupBookingIDs);
+    if (!inboundBookingIDs.length && returnBookingID) inboundBookingIDs.push(Number(returnBookingID));
+    const allBookingIDs = [...outboundBookingIDs, ...inboundBookingIDs];
+
     // 2) Confirm booking records
-    await axios.put(`${RECORD_SERVICE_URL}/records/${bookingID}/status`, { status: 'Confirmed' });
-    if (returnBookingID) {
-      await axios.put(`${RECORD_SERVICE_URL}/records/${returnBookingID}/status`, { status: 'Confirmed' });
+    for (const id of allBookingIDs) {
+      await axios.put(`${RECORD_SERVICE_URL}/records/${id}/status`, { status: 'Confirmed' });
     }
 
     // 3) Confirm seats
@@ -389,6 +607,25 @@ app.post('/api/bookings/finalize', async (req, res) => {
       });
     }
 
+    const passengerSummaries = [];
+    for (const id of outboundBookingIDs) {
+      try {
+        const bookingResponse = await axios.get(`${RECORD_SERVICE_URL}/records/${id}`);
+        const record = bookingResponse.data;
+        const name = record.isGuest
+          ? `${record.guestFirstName || ''} ${record.guestLastName || ''}`.trim()
+          : `${passenger.FirstName} ${passenger.LastName}`.trim();
+
+        passengerSummaries.push({
+          bookingID: id,
+          name,
+          seatNumber: record.seatNumber,
+        });
+      } catch (err) {
+        console.warn(`Could not fetch outbound group booking ${id} for notification:`, err.message);
+      }
+    }
+
     // 6) Publish booking.confirmed to RabbitMQ → Notification Service sends email
     await publishBookingConfirmed({
       booking_id:      bookingID,
@@ -402,6 +639,8 @@ app.post('/api/bookings/finalize', async (req, res) => {
       amount_paid:     payment.amount,
       trip_type:       flights.length > 1 ? 'round_trip' : 'one_way',
       flights,
+      passengers: passengerSummaries,
+      group_size: passengerSummaries.length || 1,
       return_booking_id: returnBookingID || null,
     });
 
@@ -410,6 +649,7 @@ app.post('/api/bookings/finalize', async (req, res) => {
       status: 'Confirmed',
       bookingID,
       returnBookingID: returnBookingID || null,
+      bookingIDs: allBookingIDs,
       payment,
     });
 
@@ -446,6 +686,422 @@ app.get('/api/bookings/passenger/:passengerID', async (req, res) => {
   }
 });
 
+app.post('/api/rebooking/accept', async (req, res) => {
+  const { offerID, bookingIDs, seatAssignments, frontendBaseUrl } = req.body;
+
+  if (!offerID || !Array.isArray(bookingIDs) || !bookingIDs.length || !Array.isArray(seatAssignments) || !seatAssignments.length) {
+    return res.status(400).json({
+      error: 'offerID, bookingIDs, and seatAssignments are required',
+    });
+  }
+
+  if (bookingIDs.length !== seatAssignments.length) {
+    return res.status(400).json({
+      error: 'bookingIDs and seatAssignments must have the same length',
+    });
+  }
+
+  const normalizedBookingIDs = bookingIDs.map(Number).filter((id) => Number.isFinite(id) && id > 0);
+  const normalizedSeatAssignments = seatAssignments
+    .map((seat) => String(seat || '').trim())
+    .filter(Boolean);
+
+  if (normalizedBookingIDs.length !== normalizedSeatAssignments.length) {
+    return res.status(400).json({
+      error: 'Invalid bookingIDs or seatAssignments payload',
+    });
+  }
+
+  try {
+    const offerResponse = await axios.get(`${OFFER_SERVICE_URL}/offer/${offerID}`);
+    const offer = offerResponse.data;
+
+    if (String(offer.status) !== 'Pending Response') {
+      return res.status(409).json({
+        error: 'Offer can no longer be accepted',
+        status: offer.status,
+      });
+    }
+
+    const recordResponses = await Promise.all(
+      normalizedBookingIDs.map((bookingID) => axios.get(`${RECORD_SERVICE_URL}/records/${bookingID}`))
+    );
+    const records = recordResponses.map((response) => response.data);
+
+    const newFlightID = Number(offer.newFlightID);
+    const origFlightID = Number(offer.origFlightID);
+    const seatNumberCsv = normalizedSeatAssignments.join(',');
+
+    await axios.post(`${SEATS_SERVICE_URL}/seats/hold`, {
+      flightID: newFlightID,
+      seatNumber: seatNumberCsv,
+      passengerID: Number(offer.passengerID),
+    });
+
+    try {
+      await axios.post(`${SEATS_SERVICE_URL}/seats/confirm`, {
+        flightID: newFlightID,
+        seatNumber: seatNumberCsv,
+      });
+    } catch (confirmError) {
+      await axios.post(`${SEATS_SERVICE_URL}/seats/release`, {
+        flightID: newFlightID,
+        seatNumber: seatNumberCsv,
+      }).catch(() => {});
+      throw confirmError;
+    }
+
+    for (let index = 0; index < normalizedBookingIDs.length; index += 1) {
+      await axios.put(`${RECORD_SERVICE_URL}/records/${normalizedBookingIDs[index]}/rebook`, {
+        FlightID: newFlightID,
+        seatNumber: normalizedSeatAssignments[index],
+        BookingStatus: 'Confirmed',
+      });
+    }
+
+    await axios.put(`${OFFER_SERVICE_URL}/offer/${offerID}`, {
+      status: 'Accepted',
+    });
+
+    let passenger = { FirstName: 'Passenger', LastName: '', Email: '' };
+    try {
+      const passengerResponse = await axios.get(
+        `${PASSENGER_SERVICE_URL}/getpassenger/${offer.passengerID}/`
+      );
+      passenger = passengerResponse.data;
+    } catch (err) {
+      console.warn('Could not fetch passenger for rebooking notification:', err.message);
+    }
+
+    const newFlightDetails = await getFlightEmailDetails(newFlightID);
+    const passengerSummaries = records.map((record, index) => ({
+      bookingID: normalizedBookingIDs[index],
+      name: record.isGuest
+        ? `${record.guestFirstName || ''} ${record.guestLastName || ''}`.trim()
+        : `${passenger.FirstName} ${passenger.LastName}`.trim(),
+      seatNumber: normalizedSeatAssignments[index],
+    }));
+
+    await publishBookingConfirmed({
+      booking_id: normalizedBookingIDs[0],
+      passenger_name: `${passenger.FirstName} ${passenger.LastName}`.trim() || 'Passenger',
+      passenger_email: passenger.Email,
+      flight_number: firstNonEmpty(newFlightDetails.flightNumber, `SQ${newFlightID}`),
+      origin: firstNonEmpty(newFlightDetails.origin, 'Origin'),
+      destination: firstNonEmpty(newFlightDetails.destination, 'Destination'),
+      departure_date: firstNonEmpty(newFlightDetails.departureDate, 'N/A'),
+      seat_number: seatNumberCsv,
+      amount_paid: records.reduce((sum, record) => sum + Number(firstNonEmpty(record.amount, record.amountPaid, record.AmountPaid) || 0), 0),
+      trip_type: 'one_way',
+      flights: [{
+        leg: 'rebooked',
+        flight_id: newFlightID,
+        booking_id: normalizedBookingIDs[0],
+        flight_number: firstNonEmpty(newFlightDetails.flightNumber, `SQ${newFlightID}`),
+        origin: firstNonEmpty(newFlightDetails.origin, 'Origin'),
+        destination: firstNonEmpty(newFlightDetails.destination, 'Destination'),
+        departure_date: firstNonEmpty(newFlightDetails.departureDate, 'N/A'),
+        seat_number: seatNumberCsv,
+      }],
+      passengers: passengerSummaries,
+      group_size: passengerSummaries.length,
+      original_flight_id: origFlightID,
+      frontend_base_url: frontendBaseUrl || null,
+    });
+
+    return res.status(200).json({
+      success: true,
+      offerID: Number(offerID),
+      bookingIDs: normalizedBookingIDs,
+      flightID: newFlightID,
+      seatAssignments: normalizedSeatAssignments,
+    });
+  } catch (error) {
+    return res.status(error.response?.status || 500).json({
+      error: 'Failed to accept rebooking with seats',
+      message: error.response?.data?.message || error.message,
+    });
+  }
+});
+
+app.post('/api/rebooking/reject', async (req, res) => {
+  const { offerID } = req.body;
+
+  if (!offerID) {
+    return res.status(400).json({
+      error: 'offerID is required',
+    });
+  }
+
+  try {
+    const offerResponse = await axios.get(`${OFFER_SERVICE_URL}/offer/${offerID}`);
+    const offer = offerResponse.data;
+
+    if (String(offer.status) !== 'Pending Response') {
+      return res.status(409).json({
+        error: 'Offer can no longer be rejected',
+        status: offer.status,
+      });
+    }
+
+    const groupBookings = await getGroupBookingsForOffer(offer);
+    if (!groupBookings.length) {
+      return res.status(404).json({
+        error: 'Affected booking group not found',
+      });
+    }
+
+    const normalizedStatuses = groupBookings.map((record) => normalizedStatus(firstNonEmpty(
+      record.status,
+      record.bookingstatus,
+      record.BookingStatus
+    )));
+    const allPending = normalizedStatuses.every((status) => status === 'Pending');
+
+    if (allPending) {
+      for (const record of groupBookings) {
+        const bookingID = Number(firstNonEmpty(record.bookingID, record.BookingID));
+        const heldFlightID = Number(firstNonEmpty(record.flightID, record.FlightID));
+        const heldSeatNumber = firstNonEmpty(record.seatNumber, record.SeatNumber);
+
+        if (heldFlightID && heldSeatNumber) {
+          try {
+            await axios.post(`${SEATS_SERVICE_URL}/seats/release`, {
+              flightID: heldFlightID,
+              seatNumber: heldSeatNumber,
+            });
+          } catch (seatError) {
+            console.warn(`Could not release held seat ${heldSeatNumber} for booking ${bookingID}:`, seatError.response?.data?.message || seatError.message);
+          }
+        }
+
+        await axios.put(`${RECORD_SERVICE_URL}/records/${bookingID}`, {
+          BookingStatus: 'Cancelled',
+        });
+      }
+
+      await axios.put(`${OFFER_SERVICE_URL}/offer/${offerID}`, {
+        status: 'Rejected',
+      });
+
+      return res.status(200).json({
+        success: true,
+        offerID: Number(offerID),
+        bookingIDs: groupBookings.map((record) => Number(firstNonEmpty(record.bookingID, record.BookingID))),
+        refundAmount: 0,
+        refundRequired: false,
+        message: 'Pending disrupted booking was cancelled with no refund required.',
+      });
+    }
+
+    const refundAmount = groupBookings.reduce(
+      (sum, record) => sum + Number(firstNonEmpty(record.amount, record.amountPaid, record.AmountPaid) || 0),
+      0
+    );
+
+    const refundResponse = await axios.post(`${PAYMENT_SERVICE_URL}/payment/refund`, {
+      BookingID: Number(offer.bookingID),
+      PassengerID: Number(offer.passengerID),
+      Amount: refundAmount,
+      refundType: 'partial',
+      refundAmount,
+    });
+
+    const refundPayload = refundResponse.data || {};
+    const refundStatus = refundPayload.Status || refundPayload.status;
+
+    if (refundResponse.status >= 400 || refundStatus !== 'Refunded') {
+      for (const record of groupBookings) {
+        await axios.put(`${RECORD_SERVICE_URL}/records/${firstNonEmpty(record.bookingID, record.BookingID)}`, {
+          BookingStatus: 'Refund Failed',
+        });
+      }
+
+      return res.status(502).json({
+        error: 'Refund failed',
+        message: refundPayload.message || 'The refund could not be completed.',
+      });
+    }
+
+    for (const record of groupBookings) {
+      await axios.put(`${RECORD_SERVICE_URL}/records/${firstNonEmpty(record.bookingID, record.BookingID)}`, {
+        BookingStatus: 'Cancelled',
+      });
+    }
+
+    await axios.put(`${OFFER_SERVICE_URL}/offer/${offerID}`, {
+      status: 'Rejected',
+    });
+
+    return res.status(200).json({
+      success: true,
+      offerID: Number(offerID),
+      bookingIDs: groupBookings.map((record) => Number(firstNonEmpty(record.bookingID, record.BookingID))),
+      refundAmount,
+      refundID: refundPayload.RefundID || refundPayload.refundID || null,
+    });
+  } catch (error) {
+    return res.status(error.response?.status || 500).json({
+      error: 'Failed to reject rebooking offer',
+      message: error.response?.data?.message || error.message,
+    });
+  }
+});
+
+app.post('/api/bookings/resume-payment', async (req, res) => {
+  const { bookingID, frontendBaseUrl } = req.body;
+
+  if (!bookingID) {
+    return res.status(400).json({ error: 'bookingID is required' });
+  }
+
+  try {
+    const bookingResponse = await axios.get(`${RECORD_SERVICE_URL}/records/${bookingID}`);
+    const seedBooking = bookingResponse.data;
+
+    if (seedBooking.status !== 'Pending') {
+      return res.status(409).json({
+        error: 'Booking is no longer awaiting payment',
+        status: seedBooking.status,
+      });
+    }
+
+    const bookerID = Number(firstNonEmpty(seedBooking.bookedByPassengerID, seedBooking.BookedByPassengerID, seedBooking.passengerID, seedBooking.PassengerID));
+    if (!bookerID) {
+      return res.status(400).json({ error: 'Pending booking is missing a bookedByPassengerID' });
+    }
+
+    const allBookingsResponse = await axios.get(`${RECORD_SERVICE_URL}/records/passenger/${bookerID}`);
+    const allBookings = Array.isArray(allBookingsResponse.data) ? allBookingsResponse.data : [];
+    const groupCreatedAt = firstNonEmpty(seedBooking.createdAt, seedBooking.createdTime, seedBooking.CreatedTime);
+
+    const pendingGroup = allBookings
+      .filter((record) => {
+        const createdAt = firstNonEmpty(record.createdAt, record.createdTime, record.CreatedTime);
+        return Number(firstNonEmpty(record.bookedByPassengerID, record.BookedByPassengerID, record.passengerID, record.PassengerID)) === bookerID
+          && String(record.status) === 'Pending'
+          && String(createdAt) === String(groupCreatedAt);
+      })
+      .sort((a, b) => Number(firstNonEmpty(a.bookingID, a.BookingID)) - Number(firstNonEmpty(b.bookingID, b.BookingID)));
+
+    if (!pendingGroup.length) {
+      return res.status(404).json({ error: 'No pending booking group found' });
+    }
+
+    if (isPendingRecordExpired(groupCreatedAt)) {
+      await cleanupPendingRecords(pendingGroup);
+      return res.status(410).json({
+        error: 'Payment hold expired',
+        message: 'The 5-minute payment hold expired and the seats have been released.',
+      });
+    }
+
+    const distinctFlightIDs = [...new Set(pendingGroup.map(getNormalizedFlightID).filter((id) => Number.isFinite(id) && id > 0))];
+    for (const flightID of distinctFlightIDs) {
+      const seatNumbers = pendingGroup
+        .filter((record) => getNormalizedFlightID(record) === flightID)
+        .map(getNormalizedSeatNumber)
+        .filter(Boolean)
+        .join(',');
+
+      if (!seatNumbers) continue;
+
+      await axios.post(`${SEATS_SERVICE_URL}/seats/refresh-hold`, {
+        flightID,
+        seatNumber: seatNumbers,
+      });
+    }
+
+    const groupedByFlight = distinctFlightIDs.map((flightID) => ({
+      flightID,
+      records: pendingGroup.filter((record) => getNormalizedFlightID(record) === flightID),
+    })).sort((a, b) => {
+      const firstA = Number(firstNonEmpty(a.records[0]?.bookingID, a.records[0]?.BookingID));
+      const firstB = Number(firstNonEmpty(b.records[0]?.bookingID, b.records[0]?.BookingID));
+      return firstA - firstB;
+    });
+
+    const outboundGroup = groupedByFlight[0];
+    const returnGroup = groupedByFlight[1] || null;
+
+    const frontendOrigin = (frontendBaseUrl || 'http://localhost:5173').replace(/\/$/, '');
+    const outboundBookingID = Number(firstNonEmpty(outboundGroup.records[0]?.bookingID, outboundGroup.records[0]?.BookingID));
+    const returnBookingID = returnGroup
+      ? Number(firstNonEmpty(returnGroup.records[0]?.bookingID, returnGroup.records[0]?.BookingID))
+      : null;
+
+    let combinedFlightNumber = `Booking ${outboundBookingID}`;
+    try {
+      const outboundFlightResponse = await axios.get(`${FLIGHT_SERVICE_URL}/flight/${outboundGroup.flightID}`);
+      const outboundFlightNumber = firstNonEmpty(
+        outboundFlightResponse.data?.FlightNumber,
+        outboundFlightResponse.data?.flightNumber,
+        `SQ${outboundGroup.flightID}`
+      );
+
+      if (returnGroup) {
+        const returnFlightResponse = await axios.get(`${FLIGHT_SERVICE_URL}/flight/${returnGroup.flightID}`);
+        const returnFlightNumber = firstNonEmpty(
+          returnFlightResponse.data?.FlightNumber,
+          returnFlightResponse.data?.flightNumber,
+          `SQ${returnGroup.flightID}`
+        );
+        combinedFlightNumber = `${outboundFlightNumber} & ${returnFlightNumber}`;
+      } else {
+        combinedFlightNumber = outboundFlightNumber;
+      }
+    } catch (err) {
+      console.warn('Could not fetch flight numbers for resumed payment:', err.message);
+    }
+
+    let successUrl = `${frontendOrigin}/booking-success/${outboundBookingID}`
+      + `?session_id={CHECKOUT_SESSION_ID}`
+      + `&flightID=${encodeURIComponent(String(outboundGroup.flightID))}`
+      + `&seatNumber=${encodeURIComponent(outboundGroup.records.map(getNormalizedSeatNumber).join(','))}`
+      + `&groupBookingIDs=${encodeURIComponent(outboundGroup.records.map((record) => firstNonEmpty(record.bookingID, record.BookingID)).join(','))}`;
+
+    if (returnGroup) {
+      successUrl += `&returnBookingID=${encodeURIComponent(String(returnBookingID))}`;
+      successUrl += `&returnFlightID=${encodeURIComponent(String(returnGroup.flightID))}`;
+      successUrl += `&returnSeatNumber=${encodeURIComponent(returnGroup.records.map(getNormalizedSeatNumber).join(','))}`;
+      successUrl += `&returnGroupBookingIDs=${encodeURIComponent(returnGroup.records.map((record) => firstNonEmpty(record.bookingID, record.BookingID)).join(','))}`;
+    }
+
+    const cancelUrlObject = new URL(buildCancelUrl(
+      null,
+      frontendOrigin,
+      outboundBookingID,
+      returnBookingID
+    ));
+    cancelUrlObject.searchParams.set('groupBookingIDs', outboundGroup.records.map((record) => firstNonEmpty(record.bookingID, record.BookingID)).join(','));
+    if (returnGroup) {
+      cancelUrlObject.searchParams.set('returnGroupBookingIDs', returnGroup.records.map((record) => firstNonEmpty(record.bookingID, record.BookingID)).join(','));
+    }
+
+    const paymentResponse = await axios.post(`${PAYMENT_SERVICE_URL}/payment/checkout`, {
+      bookingID: outboundBookingID,
+      passengerID: bookerID,
+      amount: pendingGroup.reduce((sum, record) => sum + Number(firstNonEmpty(record.amount, record.amountPaid, record.AmountPaid) || 0), 0),
+      flightNumber: combinedFlightNumber,
+      successUrl,
+      cancelUrl: cancelUrlObject.toString(),
+    });
+
+    return res.status(200).json({
+      success: true,
+      bookingID: outboundBookingID,
+      bookingIDs: pendingGroup.map((record) => Number(firstNonEmpty(record.bookingID, record.BookingID))),
+      sessionUrl: paymentResponse.data.sessionUrl,
+      stripeSessionID: paymentResponse.data.stripeSessionID,
+    });
+  } catch (error) {
+    return res.status(error.response?.status || 500).json({
+      error: 'Failed to resume pending payment',
+      message: error.response?.data?.message || error.message,
+    });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Booking Composite Service running on port ${PORT}`);
@@ -455,17 +1111,22 @@ app.listen(PORT, () => {
 // CANCEL PENDING BOOKING(S) AFTER STRIPE CANCEL
 // ==========================================
 app.post('/api/bookings/cancel-pending', async (req, res) => {
-  const { bookingID, returnBookingID } = req.body;
+  const { bookingID, returnBookingID, groupBookingIDs, returnGroupBookingIDs } = req.body;
 
   if (!bookingID) {
     return res.status(400).json({ error: 'Missing required field: bookingID' });
   }
 
-  const bookingIDs = [bookingID, returnBookingID].filter(Boolean).map(Number);
+  const bookingIDs = [
+    ...parseIdList(groupBookingIDs),
+    ...parseIdList(returnGroupBookingIDs),
+    ...[bookingID, returnBookingID].filter(Boolean).map(Number),
+  ];
+  const uniqueBookingIDs = [...new Set(bookingIDs)];
   const cancelled = [];
   const skipped = [];
 
-  for (const id of bookingIDs) {
+  for (const id of uniqueBookingIDs) {
     try {
       const recordResponse = await axios.get(`${RECORD_SERVICE_URL}/records/${id}`);
       const record = recordResponse.data;

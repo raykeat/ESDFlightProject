@@ -17,6 +17,9 @@ const cancelling      = ref(false)
 const cancelError     = ref('')
 const cancelSuccess   = ref(null)
 const staffSession    = ref(null)
+const affectedPassengersCount = ref(0)
+const countingAffectedPassengers = ref(false)
+const affectedPassengersByFlightId = ref({})
 
 const STATUS_FILTERS = ['Available', 'Unavailable', 'Cancelled']
 
@@ -31,13 +34,77 @@ async function loadFlights() {
   loading.value = true
   error.value   = null
   try {
-    const res = await axios.get('http://localhost:3003/flights')
-    flights.value = res.data
+    let response
+
+    try {
+      response = await axios.get('http://localhost:3003/flights')
+    } catch (primaryError) {
+      console.warn('Primary flights endpoint unavailable, falling back to available flights endpoint.', primaryError)
+      response = await axios.get('http://localhost:3003/flight/available')
+    }
+
+    flights.value = Array.isArray(response.data)
+      ? response.data
+      : Array.isArray(response.data?.flights)
+        ? response.data.flights
+        : []
+
+    await loadAffectedPassengersForFlights(flights.value)
   } catch (err) {
     error.value = 'Could not load flights. Please try again.'
   } finally {
     loading.value = false
   }
+}
+
+async function fetchAffectedPassengersCount(flightID) {
+  if (!flightID) return 0
+
+  const response = await axios.get('http://localhost:3002/records', {
+    params: {
+      FlightID: flightID,
+      bookingstatus: 'Confirmed',
+    },
+  })
+
+  let records = response.data
+
+  if (typeof records === 'string') {
+    try {
+      records = JSON.parse(records)
+    } catch (parseError) {
+      console.warn('Could not parse affected passengers response.', parseError)
+      return 0
+    }
+  }
+
+  return Array.isArray(records) ? records.length : 0
+}
+
+async function loadAffectedPassengersForFlights(flightList) {
+  const uniqueFlightIds = [...new Set((flightList || []).map(flight => flight?.FlightID).filter(Boolean))]
+
+  if (uniqueFlightIds.length === 0) {
+    affectedPassengersByFlightId.value = {}
+    return
+  }
+
+  const results = await Promise.allSettled(
+    uniqueFlightIds.map(async (flightID) => ({
+      flightID,
+      count: await fetchAffectedPassengersCount(flightID),
+    }))
+  )
+
+  const nextCounts = {}
+
+  results.forEach((result) => {
+    if (result.status === 'fulfilled') {
+      nextCounts[result.value.flightID] = result.value.count
+    }
+  })
+
+  affectedPassengersByFlightId.value = nextCounts
 }
 
 const filteredFlights = computed(() => {
@@ -66,7 +133,9 @@ function openCancelModal(flight) {
   cancelReason.value    = ''
   cancelError.value     = ''
   cancelSuccess.value   = null
+  affectedPassengersCount.value = 0
   showCancelModal.value = true
+  loadAffectedPassengers(flight)
 }
 
 function closeCancelModal() {
@@ -74,6 +143,31 @@ function closeCancelModal() {
   selectedFlight.value  = null
   cancelReason.value    = ''
   cancelError.value     = ''
+  affectedPassengersCount.value = 0
+  countingAffectedPassengers.value = false
+}
+
+async function loadAffectedPassengers(flight) {
+  if (!flight?.FlightID) return
+
+  countingAffectedPassengers.value = true
+  try {
+    const count = await fetchAffectedPassengersCount(flight.FlightID)
+    affectedPassengersCount.value = count
+    affectedPassengersByFlightId.value = {
+      ...affectedPassengersByFlightId.value,
+      [flight.FlightID]: count,
+    }
+  } catch (err) {
+    console.warn('Could not load affected passengers count.', err)
+    affectedPassengersCount.value = 0
+  } finally {
+    countingAffectedPassengers.value = false
+  }
+}
+
+function affectedCountForFlight(flightID) {
+  return affectedPassengersByFlightId.value[flightID] ?? 0
 }
 
 async function confirmCancellation() {
@@ -250,13 +344,14 @@ function statusStyle(status) {
       <div v-else style="background:white; border:1px solid rgba(0,0,0,0.07); border-radius:16px; overflow:hidden; box-shadow:0 1px 4px rgba(0,0,0,0.04);">
 
         <!-- Table header -->
-        <div style="display:grid; grid-template-columns:70px 120px 1fr 1fr 110px 100px 110px 120px; padding:12px 24px; background:#f8fafc; border-bottom:1.5px solid #e2e8f0;">
+        <div style="display:grid; grid-template-columns:70px 120px 1fr 1fr 110px 100px 120px 110px 120px; padding:12px 24px; background:#f8fafc; border-bottom:1.5px solid #e2e8f0;">
           <span style="font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#94a3b8;">ID</span>
           <span style="font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#94a3b8;">Flight</span>
           <span style="font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#94a3b8;">From</span>
           <span style="font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#94a3b8;">To</span>
           <span style="font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#94a3b8;">Date</span>
           <span style="font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#94a3b8;">Departs</span>
+          <span style="font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#94a3b8;">Affected</span>
           <span style="font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#94a3b8;">Status</span>
           <span style="font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#94a3b8;">Action</span>
         </div>
@@ -264,7 +359,7 @@ function statusStyle(status) {
         <!-- Rows -->
         <div v-for="(flight, idx) in filteredFlights" :key="flight.FlightID"
           :style="{
-            display:'grid', gridTemplateColumns:'70px 120px 1fr 1fr 110px 100px 110px 120px',
+            display:'grid', gridTemplateColumns:'70px 120px 1fr 1fr 110px 100px 120px 110px 120px',
             padding:'16px 24px', alignItems:'center',
             borderBottom: idx < filteredFlights.length - 1 ? '1px solid #f1f5f9' : 'none',
             background: flight.Status?.toLowerCase() === 'cancelled' ? '#fafafa' : 'white',
@@ -301,6 +396,16 @@ function statusStyle(status) {
 
           <!-- Departure time -->
           <span style="font-size:14px; font-weight:600; color:#1e293b;">{{ flight.DepartureTime }}</span>
+
+          <!-- Affected passengers -->
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="min-width:30px; font-size:16px; font-weight:800; color:#0f172a; line-height:1;">
+              {{ affectedCountForFlight(flight.FlightID) }}
+            </span>
+            <span style="font-size:11px; color:#94a3b8; line-height:1.3;">
+              confirmed<br>passengers
+            </span>
+          </div>
 
           <!-- Status badge -->
           <div :style="{
@@ -362,7 +467,7 @@ function statusStyle(status) {
           </p>
           <div style="display:flex; gap:10px; justify-content:center; margin-bottom:24px;">
             <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:12px 20px; text-align:center; flex:1;">
-              <p style="font-size:28px; font-weight:800; color:#0f172a; margin:0; line-height:1;">{{ cancelSuccess.PassengersAffected || 0 }}</p>
+              <p style="font-size:28px; font-weight:800; color:#0f172a; margin:0; line-height:1;">{{ Math.max(cancelSuccess.PassengersAffected || 0, affectedPassengersCount) }}</p>
               <p style="font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#94a3b8; margin:6px 0 0;">Passengers Affected</p>
             </div>
           </div>
@@ -429,6 +534,14 @@ function statusStyle(status) {
                 <span style="background:white; border:1px solid #e2e8f0; border-radius:6px; padding:3px 10px; font-size:11px; font-weight:500; color:#64748b; font-family:monospace;">ID #{{ selectedFlight?.FlightID }}</span>
                 <span style="background:white; border:1px solid #e2e8f0; border-radius:6px; padding:3px 10px; font-size:12px; color:#64748b;">{{ selectedFlight?.Date }}</span>
               </div>
+            </div>
+
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; background:#fff7ed; border:1px solid #fed7aa; border-radius:12px; padding:12px 14px; margin-bottom:16px;">
+              <div>
+                <p style="font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#c2410c; margin:0 0 4px;">Affected Passengers</p>
+                <p style="font-size:13px; color:#7c2d12; margin:0;">{{ countingAffectedPassengers ? 'Checking confirmed bookings...' : `${affectedPassengersCount} confirmed passenger(s) will be affected.` }}</p>
+              </div>
+              <div style="font-size:24px; font-weight:800; color:#c2410c; line-height:1;">{{ countingAffectedPassengers ? '...' : affectedPassengersCount }}</div>
             </div>
 
             <!-- Reason input -->

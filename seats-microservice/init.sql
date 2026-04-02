@@ -6,7 +6,8 @@ CREATE TABLE IF NOT EXISTS seats (
     FlightID INT NOT NULL,
     SeatNumber VARCHAR(5) NOT NULL,
     Status ENUM('available', 'unavailable', 'hold', 'cancelled') DEFAULT 'available',
-    PassengerID INT NULL
+    PassengerID INT NULL,
+    HoldExpiresAt DATETIME NULL
 );
 
 ALTER TABLE seats
@@ -1457,6 +1458,7 @@ INSERT INTO seats (FlightID, SeatNumber, Status) VALUES
 -- Scenario 2 test fixture
 -- FlightID 10001 = BA233 (Singapore -> Bangkok): all seats vacant
 -- FlightID 10003 = BA245 (Singapore -> Bangkok): 55/60 seats filled (5 seats left)
+-- FlightID 10005 = BA247 (Singapore -> Bangkok): only 3 seats left
 
 UPDATE seats
 SET Status = 'available', PassengerID = NULL
@@ -1467,3 +1469,56 @@ SET
     Status = CASE WHEN SeatNumber IN ('10B', '10C', '10D', '10E', '10F') THEN 'available' ELSE 'unavailable' END,
     PassengerID = CASE WHEN SeatNumber IN ('10B', '10C', '10D', '10E', '10F') THEN NULL ELSE 999999 END
 WHERE FlightID = 10003;
+
+-- Seat fixtures for newer April/May 2026 flight seeds
+INSERT INTO seats (FlightID, SeatNumber, Status)
+SELECT flights.FlightID, CONCAT(seat_rows.RowNum, seat_cols.SeatCol) AS SeatNumber, 'available'
+FROM (
+    SELECT 10005 AS FlightID UNION ALL
+    SELECT 10006 UNION ALL
+    SELECT 10007 UNION ALL
+    SELECT 70001 AS FlightID UNION ALL
+    SELECT 70002 UNION ALL
+    SELECT 70003 UNION ALL
+    SELECT 70004 UNION ALL
+    SELECT 70005 UNION ALL
+    SELECT 70006 UNION ALL
+    SELECT 71001 UNION ALL
+    SELECT 71002 UNION ALL
+    SELECT 72001 UNION ALL
+    SELECT 72002 UNION ALL
+    SELECT 73001 UNION ALL
+    SELECT 73002 UNION ALL
+    SELECT 74001 UNION ALL
+    SELECT 74002 UNION ALL
+    SELECT 75001 UNION ALL
+    SELECT 75002 UNION ALL
+    SELECT 76001 UNION ALL
+    SELECT 76002
+) AS flights
+CROSS JOIN (
+    SELECT 1 AS RowNum UNION ALL
+    SELECT 2 UNION ALL
+    SELECT 3 UNION ALL
+    SELECT 4 UNION ALL
+    SELECT 5 UNION ALL
+    SELECT 6 UNION ALL
+    SELECT 7 UNION ALL
+    SELECT 8 UNION ALL
+    SELECT 9 UNION ALL
+    SELECT 10
+) AS seat_rows
+CROSS JOIN (
+    SELECT 'A' AS SeatCol UNION ALL
+    SELECT 'B' UNION ALL
+    SELECT 'C' UNION ALL
+    SELECT 'D' UNION ALL
+    SELECT 'E' UNION ALL
+    SELECT 'F'
+) AS seat_cols;
+
+UPDATE seats
+SET
+    Status = CASE WHEN SeatNumber IN ('10D', '10E', '10F') THEN 'available' ELSE 'unavailable' END,
+    PassengerID = CASE WHEN SeatNumber IN ('10D', '10E', '10F') THEN NULL ELSE 999999 END
+WHERE FlightID = 10005;
