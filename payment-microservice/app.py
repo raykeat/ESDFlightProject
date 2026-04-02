@@ -502,6 +502,12 @@ def process_refund():
         ).with_for_update().order_by(Payment.paymentID.desc()).first()
 
         if not original_payment:
+            original_payment = Payment.query.filter_by(
+                passengerID=passenger_id,
+                status="Completed"
+            ).with_for_update().order_by(Payment.paymentID.desc()).first()
+
+        if not original_payment:
             return jsonify({
                 "error":   "Not Found",
                 "code":    "PAYMENT_NOT_FOUND",
@@ -618,11 +624,29 @@ def process_refund():
                 "message": "Refund service is temporarily unavailable. Please try again in 30 seconds."
             }), 503
 
-        original_payment.status             = "Refunded"
-        original_payment.refundID           = stripe_refund.id
-        original_payment.refundedAt         = get_sgt_now()
-        original_payment.cancellationReason = reason
-        original_payment.idempotencyKey     = idempotency_key
+        refund_timestamp = get_sgt_now()
+
+        if original_payment.bookingID == booking_id and refund_type == 'full':
+            original_payment.status             = "Refunded"
+            original_payment.refundID           = stripe_refund.id
+            original_payment.refundedAt         = refund_timestamp
+            original_payment.cancellationReason = reason
+            original_payment.idempotencyKey     = idempotency_key
+        else:
+            refund_record = Payment(
+                bookingID=booking_id,
+                passengerID=passenger_id,
+                amount=refund_amount,
+                status="Refunded",
+                stripeSessionID=original_payment.stripeSessionID,
+                stripeChargeID=original_payment.stripeChargeID,
+                refundID=stripe_refund.id,
+                idempotencyKey=idempotency_key,
+                chargedAt=original_payment.chargedAt,
+                refundedAt=refund_timestamp,
+                cancellationReason=reason,
+            )
+            db.session.add(refund_record)
         db.session.commit()
 
         log_event("refund_completed", bookingID=booking_id, refundID=stripe_refund.id)
@@ -639,7 +663,7 @@ def process_refund():
             "RefundAmount":       refund_amount,
             "refundType":         refund_type,
             "cancellationReason": reason,
-            "refundedAt":         get_sgt_now().strftime("%Y-%m-%d %H:%M:%S SGT"),
+            "refundedAt":         refund_timestamp.strftime("%Y-%m-%d %H:%M:%S SGT"),
             "stripeStatus":       stripe_refund.status
         }), 200
 

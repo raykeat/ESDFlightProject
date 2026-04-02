@@ -1,41 +1,218 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import SeatSelector from './SeatSelector.vue'
 import { usePassengerSession } from '../composables/usePassengerSession'
+import { useBookingDraft } from '../composables/useBookingDraft'
 
-const route  = useRoute()
+const route = useRoute()
 const router = useRouter()
 const { currentPassenger } = usePassengerSession()
+const { bookingDraft, patchBookingDraft } = useBookingDraft()
 
-const flightID         = parseInt(route.query.flightID)
-const isReturn         = route.query.isReturn === 'true'
-const outboundFlightID = route.query.outboundFlightID || null
-const outboundSeat     = route.query.outboundSeat     || null
-const searchParams     = {
-  tripType:         route.query.tripType         || 'one-way',
+const flightID = computed(() => Number.parseInt(route.query.flightID, 10))
+const isReturn = computed(() => route.query.isReturn === 'true')
+const searchParams = computed(() => ({
+  tripType: route.query.tripType || 'one-way',
   departingCountry: route.query.departingCountry || '',
-  arrivingCountry:  route.query.arrivingCountry  || '',
-  departureDate:    route.query.departureDate    || '',
-  returnDate:       route.query.returnDate       || '',
-  passengers:       parseInt(route.query.passengers) || 1,
-}
+  arrivingCountry: route.query.arrivingCountry || '',
+  departureDate: route.query.departureDate || '',
+  returnDate: route.query.returnDate || '',
+  passengers: Number.parseInt(route.query.passengers, 10) || 1,
+}))
 
-const passengers = searchParams.passengers
-
-// ─── State ────────────────────────────────────────────────
-const flight        = ref(null)
-const seats         = ref([])
-const loading       = ref(true)
-const error         = ref(null)
+const flight = ref(null)
+const seats = ref([])
+const loading = ref(true)
+const error = ref(null)
 const selectedSeats = ref([])
 
-// ─── Fetch from composite service ─────────────────────────
-onMounted(async () => {
-  if (!flightID) { error.value = 'No flight ID provided.'; loading.value = false; return }
+const travelers = computed(() => {
+  const draftTravelers = bookingDraft.value?.travelers || []
 
-  const storageKey = `flightSearchComposite:${flightID}`
+  if (draftTravelers.length) {
+    return draftTravelers.map((traveller, index) => ({
+      ...traveller,
+      displayName: `${traveller.firstName || ''} ${traveller.lastName || ''}`.trim() || `Passenger ${index + 1}`,
+    }))
+  }
+
+  return Array.from({ length: searchParams.value.passengers }, (_, index) => ({
+    id: `passenger-${index + 1}`,
+    displayName: index === 0 && currentPassenger.value
+      ? `${currentPassenger.value.FirstName || ''} ${currentPassenger.value.LastName || ''}`.trim()
+      : `Passenger ${index + 1}`,
+    firstName: index === 0 ? (currentPassenger.value?.FirstName || '') : '',
+    lastName: index === 0 ? (currentPassenger.value?.LastName || '') : '',
+  }))
+})
+
+const initialAssignments = computed(() => {
+  const assignments = bookingDraft.value?.seatAssignments?.[isReturn.value ? 'return' : 'outbound'] || []
+  return Array.from({ length: searchParams.value.passengers }, (_, index) => assignments[index] || '')
+})
+
+const totalPrice = computed(() => {
+  if (!flight.value) return '0.00'
+  const base = Number.parseFloat(flight.value.Price ?? flight.value.price ?? 0)
+  return (base * searchParams.value.passengers).toFixed(2)
+})
+
+const selectedSeatLabels = computed(() => selectedSeats.value.filter(Boolean))
+
+function formatTime(timeText) {
+  if (!timeText) return '--'
+  const [hour, minute] = timeText.slice(0, 5).split(':').map(Number)
+  const suffix = hour >= 12 ? 'PM' : 'AM'
+  const hour12 = hour % 12 || 12
+  return `${hour12}:${String(minute).padStart(2, '0')} ${suffix}`
+}
+
+function formatDuration(durationText) {
+  if (!durationText) return '--'
+  const clean = String(durationText).replace('h', '').trim()
+  const [hours, minutes = '00'] = clean.split(':')
+  return `${Number.parseInt(hours, 10)}h ${String(minutes).padStart(2, '0')}m`
+}
+
+function formatDate(dateText) {
+  if (!dateText) return '--'
+  const [day, month, year] = dateText.split('/')
+  return new Date(`${year}-${month}-${day}`).toLocaleDateString('en-US', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
+const isNextDay = computed(() => {
+  if (!flight.value) return false
+  const [departureHour, departureMinute] = (flight.value.DepartureTime ?? '00:00').slice(0, 5).split(':').map(Number)
+  const [arrivalHour, arrivalMinute] = (flight.value.ArrivalTime ?? '00:00').slice(0, 5).split(':').map(Number)
+  return arrivalHour * 60 + arrivalMinute < departureHour * 60 + departureMinute
+})
+
+const arrivalDate = computed(() => {
+  if (!flight.value?.Date) return ''
+  const [day, month, year] = flight.value.Date.split('/')
+  const arrival = new Date(`${year}-${month}-${day}`)
+  if (isNextDay.value) arrival.setDate(arrival.getDate() + 1)
+  return arrival.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+})
+
+function onSeatSelected(assignments) {
+  selectedSeats.value = assignments
+}
+
+function goBack() {
+  if (isReturn.value) {
+    router.push({
+      path: '/flight-detail',
+      query: {
+        ...route.query,
+        flightID: route.query.outboundFlightID,
+        isReturn: 'false',
+      },
+    })
+    return
+  }
+
+  router.push({
+    path: '/passenger-details',
+    query: {
+      tripType: searchParams.value.tripType,
+      departingCountry: searchParams.value.departingCountry,
+      arrivingCountry: searchParams.value.arrivingCountry,
+      departureDate: searchParams.value.departureDate,
+      returnDate: searchParams.value.returnDate,
+      passengers: searchParams.value.passengers,
+      outboundFlightID: route.query.outboundFlightID || route.query.flightID,
+      outboundFlightNumber: route.query.outboundFlightNumber || '',
+      outboundOrigin: route.query.outboundOrigin || searchParams.value.departingCountry,
+      outboundDestination: route.query.outboundDestination || searchParams.value.arrivingCountry,
+      outboundPrice: route.query.outboundPrice || '',
+      returnFlightID: route.query.returnFlightID || '',
+      returnFlightNumber: route.query.returnFlightNumber || '',
+      returnOrigin: route.query.returnOrigin || '',
+      returnDestination: route.query.returnDestination || '',
+      returnPrice: route.query.returnPrice || '',
+    },
+  })
+}
+
+function persistSeatAssignments() {
+  patchBookingDraft({
+    seatAssignments: {
+      ...(bookingDraft.value?.seatAssignments || { outbound: [], return: [] }),
+      [isReturn.value ? 'return' : 'outbound']: [...selectedSeats.value],
+    },
+  })
+}
+
+function continueToBooking() {
+  const everyPassengerSeated = selectedSeats.value.length === searchParams.value.passengers && selectedSeats.value.every(Boolean)
+  if (!everyPassengerSeated) {
+    alert(`Please assign ${searchParams.value.passengers} seat(s) before continuing.`)
+    return
+  }
+
+  if (!currentPassenger.value) {
+    router.push({ path: '/auth', query: { redirect: '/passenger-details', ...route.query } })
+    return
+  }
+
+  persistSeatAssignments()
+
+  if (searchParams.value.tripType === 'round-trip' && !isReturn.value) {
+    router.push({
+      path: '/flight-detail',
+      query: {
+        ...route.query,
+        flightID: route.query.returnFlightID,
+        isReturn: 'true',
+      },
+    })
+    return
+  }
+
+  router.push({
+    path: '/booking-confirmation',
+    query: {
+      flightID: flightID.value,
+      flightNumber: flight.value?.FlightNumber || route.query.returnFlightNumber || route.query.outboundFlightNumber || '',
+      amount: totalPrice.value,
+      seatNumber: selectedSeats.value.join(','),
+      outboundFlightID: route.query.outboundFlightID || '',
+      outboundFlightNumber: route.query.outboundFlightNumber || '',
+      outboundSeat: (bookingDraft.value?.seatAssignments?.outbound || []).join(','),
+      outboundPrice: route.query.outboundPrice
+        ? (Number.parseFloat(route.query.outboundPrice) * searchParams.value.passengers).toFixed(2)
+        : '',
+      tripType: searchParams.value.tripType,
+      departingCountry: searchParams.value.departingCountry,
+      arrivingCountry: searchParams.value.arrivingCountry,
+      departureDate: searchParams.value.departureDate,
+      returnDate: searchParams.value.returnDate,
+      passengers: searchParams.value.passengers,
+    },
+  })
+}
+
+async function loadFlightDetail() {
+  if (!flightID.value) {
+    error.value = 'No flight ID provided.'
+    loading.value = false
+    return
+  }
+
+  loading.value = true
+  error.value = null
+  flight.value = null
+  seats.value = []
+
+  const storageKey = `flightSearchComposite:${flightID.value}`
 
   try {
     const prefetched = sessionStorage.getItem(storageKey)
@@ -48,155 +225,102 @@ onMounted(async () => {
     }
 
     if (!flight.value) {
-      const res = await axios.get(`http://localhost:5011/flight-search/${flightID}`)
-      flight.value = res.data.flight
-      seats.value = Array.isArray(res.data.seats) ? res.data.seats : []
+      try {
+        const compositeResponse = await axios.get(`http://localhost:5011/flight-search/${flightID.value}`)
+        flight.value = compositeResponse.data.flight
+        seats.value = Array.isArray(compositeResponse.data.seats) ? compositeResponse.data.seats : []
+      } catch (compositeError) {
+        console.warn('Flight search composite unavailable, falling back to direct services.', compositeError)
+
+        const [flightResponse, seatsResponse] = await Promise.all([
+          axios.get(`http://localhost:3003/flight/${flightID.value}`),
+          axios.get(`http://localhost:5003/seats/${flightID.value}`).catch(() => ({ data: [] })),
+        ])
+
+        flight.value = flightResponse.data
+        seats.value = Array.isArray(seatsResponse.data) ? seatsResponse.data : []
+      }
     }
-  } catch (e) {
-    console.error('Flight search composite error:', e)
+
+    selectedSeats.value = [...initialAssignments.value]
+  } catch (fetchError) {
+    console.error('Flight search composite error:', fetchError)
     error.value = 'Could not load flight details. Please try again.'
   } finally {
     loading.value = false
   }
-})
-
-// ─── Seat selection ───────────────────────────────────────
-function onSeatSelected(seats) { selectedSeats.value = seats }
-
-// ─── Computed price ───────────────────────────────────────
-const totalPrice = computed(() => {
-  if (!flight.value) return '0.00'
-  const base = parseFloat(flight.value.Price ?? flight.value.price ?? 0)
-  return (base * passengers).toFixed(2)
-})
-
-// ─── Format helpers ───────────────────────────────────────
-// Detect overnight flight (arrival time < departure time → crossed midnight)
-const isNextDay = computed(() => {
-  if (!flight.value) return false
-  const [dh, dm] = (flight.value.DepartureTime ?? '00:00').slice(0, 5).split(':').map(Number)
-  const [ah, am] = (flight.value.ArrivalTime   ?? '00:00').slice(0, 5).split(':').map(Number)
-  return ah * 60 + am < dh * 60 + dm
-})
-
-const arrivalDate = computed(() => {
-  if (!flight.value?.Date) return ''
-  const [day, month, year] = flight.value.Date.split('/')
-  const d = new Date(`${year}-${month}-${day}`)
-  if (isNextDay.value) d.setDate(d.getDate() + 1)
-  return d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
-})
-
-// "14:30" → "2:30 PM"
-function formatTime(t) {
-  if (!t) return '--'
-  const [h, m] = t.slice(0, 5).split(':').map(Number)
-  const period = h >= 12 ? 'PM' : 'AM'
-  const h12    = h % 12 || 12
-  return `${h12}:${String(m).padStart(2, '0')} ${period}`
 }
 
-// "3:00" or "3:00h" → "3h 00m"
-function formatDuration(d) {
-  if (!d) return '--'
-  const clean = String(d).replace('h', '').trim()
-  const [h, m = '00'] = clean.split(':')
-  return `${parseInt(h)}h ${String(m).padStart(2, '0')}m`
-}
+onMounted(async () => {
+  await loadFlightDetail()
+})
 
-// "03/05/2026" → "Sun, May 3, 2026"
-function formatDate(d) {
-  if (!d) return '--'
-  const [day, month, year] = d.split('/')
-  return new Date(`${year}-${month}-${day}`).toLocaleDateString('en-US', {
-    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric'
-  })
-}
-
-// ─── Navigation ───────────────────────────────────────────
-function goBack() { router.back() }
-
-function continueToBooking() {
-  if (selectedSeats.value.length !== passengers) {
-    alert(`Please select ${passengers} seat(s) before continuing.`)
-    return
+watch(
+  () => route.query,
+  async () => {
+    await loadFlightDetail()
   }
-  
-  const seatString = selectedSeats.value.join(',')
-
-  if (!currentPassenger.value) {
-    router.push({ path: '/auth', query: { redirect: '/flight-detail', flightID, ...searchParams } })
-    return
-  }
-
-  if (searchParams.tripType === 'round-trip' && !isReturn) {
-    // Proceed to return flight selection
-    router.push({
-      path: '/search-results',
-      query: {
-        step: 'return',
-        outboundFlightID: flightID,
-        outboundFlightNumber: flight.value?.FlightNumber,
-        outboundOrigin: flight.value?.Origin,
-        outboundDestination: flight.value?.Destination,
-        outboundPrice: totalPrice.value,
-        outboundSeat: seatString,
-        ...searchParams,
-      }
-    })
-    return
-  }
-
-  // Otherwise, proceed to checkout (one-way or round-trip return flight)
-  router.push({
-    path: '/booking-confirmation',
-    query: {
-      flightID,
-      flightNumber:         flight.value?.FlightNumber,
-      amount:               totalPrice.value,
-      seatNumber:           seatString,
-      outboundFlightID:     route.query.outboundFlightID || '',
-      outboundFlightNumber: route.query.outboundFlightNumber || '',
-      outboundSeat:         route.query.outboundSeat     || '',
-      outboundPrice:        route.query.outboundPrice    || '',
-      ...searchParams,
-    }
-  })
-}
+)
 </script>
 
 <template>
-  <main class="relative min-h-screen overflow-hidden" style="background: linear-gradient(135deg, #f8f8fa 0%, #f0f0f5 100%);">
+  <main class="relative min-h-screen overflow-hidden bg-[linear-gradient(135deg,#f8f8fa_0%,#f0f0f5_100%)]">
     <div class="pointer-events-none absolute inset-0 z-0">
-      <div class="absolute -top-40 -right-40 h-[500px] w-[500px] rounded-full bg-[#e63946]/7 blur-[110px]"></div>
+      <div class="absolute -right-40 -top-40 h-[500px] w-[500px] rounded-full bg-[#e63946]/7 blur-[110px]"></div>
       <div class="absolute -bottom-40 -left-40 h-[420px] w-[420px] rounded-full bg-indigo-400/5 blur-[95px]"></div>
     </div>
 
-    <div class="relative z-10 mx-auto h-[calc(100vh-56px)] max-w-[1520px] px-5 py-3 md:px-8 xl:px-12">
-      <div v-if="loading" class="flex h-full flex-col items-center justify-center">
+    <div class="relative z-10 mx-auto max-w-[1520px] px-5 py-6 md:px-8 xl:px-12">
+      <div class="mb-8 rounded-[28px] bg-white/80 px-6 py-6 shadow-[0_20px_48px_rgba(0,0,0,0.06)] backdrop-blur-2xl">
+        <div class="grid grid-cols-3 items-start gap-6">
+          <div class="flex items-start gap-3">
+            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-sm font-bold text-white">✓</div>
+            <div class="min-w-0 flex-1 pt-1">
+              <div class="h-1 rounded-full bg-emerald-500"></div>
+              <p class="mt-3 text-sm font-semibold text-emerald-600">Fill in your info</p>
+            </div>
+          </div>
+          <div class="flex items-start gap-3">
+            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#e63946] text-sm font-bold text-white shadow-[0_10px_18px_rgba(230,57,70,0.22)]">2</div>
+            <div class="min-w-0 flex-1 pt-1">
+              <div class="h-1 rounded-full bg-[#e63946]"></div>
+              <p class="mt-3 text-sm font-semibold text-[#e63946]">Choose your seat</p>
+            </div>
+          </div>
+          <div class="flex items-start gap-3">
+            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#eef0f5] text-sm font-bold text-[#7d8594]">3</div>
+            <div class="min-w-0 flex-1 pt-1">
+              <div class="h-1 rounded-full bg-[#d9dde6]"></div>
+              <p class="mt-3 text-sm font-semibold text-[#1d1d1f]">Finalise your payment</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="loading" class="flex min-h-[60vh] flex-col items-center justify-center">
         <div class="relative flex h-14 w-14 items-center justify-center">
           <div class="absolute h-full w-full animate-ping rounded-full border-[3px] border-[#e63946]/20"></div>
           <div class="h-7 w-7 animate-spin rounded-full border-[3px] border-[#e63946] border-t-transparent"></div>
         </div>
-        <p class="mt-4 text-xs font-bold uppercase tracking-[0.2em] text-[#6e6e73]">Loading flight…</p>
+        <p class="mt-4 text-xs font-bold uppercase tracking-[0.2em] text-[#6e6e73]">Loading flight...</p>
       </div>
 
-      <div v-else-if="error" class="flex h-full flex-col items-center justify-center text-center">
+      <div v-else-if="error" class="flex min-h-[60vh] flex-col items-center justify-center text-center">
         <p class="text-base font-semibold text-[#1d1d1f]">{{ error }}</p>
         <button @click="goBack" class="mt-5 rounded-full bg-[#e63946] px-7 py-2.5 text-sm font-bold text-white transition hover:bg-[#d62839]">Go Back</button>
       </div>
 
-      <div v-else class="grid h-full grid-cols-1 gap-4 lg:grid-cols-[420px_1fr] xl:grid-cols-[460px_1fr]">
-        <aside class="rounded-[24px] border border-white/80 bg-white/85 p-5 shadow-[0_18px_40px_rgba(0,0,0,0.07)] backdrop-blur-2xl">
+      <div v-else class="grid gap-4 lg:grid-cols-[420px_1fr] xl:grid-cols-[460px_1fr]">
+        <aside class="relative z-20 rounded-[24px] border border-white/80 bg-white/85 p-5 shadow-[0_18px_40px_rgba(0,0,0,0.07)] backdrop-blur-2xl">
           <div class="mb-4 flex items-center justify-between">
             <button
               @click="goBack"
               class="inline-flex items-center gap-1.5 rounded-full border border-black/8 bg-white px-3 py-1.5 text-[11px] font-semibold text-[#1d1d1f] transition hover:bg-[#f8f8fa]"
             >
               <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-                <path stroke-linecap="round" d="M15 19l-7-7 7-7"/>
+                <path stroke-linecap="round" d="M15 19l-7-7 7-7" />
               </svg>
-              Back to Results
+              {{ isReturn ? 'Back to Departure Seats' : 'Back' }}
             </button>
             <span
               class="rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em]"
@@ -208,7 +332,7 @@ function continueToBooking() {
 
           <div class="mb-4 flex items-center justify-between rounded-2xl bg-[#f5f5f7] px-3.5 py-3">
             <span class="text-sm font-bold text-[#1d1d1f]">{{ flight.FlightNumber }}</span>
-            <span class="text-sm font-semibold text-[#6e6e73]">${{ parseFloat(flight.Price ?? flight.price).toFixed(2) }}</span>
+            <span class="text-sm font-semibold text-[#6e6e73]">${{ Number.parseFloat(flight.Price ?? flight.price ?? 0).toFixed(2) }}</span>
           </div>
 
           <div class="mb-4 rounded-2xl bg-[#f5f5f7] p-3.5">
@@ -241,17 +365,20 @@ function continueToBooking() {
           </div>
 
           <div class="mt-4 rounded-xl border border-black/6 bg-white px-3.5 py-2.5">
-            <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#a1a1a6]">Amenities</p>
-            <p class="mt-1 text-sm font-semibold text-[#1d1d1f]">
-              {{ flight.Baggage || 'Baggage N/A' }} · {{ flight.Meals || 'Meals N/A' }} · {{ flight.Beverages || 'Beverages N/A' }} · {{ flight.Wifi ? 'Wi-Fi Included' : 'No Wi-Fi' }}
-            </p>
+            <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#a1a1a6]">Passengers</p>
+            <div class="mt-2 space-y-2">
+              <div v-for="(traveler, index) in travelers" :key="traveler.id" class="flex items-center justify-between text-sm">
+                <span class="font-semibold text-[#1d1d1f]">{{ traveler.displayName }}</span>
+                <span class="text-[#6e6e73]">{{ selectedSeats[index] || 'Seat not selected' }}</span>
+              </div>
+            </div>
           </div>
 
           <div class="mt-4 rounded-2xl border border-[#e63946]/15 bg-gradient-to-br from-[#e63946]/6 to-rose-50 p-3.5">
             <div class="flex items-center justify-between gap-3">
               <div>
-                <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#e63946]">Selected Seats</p>
-                <p class="mt-1 text-lg font-bold text-[#1d1d1f]">{{ selectedSeats.length ? selectedSeats.join(', ') : 'None yet' }}</p>
+                <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#e63946]">Assigned Seats</p>
+                <p class="mt-1 text-lg font-bold text-[#1d1d1f]">{{ selectedSeatLabels.length ? selectedSeatLabels.join(', ') : 'None yet' }}</p>
               </div>
               <div class="text-right">
                 <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#6e6e73]">Total</p>
@@ -261,19 +388,23 @@ function continueToBooking() {
           </div>
 
           <button
-            :disabled="selectedSeats.length !== passengers"
+            :disabled="selectedSeatLabels.length !== searchParams.passengers || selectedSeats.some((seat) => !seat)"
             @click="continueToBooking"
-            class="mt-4 w-full rounded-[14px] py-3 text-sm font-bold uppercase tracking-[0.12em] text-white transition-all"
-            :class="selectedSeats.length === passengers
+            class="relative z-30 mt-4 w-full rounded-[14px] py-3 text-sm font-bold uppercase tracking-[0.12em] text-white transition-all"
+            :class="selectedSeatLabels.length === searchParams.passengers && !selectedSeats.some((seat) => !seat)
               ? 'bg-gradient-to-r from-[#e63946] to-[#f43f5e] shadow-[0_8px_24px_rgba(230,57,70,0.28)] hover:-translate-y-0.5'
-              : 'bg-[#d1d1d6] cursor-not-allowed opacity-70'"
+              : 'cursor-not-allowed bg-[#d1d1d6] opacity-70'"
           >
-            <span v-if="selectedSeats.length !== passengers">Select {{ passengers }} seat(s) to continue</span>
-            <span v-else>Continue to Booking · ${{ totalPrice }}</span>
+            <span v-if="selectedSeatLabels.length !== searchParams.passengers || selectedSeats.some((seat) => !seat)">
+              Assign {{ searchParams.passengers }} seat(s) to continue
+            </span>
+            <span v-else>
+              {{ isReturn ? `Continue to Payment · $${totalPrice}` : searchParams.tripType === 'round-trip' ? 'Continue to Return Seats' : `Continue to Booking · $${totalPrice}` }}
+            </span>
           </button>
         </aside>
 
-        <section class="rounded-[24px] border border-white/80 bg-white/80 p-5 shadow-[0_18px_40px_rgba(0,0,0,0.07)] backdrop-blur-2xl">
+        <section class="relative z-10 rounded-[24px] border border-white/80 bg-white/80 p-5 shadow-[0_18px_40px_rgba(0,0,0,0.07)] backdrop-blur-2xl">
           <div class="mb-3">
             <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-[#a1a1a6]">Cabin Map</p>
             <h2 class="text-2xl font-semibold tracking-tight text-[#1d1d1f]">Choose Your Seat</h2>
@@ -282,7 +413,9 @@ function continueToBooking() {
             <SeatSelector
               :flightId="flightID"
               :seatsData="seats"
-              :maxSeats="passengers"
+              :maxSeats="searchParams.passengers"
+              :travelers="travelers"
+              :initialAssignments="initialAssignments"
               @seatSelected="onSeatSelected"
             />
           </div>

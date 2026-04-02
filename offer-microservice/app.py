@@ -4,7 +4,7 @@ import json
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
-from sqlalchemy import exc
+from sqlalchemy import exc, text
 from datetime import datetime, timezone, timedelta
 
 app = Flask(__name__)
@@ -602,11 +602,34 @@ def delete_offer(offerID):
 
 import time
 
+def drop_legacy_coupon_column():
+    """
+    Remove the old coupon-era column from existing local databases.
+    """
+    legacy_column = db.session.execute(
+        text(
+            """
+            SELECT 1
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'offer'
+              AND COLUMN_NAME = 'couponID'
+            LIMIT 1
+            """
+        )
+    ).scalar()
+
+    if legacy_column:
+        logger.info("Dropping legacy couponID column from offer table")
+        db.session.execute(text("ALTER TABLE offer DROP COLUMN couponID"))
+        db.session.commit()
+
 def wait_for_db(retries=10, delay=3):
     for i in range(retries):
         try:
             with app.app_context():
                 db.create_all()
+                drop_legacy_coupon_column()
             print('✓ Connected to offer-db')
             return
         except Exception as e:

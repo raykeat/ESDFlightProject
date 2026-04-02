@@ -3,10 +3,12 @@ import LandingPage from '../components/LandingPage.vue'
 import AuthPage from '../pages/AuthPage.vue'
 import ProfilePage from '../pages/ProfilePage.vue'
 import SearchResults from '../pages/SearchResults.vue' 
+import PassengerDetails from '../pages/PassengerDetails.vue'
 import BookingConfirmation from '../pages/BookingConfirmation.vue'  
 import BookingSuccess from '../pages/BookingSuccess.vue'
 import MyBookings from '../pages/MyBookings.vue'
 import RebookingOffer from '../pages/RebookingOffer.vue'
+import RebookingSeatSelection from '../pages/RebookingSeatSelection.vue'
 import StaffAuth    from '../pages/StaffAuth.vue'
 import StaffFlights from '../pages/StaffFlights.vue'
 import FlightDetail from '../pages/FlightDetail.vue'
@@ -15,6 +17,13 @@ import MyVouchers from '../pages/MyVouchers.vue'
 
 const router = createRouter({
   history: createWebHistory(),
+  scrollBehavior(to, from, savedPosition) {
+    if (savedPosition) {
+      return savedPosition
+    }
+
+    return { top: 0 }
+  },
   routes: [
     {
       path: '/',
@@ -35,6 +44,11 @@ const router = createRouter({
       path: '/search-results',
       name: 'search-results',
       component: SearchResults
+    },
+    {
+      path: '/passenger-details',
+      name: 'passenger-details',
+      component: PassengerDetails
     },
     {
       path: '/booking-confirmation',
@@ -60,6 +74,11 @@ const router = createRouter({
       path: '/rebooking-offer',
       name: 'rebooking-offer',
       component: RebookingOffer
+    },
+    {
+      path: '/rebooking-seat-selection',
+      name: 'rebooking-seat-selection',
+      component: RebookingSeatSelection
     },
     {
       path: '/staff/login',

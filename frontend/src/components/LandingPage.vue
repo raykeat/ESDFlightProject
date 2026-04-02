@@ -37,6 +37,7 @@ const datePickerOpen = ref(false)
 const datePickerRef = ref(null)
 const datePickerMonth = ref(startOfMonth(new Date()))
 const activeDateField = ref('departure')
+const searchValidationMessage = ref('')
 
 const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
@@ -44,6 +45,11 @@ const leftMonth = computed(() => datePickerMonth.value)
 const rightMonth = computed(() => addMonths(datePickerMonth.value, 1))
 const leftMonthCells = computed(() => buildCalendarCells(leftMonth.value))
 const rightMonthCells = computed(() => buildCalendarCells(rightMonth.value))
+const hasMatchingRoute = computed(() => {
+  const origin = booking.value.departingCountry?.trim()
+  const destination = booking.value.arrivingCountry?.trim()
+  return Boolean(origin && destination && origin === destination)
+})
 
 function startOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth(), 1)
@@ -175,10 +181,16 @@ const displayName = computed(() => {
 
 function submitSearch() {
   console.log('Search submitted', booking.value)
+  searchValidationMessage.value = ''
 
   // Validate required fields
   if (!booking.value.departingCountry || !booking.value.arrivingCountry || !booking.value.departureDate) {
     alert('Please fill in all required fields')
+    return
+  }
+
+  if (hasMatchingRoute.value) {
+    searchValidationMessage.value = `Please select a different destination from ${booking.value.departingCountry}.`
     return
   }
   
@@ -233,6 +245,15 @@ watch(
     if (newType === 'one-way') {
       booking.value.returnDate = ''
       activeDateField.value = 'departure'
+    }
+  }
+)
+
+watch(
+  () => [booking.value.departingCountry, booking.value.arrivingCountry],
+  () => {
+    if (!hasMatchingRoute.value) {
+      searchValidationMessage.value = ''
     }
   }
 )
@@ -390,7 +411,8 @@ onBeforeUnmount(() => {
                     <div class="relative">
                       <select
                         v-model="booking.departingCountry"
-                        class="w-full appearance-none rounded-2xl border border-black/8 bg-[#f7f7f8] py-4 pl-5 pr-10 text-sm font-semibold text-[#1d1d1f] outline-none transition-all duration-200 focus:border-[#e63946]/50 focus:bg-white focus:shadow-[0_0_0_4px_rgba(230,57,70,0.08)] focus:ring-0"
+                        class="w-full appearance-none rounded-2xl border bg-[#f7f7f8] py-4 pl-5 pr-10 text-sm font-semibold text-[#1d1d1f] outline-none transition-all duration-200 focus:bg-white focus:ring-0"
+                        :class="hasMatchingRoute ? 'border-[#e63946]/55 shadow-[0_0_0_4px_rgba(230,57,70,0.08)] focus:border-[#e63946]' : 'border-black/8 focus:border-[#e63946]/50 focus:shadow-[0_0_0_4px_rgba(230,57,70,0.08)]'"
                       >
                         <option value="" disabled>Select origin city</option>
                         <option>Bangkok</option>
@@ -428,7 +450,8 @@ onBeforeUnmount(() => {
                     <div class="relative">
                       <select
                         v-model="booking.arrivingCountry"
-                        class="w-full appearance-none rounded-2xl border border-black/8 bg-[#f7f7f8] py-4 pl-5 pr-10 text-sm font-semibold text-[#1d1d1f] outline-none transition-all duration-200 focus:border-[#e63946]/50 focus:bg-white focus:shadow-[0_0_0_4px_rgba(230,57,70,0.08)] focus:ring-0"
+                        class="w-full appearance-none rounded-2xl border bg-[#f7f7f8] py-4 pl-5 pr-10 text-sm font-semibold text-[#1d1d1f] outline-none transition-all duration-200 focus:bg-white focus:ring-0"
+                        :class="hasMatchingRoute ? 'border-[#e63946]/55 shadow-[0_0_0_4px_rgba(230,57,70,0.08)] focus:border-[#e63946]' : 'border-black/8 focus:border-[#e63946]/50 focus:shadow-[0_0_0_4px_rgba(230,57,70,0.08)]'"
                       >
                         <option value="" disabled>Select destination city</option>
                         <option>Bangkok</option>
@@ -445,6 +468,13 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
                 </div>
+
+                <p
+                  v-if="searchValidationMessage"
+                  class="rounded-2xl border border-[#e63946]/20 bg-[#fff1f2] px-4 py-3 text-sm font-medium text-[#b42318]"
+                >
+                  {{ searchValidationMessage }}
+                </p>
 
                 <!-- Row 2: Dates + Passengers -->
                 <div class="grid gap-4" :class="booking.tripType === 'round-trip' ? 'md:grid-cols-3' : 'md:grid-cols-2'">

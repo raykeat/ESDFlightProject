@@ -1,6 +1,15 @@
 const express = require('express');
 const mysql   = require('mysql2');
+const cors    = require('cors');
 const app     = express();
+
+app.use(cors({
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:5174',
+  ],
+  credentials: true,
+}));
 
 app.use(express.json());
 
@@ -53,26 +62,60 @@ app.get('/health', (req, res) => {
 app.post('/records', (req, res) => {
   const { 
     passengerID, PassengerID,
+    bookedByPassengerID, BookedByPassengerID,
     flightID, FlightID,
     amount, AmountPaid, amountPaid,
     seatNumber,
     returnFlightID,
-    returnSeatNumber
+    returnSeatNumber,
+    isGuest, IsGuest,
+    guestFirstName, GuestFirstName,
+    guestLastName, GuestLastName,
+    guestPassportNumber, GuestPassportNumber
   } = req.body;
 
   const finalPassengerID = PassengerID ?? passengerID;
+  const finalBookedByPassengerID = BookedByPassengerID ?? bookedByPassengerID ?? finalPassengerID;
   const finalFlightID     = FlightID     ?? flightID;
   const finalAmountPaid   = AmountPaid   ?? amountPaid ?? amount;
+  const finalIsGuest      = Boolean(IsGuest ?? isGuest);
+  const finalGuestFirstName = GuestFirstName ?? guestFirstName ?? null;
+  const finalGuestLastName = GuestLastName ?? guestLastName ?? null;
+  const finalGuestPassportNumber = GuestPassportNumber ?? guestPassportNumber ?? null;
+
+  if (!finalFlightID || finalAmountPaid == null) {
+    return res.status(400).json({ error: 'FlightID and amount are required' });
+  }
+
+  if (!finalBookedByPassengerID) {
+    return res.status(400).json({ error: 'BookedByPassengerID is required' });
+  }
+
+  if (!finalPassengerID && !finalIsGuest) {
+    return res.status(400).json({ error: 'PassengerID is required for non-guest bookings' });
+  }
+
+  if (finalIsGuest && (!finalGuestFirstName || !finalGuestLastName || !finalGuestPassportNumber)) {
+    return res.status(400).json({ error: 'GuestFirstName, GuestLastName, and GuestPassportNumber are required for guest bookings' });
+  }
 
   pool.query(
-    'INSERT INTO booking (PassengerID, FlightID, AmountPaid, bookingstatus, seatNumber, returnFlightID, returnSeatNumber) VALUES (?, ?, ?, "Pending", ?, ?, ?)',
+    `INSERT INTO booking (
+      PassengerID, BookedByPassengerID, FlightID, AmountPaid, bookingstatus, seatNumber,
+      returnFlightID, returnSeatNumber, IsGuest, GuestFirstName, GuestLastName, GuestPassportNumber
+    ) VALUES (?, ?, ?, ?, "Pending", ?, ?, ?, ?, ?, ?, ?)`,
     [
       finalPassengerID, 
+      finalBookedByPassengerID,
       finalFlightID, 
       finalAmountPaid, 
       seatNumber        || null, 
       returnFlightID    || null, 
-      returnSeatNumber  || null
+      returnSeatNumber  || null,
+      finalIsGuest,
+      finalGuestFirstName,
+      finalGuestLastName,
+      finalGuestPassportNumber,
     ],
     (err, result) => {
       if (err) {
@@ -109,6 +152,16 @@ app.get('/records', (req, res) => {
       seatNumber AS seatNumber,
       PassengerID AS passengerID,
       PassengerID AS PassengerID,
+      BookedByPassengerID AS bookedByPassengerID,
+      BookedByPassengerID AS BookedByPassengerID,
+      IsGuest AS isGuest,
+      IsGuest AS IsGuest,
+      GuestFirstName AS guestFirstName,
+      GuestFirstName AS GuestFirstName,
+      GuestLastName AS guestLastName,
+      GuestLastName AS GuestLastName,
+      GuestPassportNumber AS guestPassportNumber,
+      GuestPassportNumber AS GuestPassportNumber,
       AmountPaid AS amount,
       AmountPaid AS amountPaid,
       AmountPaid AS AmountPaid,
@@ -156,6 +209,16 @@ app.get('/records/passenger/:passengerID', (req, res) => {
       seatNumber AS seatID,
       seatNumber AS seatNumber,
       PassengerID AS passengerID,
+      BookedByPassengerID AS bookedByPassengerID,
+      BookedByPassengerID AS BookedByPassengerID,
+      IsGuest AS isGuest,
+      IsGuest AS IsGuest,
+      GuestFirstName AS guestFirstName,
+      GuestFirstName AS GuestFirstName,
+      GuestLastName AS guestLastName,
+      GuestLastName AS GuestLastName,
+      GuestPassportNumber AS guestPassportNumber,
+      GuestPassportNumber AS GuestPassportNumber,
       AmountPaid AS amount,
       AmountPaid AS amountPaid,
       bookingstatus AS status,
@@ -163,9 +226,9 @@ app.get('/records/passenger/:passengerID', (req, res) => {
       CreatedTime AS createdAt,
       CreatedTime AS createdTime
     FROM booking
-    WHERE PassengerID = ?
+    WHERE PassengerID = ? OR BookedByPassengerID = ?
     ORDER BY CreatedTime DESC`,
-    [passengerID],
+    [passengerID, passengerID],
     (err, results) => {
       if (err) {
         console.error(err);
@@ -190,6 +253,11 @@ app.get('/records/:bookingID', (req, res) => {
       seatNumber AS seatID,
       seatNumber AS seatNumber,
       PassengerID AS passengerID,
+      BookedByPassengerID AS bookedByPassengerID,
+      IsGuest AS isGuest,
+      GuestFirstName AS guestFirstName,
+      GuestLastName AS guestLastName,
+      GuestPassportNumber AS guestPassportNumber,
       AmountPaid AS amount,
       AmountPaid AS amountPaid,
       bookingstatus AS status,
@@ -278,6 +346,38 @@ app.put('/records/:bookingID', (req, res) => {
       return res.json({
         BookingID: Number(bookingID),
         BookingStatus: status
+      });
+    }
+  );
+});
+
+app.put('/records/:bookingID/rebook', (req, res) => {
+  const { bookingID } = req.params;
+  const flightID = req.body.FlightID || req.body.flightID;
+  const seatNumber = req.body.seatNumber || req.body.SeatNumber;
+  const status = req.body.BookingStatus || req.body.bookingstatus || req.body.status || 'Confirmed';
+
+  if (!flightID || !seatNumber) {
+    return res.status(400).json({ error: 'FlightID and seatNumber are required' });
+  }
+
+  pool.query(
+    'UPDATE booking SET FlightID = ?, seatNumber = ?, bookingstatus = ? WHERE BookingID = ?',
+    [flightID, seatNumber, status, bookingID],
+    (err, result) => {
+      if (err) {
+        console.error(err);
+        return res.status(500).json({ error: err.message });
+      }
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ error: 'Booking not found' });
+      }
+
+      return res.json({
+        BookingID: Number(bookingID),
+        FlightID: Number(flightID),
+        seatNumber,
+        BookingStatus: status,
       });
     }
   );

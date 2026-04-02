@@ -337,11 +337,16 @@ def booking_confirmation_template(data: dict) -> dict:
                 "subject": subject,
                 "html": f"""
                 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;max-width:700px;margin:20px auto;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;background:#ffffff;">
-                    <div style="background:linear-gradient(135deg,#1d4ed8,#2563eb);padding:24px 28px;color:#ffffff;">
-                        <h2 style="margin:0;font-size:28px;line-height:1.2;">{heading}</h2>
-                        <p style="margin:10px 0 0;font-size:14px;opacity:0.95;">Dear {data['passenger_name']}, your payment has been received and your itinerary is confirmed.</p>
+                    <div style="background:linear-gradient(135deg,#f8fafc,#fff1f2);padding:24px 28px;border-bottom:1px solid #f1f5f9;">
+                        <div style="display:inline-flex;align-items:center;gap:8px;background:#ecfdf3;color:#15803d;border:1px solid #bbf7d0;border-radius:999px;padding:8px 14px;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">
+                            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;"></span>
+                            Confirmed
+                        </div>
+                        <h2 style="margin:16px 0 0;font-size:30px;line-height:1.2;color:#1d1d1f;">{heading}</h2>
+                        <p style="margin:10px 0 0;font-size:14px;color:#4b5563;">Dear {data['passenger_name']}, your booking has been successfully confirmed. Here are your flight details:</p>
                     </div>
                     <div style="padding:24px 28px;">
+                        <h3 style="color:#e63946;margin-top:0;">Flight Details</h3>
                         <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
                             <thead>
                                 <tr style="background:#f3f4f6;">
@@ -361,7 +366,7 @@ def booking_confirmation_template(data: dict) -> dict:
                             <tr><td style="padding:8px 0;color:#6b7280;">Return Booking ID</td><td style="padding:8px 0;text-align:right;font-weight:700;color:#111827;">{data.get('return_booking_id') or '-'}</td></tr>
                             <tr><td style="padding:8px 0;color:#6b7280;">Total Amount Paid</td><td style="padding:8px 0;text-align:right;font-weight:700;color:#111827;">${_format_money(data.get('amount_paid', '0'))}</td></tr>
                         </table>
-                        <p style="margin:18px 0 0;color:#4b5563;font-size:13px;">Thank you for flying with us.</p>
+                        <p style="margin:18px 0 0;color:#4b5563;font-size:13px;">Thank you for flying with us!</p>
                     </div>
                 </div>
                 """,
@@ -375,6 +380,146 @@ def booking_confirmation_template(data: dict) -> dict:
 # =============================================================================
 # EMAIL TEMPLATE — Scenario 2 (Flight cancellation)
 # =============================================================================
+
+def booking_confirmation_template_v2(data: dict) -> dict:
+    """Scenario 1: Booking confirmed after successful payment."""
+    flights = _normalize_flights(data)
+    is_round_trip = len(flights) > 1
+    heading = "Your Round-Trip Booking is Confirmed!" if is_round_trip else "Your Booking is Confirmed!"
+    subject = "Booking Confirmed - Round Trip" if is_round_trip else f"Booking Confirmed - {flights[0].get('flight_number', 'N/A')}"
+    passengers = data.get("passengers") or []
+    passenger_count = int(data.get("group_size") or len(passengers) or 1)
+
+    flight_sections_html = []
+    rows_text = []
+    for flight in flights:
+        leg_label = "Departure Flight" if flight.get("leg") == "outbound" else "Return Flight"
+        flight_sections_html.append(f"""
+            <div style="border:1px solid #e5e7eb;border-radius:18px;background:#ffffff;overflow:hidden;margin-bottom:14px;">
+                <div style="background:linear-gradient(135deg,#fff7f8 0%,#ffffff 100%);padding:16px 18px;border-bottom:1px solid #eef2f7;">
+                    <div style="font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#e63946;">{leg_label}</div>
+                    <div style="margin-top:10px;font-size:24px;font-weight:700;color:#1d1d1f;">{flight.get('origin', 'Origin')} &rarr; {flight.get('destination', 'Destination')}</div>
+                    <div style="margin-top:6px;font-size:14px;color:#6b7280;">Flight {flight.get('flight_number', 'N/A')} &nbsp;&middot;&nbsp; {flight.get('departure_date', 'N/A')}</div>
+                </div>
+                <table style="width:100%;border-collapse:collapse;">
+                    <tr>
+                        <td style="padding:12px 18px;color:#6b7280;font-size:13px;">Seat(s)</td>
+                        <td style="padding:12px 18px;text-align:right;color:#111827;font-size:13px;font-weight:700;">{flight.get('seat_number', 'N/A')}</td>
+                    </tr>
+                    <tr style="background:#fafbfc;">
+                        <td style="padding:12px 18px;color:#6b7280;font-size:13px;">Booking Reference</td>
+                        <td style="padding:12px 18px;text-align:right;color:#111827;font-size:13px;font-weight:700;">{flight.get('booking_id') or data.get('booking_id', 'N/A')}</td>
+                    </tr>
+                </table>
+            </div>
+        """)
+        rows_text.append(
+            f"{leg_label}: {flight.get('flight_number', 'N/A')} | "
+            f"{flight.get('origin', 'Origin')} -> {flight.get('destination', 'Destination')} | "
+            f"Date: {flight.get('departure_date', 'N/A')} | Seat: {flight.get('seat_number', 'N/A')}"
+        )
+
+    passenger_rows_html = []
+    passenger_rows_text = []
+    for index, passenger in enumerate(passengers, start=1):
+        passenger_name = passenger.get("name") or f"Passenger {index}"
+        seat_number = passenger.get("seatNumber") or "TBC"
+        booking_ref = passenger.get("bookingID") or "-"
+        passenger_rows_html.append(f"""
+            <tr style="background:{'#ffffff' if index % 2 == 1 else '#fafbfc'};">
+                <td style="padding:12px 14px;border-bottom:1px solid #edf1f5;color:#111827;font-weight:600;">{passenger_name}</td>
+                <td style="padding:12px 14px;border-bottom:1px solid #edf1f5;color:#4b5563;">{seat_number}</td>
+                <td style="padding:12px 14px;border-bottom:1px solid #edf1f5;color:#4b5563;text-align:right;">#{booking_ref}</td>
+            </tr>
+        """)
+        passenger_rows_text.append(f"{passenger_name} | Seat {seat_number} | Booking #{booking_ref}")
+
+    if not passenger_rows_html:
+        passenger_rows_html.append(f"""
+            <tr>
+                <td style="padding:12px 14px;border-bottom:1px solid #edf1f5;color:#111827;font-weight:600;">{data.get('passenger_name', 'Passenger')}</td>
+                <td style="padding:12px 14px;border-bottom:1px solid #edf1f5;color:#4b5563;">{data.get('seat_number', 'N/A')}</td>
+                <td style="padding:12px 14px;border-bottom:1px solid #edf1f5;color:#4b5563;text-align:right;">#{data.get('booking_id', 'N/A')}</td>
+            </tr>
+        """)
+        passenger_rows_text.append(
+            f"{data.get('passenger_name', 'Passenger')} | Seat {data.get('seat_number', 'N/A')} | Booking #{data.get('booking_id', 'N/A')}"
+        )
+
+    return {
+        "subject": subject,
+        "html": f"""
+        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;max-width:760px;margin:20px auto;border:1px solid #e8edf4;border-radius:24px;overflow:hidden;background:#ffffff;">
+            <div style="background:radial-gradient(circle at top right,rgba(230,57,70,0.12),transparent 30%),linear-gradient(135deg,#fff8f8 0%,#ffffff 100%);padding:28px 30px;border-bottom:1px solid #f1f5f9;">
+                <div style="font-size:12px;font-weight:800;letter-spacing:0.16em;text-transform:uppercase;color:#e63946;">Blaze Air Booking Confirmation</div>
+                <div style="display:inline-flex;align-items:center;gap:8px;background:#ecfdf3;color:#15803d;border:1px solid #bbf7d0;border-radius:999px;padding:8px 14px;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin-top:14px;">
+                    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;"></span>
+                    Confirmed
+                </div>
+                <h2 style="margin:16px 0 0;font-size:34px;line-height:1.15;color:#1d1d1f;">{heading}</h2>
+                <p style="margin:12px 0 0;font-size:15px;line-height:1.7;color:#4b5563;">Dear {data.get('passenger_name', 'Passenger')}, your booking has been successfully confirmed. We have included your itinerary, traveller details, and payment summary below for easy reference.</p>
+            </div>
+            <div style="padding:28px 30px;">
+                <div style="margin-bottom:22px;padding:18px 20px;border:1px solid #edf1f5;border-radius:18px;background:#fcfcfd;">
+                    <table style="width:100%;border-collapse:collapse;">
+                        <tr>
+                            <td style="padding:0 0 10px;color:#6b7280;font-size:13px;">Lead passenger</td>
+                            <td style="padding:0 0 10px;text-align:right;color:#111827;font-size:13px;font-weight:700;">{data.get('passenger_name', 'Passenger')}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:10px 0;color:#6b7280;font-size:13px;border-top:1px solid #edf1f5;">Passengers</td>
+                            <td style="padding:10px 0;text-align:right;color:#111827;font-size:13px;font-weight:700;border-top:1px solid #edf1f5;">{passenger_count}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:10px 0;color:#6b7280;font-size:13px;border-top:1px solid #edf1f5;">Booking ID</td>
+                            <td style="padding:10px 0;text-align:right;color:#111827;font-size:13px;font-weight:700;border-top:1px solid #edf1f5;">#{data.get('booking_id', 'N/A')}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:10px 0;color:#6b7280;font-size:13px;border-top:1px solid #edf1f5;">Return Booking ID</td>
+                            <td style="padding:10px 0;text-align:right;color:#111827;font-size:13px;font-weight:700;border-top:1px solid #edf1f5;">{('#' + str(data.get('return_booking_id'))) if data.get('return_booking_id') else '-'}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:10px 0 0;color:#6b7280;font-size:13px;border-top:1px solid #edf1f5;">Total Paid</td>
+                            <td style="padding:10px 0 0;text-align:right;color:#e63946;font-size:24px;font-weight:800;border-top:1px solid #edf1f5;">${_format_money(data.get('amount_paid', '0'))}</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <h3 style="color:#e63946;margin:0 0 12px;font-size:18px;">Itinerary</h3>
+                {''.join(flight_sections_html)}
+
+                <h3 style="color:#e63946;margin:24px 0 12px;font-size:18px;">Passenger Details</h3>
+                <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;background:#ffffff;">
+                    <thead>
+                        <tr style="background:#f7f7f8;">
+                            <th style="text-align:left;padding:12px 14px;font-size:12px;letter-spacing:0.05em;text-transform:uppercase;color:#6b7280;">Passenger</th>
+                            <th style="text-align:left;padding:12px 14px;font-size:12px;letter-spacing:0.05em;text-transform:uppercase;color:#6b7280;">Seat</th>
+                            <th style="text-align:right;padding:12px 14px;font-size:12px;letter-spacing:0.05em;text-transform:uppercase;color:#6b7280;">Booking Ref</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {''.join(passenger_rows_html)}
+                    </tbody>
+                </table>
+
+                <div style="margin-top:22px;padding:18px 20px;border-radius:18px;background:#fff8f8;border:1px solid #fde2e5;color:#4b5563;font-size:13px;line-height:1.7;">
+                    Please keep this email for your records. You can review your itinerary, seats, and any future booking updates from your Blaze Air booking pages.
+                </div>
+
+                <p style="margin:20px 0 0;color:#4b5563;font-size:13px;">Thank you for flying with us.</p>
+            </div>
+        </div>
+        """,
+        "text": (
+            f"Booking Confirmed! Booking ID: {data.get('booking_id', 'N/A')}. "
+            + f"Passenger count: {passenger_count}. "
+            + " | ".join(rows_text)
+            + (" | Travellers: " + " ; ".join(passenger_rows_text) if passenger_rows_text else "")
+            + f". Total Amount Paid: ${_format_money(data.get('amount_paid', '0'))}."
+        ),
+    }
+
+booking_confirmation_template = booking_confirmation_template_v2
 
 def flight_cancelled_alt_template(data: dict) -> dict:
     """
