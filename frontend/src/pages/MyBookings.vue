@@ -193,13 +193,28 @@ function getOfferSnapshot(booking) {
   }
 }
 
-function getRefundForBooking(bookingLike) {
+function getPaymentsForBooking(bookingLike) {
   const bookingIDs = Array.isArray(bookingLike?.bookingIDs)
     ? bookingLike.bookingIDs.map(Number)
     : [Number(bookingLike?.bookingID ?? bookingLike)]
 
-  return payments.value.find(
-    (payment) => bookingIDs.includes(Number(payment.bookingID)) && String(payment.status).toLowerCase() === 'refunded'
+  return payments.value.filter((payment) => bookingIDs.includes(Number(payment.bookingID)))
+}
+
+function getPrimaryPaymentForBooking(bookingLike) {
+  const matchingPayments = getPaymentsForBooking(bookingLike)
+  if (!matchingPayments.length) return null
+
+  return matchingPayments.reduce((latest, payment) => {
+    const latestTime = new Date(latest.refundedAt || latest.chargedAt || latest.createdAt || 0).getTime()
+    const paymentTime = new Date(payment.refundedAt || payment.chargedAt || payment.createdAt || 0).getTime()
+    return paymentTime >= latestTime ? payment : latest
+  })
+}
+
+function getRefundForBooking(bookingLike) {
+  return getPaymentsForBooking(bookingLike).find(
+    (payment) => String(payment.status).toLowerCase() === 'refunded'
   ) || null
 }
 
@@ -218,6 +233,36 @@ function getRefundSnapshot(booking) {
     flight,
     amount: formatMoney(refund.amount),
     refundID: refund.refundID || 'Processing',
+    stripeChargeID: refund.stripeChargeID || 'Unavailable',
+    stripeSessionID: refund.stripeSessionID || 'Unavailable',
+  }
+}
+
+function getRejectedRefundSnapshot(booking) {
+  const offer = getOfferForBooking(booking)
+  if (!offer || offer.status !== 'Rejected') return null
+
+  const refundedPayment = getRefundForBooking(booking)
+  const primaryPayment = getPrimaryPaymentForBooking(booking)
+  const bookingStatus = normalizedStatus(booking.status)
+
+  let refundStatus = 'Refund Processing'
+  if (refundedPayment) {
+    refundStatus = 'Refund Successful'
+  } else if (bookingStatus === 'Refund Failed') {
+    refundStatus = 'Refund Failed'
+  }
+
+  return {
+    offer,
+    flight: flightsById.value[Number(offer.origFlightID)] || getFlight(booking),
+    refundPayment: refundedPayment,
+    primaryPayment,
+    refundStatus,
+    amount: formatMoney(refundedPayment?.amount ?? primaryPayment?.amount ?? booking.amount),
+    refundID: refundedPayment?.refundID || 'Pending',
+    stripeChargeID: refundedPayment?.stripeChargeID || primaryPayment?.stripeChargeID || 'Unavailable',
+    stripeSessionID: refundedPayment?.stripeSessionID || primaryPayment?.stripeSessionID || 'Unavailable',
   }
 }
 
@@ -659,6 +704,7 @@ async function resumePendingBooking(booking) {
 function getOutcomeSummary(booking) {
   const offer = getOfferForBooking(booking)
   const refund = getRefundForBooking(booking)
+  const rejectedRefund = getRejectedRefundSnapshot(booking)
 
   if (offer && offer.status === 'Pending Response') {
     return {
@@ -678,6 +724,33 @@ function getOutcomeSummary(booking) {
         : 'This trip was successfully rebooked onto a replacement flight.',
       actionLabel: 'View Rebooking',
       action: () => viewOffer(offer),
+    }
+  }
+
+  if (rejectedRefund) {
+    if (rejectedRefund.refundStatus === 'Refund Successful') {
+      return {
+        title: 'Rebooking rejected and refund completed',
+        detail: `Refunded $${rejectedRefund.amount}. Refund reference ${rejectedRefund.refundID}.`,
+        actionLabel: 'Book Again',
+        action: () => router.push('/'),
+      }
+    }
+
+    if (rejectedRefund.refundStatus === 'Refund Failed') {
+      return {
+        title: 'Rebooking rejected but refund failed',
+        detail: `Stripe charge ${rejectedRefund.stripeChargeID} could not be refunded automatically.`,
+        actionLabel: 'Book Again',
+        action: () => router.push('/'),
+      }
+    }
+
+    return {
+      title: 'Rebooking rejected and refund is processing',
+      detail: `We are processing the refund back to your original payment method for Stripe charge ${rejectedRefund.stripeChargeID}.`,
+      actionLabel: 'Book Again',
+      action: () => router.push('/'),
     }
   }
 
@@ -715,6 +788,8 @@ function getOutcomeSummary(booking) {
 }
 
 function paymentStatusLabel(booking) {
+  const rejectedRefund = getRejectedRefundSnapshot(booking)
+  if (rejectedRefund) return rejectedRefund.refundStatus
   if (hasRefund(booking)) return 'Refunded'
   if (hasPendingOffer(booking)) return 'Awaiting your review'
   if (hasAcceptedOffer(booking)) return 'Rebooked and confirmed'
@@ -1065,6 +1140,80 @@ function routeArtStyle(booking) {
                 </div>
 
                 <div
+                  v-else-if="getRejectedRefundSnapshot(booking)"
+                  class="mt-4 rounded-2xl border border-[#f8d6df] bg-gradient-to-r from-[#fff7f8] to-white p-4"
+                >
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <p class="text-sm font-bold uppercase tracking-[0.18em] text-[#e63946]">Rebooking Rejected</p>
+                    <p
+                      class="rounded-full border px-3 py-1 text-sm font-semibold"
+                      :class="getRejectedRefundSnapshot(booking).refundStatus === 'Refund Successful'
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : getRejectedRefundSnapshot(booking).refundStatus === 'Refund Failed'
+                          ? 'border-amber-200 bg-amber-50 text-amber-700'
+                          : 'border-[#f8d6df] bg-white text-[#d72660]'"
+                    >
+                      {{ getRejectedRefundSnapshot(booking).refundStatus }}
+                    </p>
+                  </div>
+
+                  <p class="mt-3 text-xl font-semibold text-[#132238]">
+                    You rejected the replacement flight. Refund details for this disrupted booking are shown below.
+                  </p>
+
+                  <div class="mt-4 grid gap-3 md:grid-cols-2">
+                    <div class="rounded-2xl border border-[#f8d6df] bg-white p-4">
+                      <p class="text-[10px] font-bold uppercase tracking-[0.16em] text-[#e63946]">Cancelled Flight</p>
+                      <p class="mt-2 text-2xl font-bold text-[#132238]">{{ getRejectedRefundSnapshot(booking).flight?.FlightNumber || 'N/A' }}</p>
+                      <p class="mt-2 text-sm text-[#6e6e73]">
+                        {{ formatFlightDateNumeric(getRejectedRefundSnapshot(booking).flight) }} · {{ getRejectedRefundSnapshot(booking).flight?.DepartureTime || '--' }}
+                      </p>
+                    </div>
+
+                    <div class="rounded-2xl border border-[#f8d6df] bg-white p-4">
+                      <p class="text-[10px] font-bold uppercase tracking-[0.16em] text-[#e63946]">Refund Status</p>
+                      <p
+                        class="mt-2 text-3xl font-bold leading-none"
+                        :class="getRejectedRefundSnapshot(booking).refundStatus === 'Refund Successful'
+                          ? 'text-emerald-600'
+                          : getRejectedRefundSnapshot(booking).refundStatus === 'Refund Failed'
+                            ? 'text-amber-600'
+                            : 'text-[#e63946]'"
+                      >
+                        {{ getRejectedRefundSnapshot(booking).refundStatus }}
+                      </p>
+                      <p class="mt-3 text-sm text-[#6e6e73]">Amount ${{ getRejectedRefundSnapshot(booking).amount }}</p>
+                    </div>
+                  </div>
+
+                  <div class="mt-4 grid gap-3 md:grid-cols-2">
+                    <div class="rounded-2xl border border-black/8 bg-white p-4">
+                      <p class="text-[10px] font-bold uppercase tracking-[0.16em] text-[#8a96a8]">Stripe Charge ID</p>
+                      <p class="mt-2 break-all text-sm font-semibold text-[#132238]">{{ getRejectedRefundSnapshot(booking).stripeChargeID }}</p>
+                    </div>
+
+                    <div class="rounded-2xl border border-black/8 bg-white p-4">
+                      <p class="text-[10px] font-bold uppercase tracking-[0.16em] text-[#8a96a8]">Refund Reference</p>
+                      <p class="mt-2 break-all text-sm font-semibold text-[#132238]">{{ getRejectedRefundSnapshot(booking).refundID }}</p>
+                    </div>
+                  </div>
+
+                  <p class="mt-4 text-sm text-[#6e6e73]">
+                    <template v-if="getRejectedRefundSnapshot(booking).refundStatus === 'Refund Successful'">
+                      Your refund has been processed to the original payment method. Please allow 3-5 business days for the funds to appear in your account.
+                    </template>
+                    <template v-else-if="getRejectedRefundSnapshot(booking).refundStatus === 'Refund Failed'">
+                      The refund could not be completed automatically. Please use the Stripe charge ID above when contacting support.
+                    </template>
+                    <template v-else>
+                      Your refund is still being processed. We will update this card once the payment provider confirms the final result.
+                    </template>
+                  </p>
+
+                  <p class="mt-5 text-sm text-[#6e6e73]">Booked on {{ formatBookedDate(booking.createdAt) }}</p>
+                </div>
+
+                <div
                   v-else-if="getRefundSnapshot(booking)"
                   class="mt-4 rounded-2xl border border-[#f8d6df] bg-gradient-to-r from-[#fff7f8] to-white p-4"
                 >
@@ -1264,6 +1413,20 @@ function routeArtStyle(booking) {
                     <p class="text-[10px] font-bold uppercase tracking-[0.14em] text-[#d72660]">Refund status</p>
                     <p class="mt-2 text-sm leading-6 text-[#6b5563]">
                       Refund reference {{ getRefundSnapshot(booking).refundID }} for ${{ getRefundSnapshot(booking).amount }} was processed to the original payment method.
+                    </p>
+                  </div>
+
+                  <div
+                    v-else-if="getRejectedRefundSnapshot(booking)"
+                    class="mt-4 rounded-xl border border-[#f8d6df] bg-[#fff8fa] p-4"
+                  >
+                    <p class="text-[10px] font-bold uppercase tracking-[0.14em] text-[#d72660]">Refund status</p>
+                    <p class="mt-2 text-sm leading-6 text-[#6b5563]">
+                      {{ getRejectedRefundSnapshot(booking).refundStatus }}.
+                      Stripe charge ID {{ getRejectedRefundSnapshot(booking).stripeChargeID }}.
+                      <template v-if="getRejectedRefundSnapshot(booking).refundStatus === 'Refund Successful'">
+                        Refund reference {{ getRejectedRefundSnapshot(booking).refundID }}.
+                      </template>
                     </p>
                   </div>
                 </div>

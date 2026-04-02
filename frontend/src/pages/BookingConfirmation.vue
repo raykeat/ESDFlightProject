@@ -201,9 +201,39 @@ const wasCancelled = route.query.cancelled === 'true'
 </script>
 
 <template>
-  <main class="min-h-screen bg-[#f5f5f7] py-20">
-    <div class="mx-auto max-w-[760px] px-6 md:px-10">
-      <div class="mb-8 grid gap-4 rounded-[28px] bg-white px-6 py-6 shadow-[0_20px_48px_rgba(0,0,0,0.08)] md:grid-cols-3">
+  <main class="relative min-h-screen overflow-hidden bg-[#f5f5f7] pb-20">
+    <div class="pointer-events-none absolute inset-0">
+      <div class="absolute inset-0 bg-[radial-gradient(circle_at_90%_12%,rgba(230,57,70,0.16),transparent_32%),radial-gradient(circle_at_8%_78%,rgba(29,29,31,0.05),transparent_30%)]"></div>
+    </div>
+    <div class="relative mx-auto max-w-[1400px] px-6 py-10">
+      <div class="mx-auto max-w-[760px] px-6 md:px-10">
+      <div class="mb-10 rounded-[34px] border border-white/80 bg-white/80 px-8 py-8 shadow-[0_24px_60px_rgba(15,23,42,0.08)] backdrop-blur-2xl">
+        <div class="grid grid-cols-3 items-start gap-6">
+          <div class="flex items-start gap-3">
+            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-sm font-bold text-white shadow-[0_10px_18px_rgba(16,185,129,0.18)]">✓</div>
+            <div class="min-w-0 flex-1 pt-1">
+              <div class="h-1 rounded-full bg-emerald-500"></div>
+              <p class="mt-3 text-sm font-semibold text-emerald-600">Fill in your info</p>
+            </div>
+          </div>
+          <div class="flex items-start gap-3">
+            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-sm font-bold text-white shadow-[0_10px_18px_rgba(16,185,129,0.18)]">✓</div>
+            <div class="min-w-0 flex-1 pt-1">
+              <div class="h-1 rounded-full bg-emerald-500"></div>
+              <p class="mt-3 text-sm font-semibold text-emerald-600">Choose your seat</p>
+            </div>
+          </div>
+          <div class="flex items-start gap-3">
+            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#e63946] text-sm font-bold text-white shadow-[0_10px_18px_rgba(230,57,70,0.22)]">3</div>
+            <div class="min-w-0 flex-1 pt-1">
+              <div class="h-1 rounded-full bg-[#e63946]"></div>
+              <p class="mt-3 text-sm font-semibold text-[#e63946]">Finalise your payment</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hidden mb-8 grid gap-4 rounded-[28px] bg-white px-6 py-6 shadow-[0_20px_48px_rgba(0,0,0,0.08)] md:grid-cols-3">
         <div class="flex items-center gap-3">
           <div class="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500 text-white">✓</div>
           <p class="text-sm font-semibold text-emerald-600">Fill in your info</p>
@@ -345,6 +375,7 @@ const wasCancelled = route.query.cancelled === 'true'
           You'll be redirected to Stripe's secure payment page. We never handle your card details directly.
         </p>
       </div>
+    </div>
     </div>
   </main>
 </template>
