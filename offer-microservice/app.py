@@ -13,6 +13,11 @@ CORS(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({"status": "OK", "service": "offer-service"}), 200
+
 # ==========================================
 # LOGGING HELPER
 # ==========================================
@@ -123,13 +128,6 @@ def check_and_expire(offer):
             db.session.commit()
             log_event("offer_auto_expired", offerID=offer.offerID)
     return offer
-
-# ==========================================
-# GET /health
-# ==========================================
-@app.route('/health', methods=['GET'])
-def health():
-    return jsonify({'status': 'OK', 'service': 'offer-service'}), 200
 
 # ==========================================
 # GET /offer

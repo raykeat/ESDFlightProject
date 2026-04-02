@@ -17,6 +17,11 @@ CORS(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({"status": "OK", "service": "payment-service"}), 200
+
 def log_event(event, **kwargs):
     logger.info(json.dumps({
         "event":     event,
