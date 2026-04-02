@@ -60,6 +60,7 @@ def process_path_a_message(msg):
         raise RuntimeError(f"Passenger lookup failed: {passenger_response.status_code} {passenger_response.text}")
     passenger_data = get_json_or_none(passenger_response) or {}
     passenger_email = passenger_data.get("Email", "")
+    passenger_name = f"{passenger_data.get('FirstName', '')} {passenger_data.get('LastName', '')}".strip() or "Valued Passenger"
 
     offer_response = requests.post(
         f"{OFFER_SERVICE_URL}/offers",
@@ -94,6 +95,7 @@ def process_path_a_message(msg):
         "email": passenger_email,
         "data": {
             "PassengerID": passenger_id,
+            "PassengerName": passenger_name,
             "BookingID": booking_id,
             "OfferID": offer_id,
             "OriginalFlight": original_flight_number,
@@ -101,7 +103,7 @@ def process_path_a_message(msg):
             "NewDate": new_flight_date,
             "NewDepartureTime": new_departure_time,
             "GroupSize": group_size,
-            "AcceptRejectLink": f"https://blazeair.com/offer?offerID={offer_id}",
+            "AcceptRejectLink": f"http://localhost:5173/rebooking-offer?offerID={offer_id}",
         },
     }
 

@@ -58,6 +58,7 @@ def process_path_b_message(msg):
         raise RuntimeError(f"Passenger lookup failed: {passenger_response.status_code} {passenger_response.text}")
     passenger_data = get_json_or_none(passenger_response) or {}
     passenger_email = passenger_data.get("Email", "")
+    passenger_name = f"{passenger_data.get('FirstName', '')} {passenger_data.get('LastName', '')}".strip() or "Valued Passenger"
 
     refund_response = requests.post(
         f"{PAYMENT_SERVICE_URL}/payment/refund",
@@ -107,6 +108,7 @@ def process_path_b_message(msg):
         "email": passenger_email,
         "data": {
             "PassengerID":    passenger_id,
+            "PassengerName":  passenger_name,
             "BookingID":      booking_id,
             "OriginalFlight": original_flight_number,
             "CancelledDate":  cancelled_date,
