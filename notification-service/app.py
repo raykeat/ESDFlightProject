@@ -382,16 +382,6 @@ def flight_cancelled_alt_template(data: dict) -> dict:
     RabbitMQ routing key: flight.cancelled.alt
     Payload structure: { "type": "...", "email": "...", "data": { ... } }
     """
-<<<<<<< Updated upstream
-    inner        = data.get("data", data)
-    orig_flight  = inner.get("OriginalFlight", "N/A")
-    new_flight   = inner.get("NewFlight", "N/A")
-    new_date     = inner.get("NewDate", "N/A")
-    new_dep_time = inner.get("NewDepartureTime", "N/A")
-    seat_number  = inner.get("SeatNumber", "N/A")
-    accept_link  = inner.get("AcceptRejectLink", "#")
-    booking_id   = inner.get("BookingID", "N/A")
-=======
     inner          = data.get("data", data)
     orig_flight    = inner.get("OriginalFlight", "N/A")
     new_flight     = inner.get("NewFlight", "N/A")
@@ -403,7 +393,6 @@ def flight_cancelled_alt_template(data: dict) -> dict:
     accept_link    = inner.get("AcceptRejectLink", "#")
     booking_id     = inner.get("BookingID", "N/A")
     passenger_name = inner.get("PassengerName", "Valued Passenger")
->>>>>>> Stashed changes
 
     return {
         "subject": "Your Flight Has Been Cancelled - Rebooking Offer Inside",
@@ -450,13 +439,6 @@ def flight_cancelled_noalt_template(data: dict) -> dict:
     RabbitMQ routing key: flight.cancelled.noalt
     Payload structure: { "type": "...", "email": "...", "data": { ... } }
     """
-<<<<<<< Updated upstream
-    inner        = data.get("data", data)
-    orig_flight  = inner.get("OriginalFlight", "N/A")
-    cancelled_dt = inner.get("CancelledDate", "N/A")
-    refund_amt   = inner.get("RefundAmount", 0)
-    booking_id   = inner.get("BookingID", "N/A")
-=======
     inner          = data.get("data", data)
     orig_flight    = inner.get("OriginalFlight", "N/A")
     cancelled_dt   = inner.get("CancelledDate", "N/A")
@@ -465,7 +447,6 @@ def flight_cancelled_noalt_template(data: dict) -> dict:
     discount       = inner.get("DiscountAmount", 0)
     booking_id     = inner.get("BookingID", "N/A")
     passenger_name = inner.get("PassengerName", "Valued Passenger")
->>>>>>> Stashed changes
 
     return {
         "subject": "Your Flight Has Been Cancelled - Full Refund Issued",
@@ -655,16 +636,6 @@ def generate_rebooking_offer_pdf(data: dict) -> bytes:
     s_link   = ps("rb_link",   fontSize=10, textColor=colors.HexColor("#1d4ed8"), alignment=1, spaceBefore=6)
     s_foot   = ps("rb_foot",   fontSize=9,  textColor=colors.HexColor("#9ca3af"), alignment=1)
 
-<<<<<<< Updated upstream
-    orig_flight  = str(inner.get("OriginalFlight", "N/A"))
-    new_flight   = str(inner.get("NewFlight", "N/A"))
-    new_date     = str(inner.get("NewDate", "N/A"))
-    new_dep_time = str(inner.get("NewDepartureTime", "N/A"))
-    seat_number  = str(inner.get("SeatNumber", "N/A"))
-    accept_link  = str(inner.get("AcceptRejectLink", "N/A"))
-    booking_id   = str(inner.get("BookingID", "N/A"))
-    THIRD        = INNER_W / 3
-=======
     orig_flight    = str(inner.get("OriginalFlight", "N/A"))
     new_flight     = str(inner.get("NewFlight", "N/A"))
     new_date       = str(inner.get("NewDate", "N/A"))
@@ -676,7 +647,6 @@ def generate_rebooking_offer_pdf(data: dict) -> bytes:
     booking_id     = str(inner.get("BookingID", "N/A"))
     passenger_name = str(inner.get("PassengerName", "Valued Passenger"))
     THIRD          = INNER_W / 3
->>>>>>> Stashed changes
 
     story = []
 
@@ -789,12 +759,6 @@ def generate_refund_noalt_pdf(data: dict) -> bytes:
     s_refund = ps("rn_refund", fontSize=11, fontName="Helvetica-Bold", textColor=colors.HexColor("#059669"), alignment=2)
     s_foot   = ps("rn_foot",   fontSize=9,  textColor=colors.HexColor("#9ca3af"), alignment=1)
 
-<<<<<<< Updated upstream
-    orig_flight  = str(inner.get("OriginalFlight", "N/A"))
-    cancelled_dt = str(inner.get("CancelledDate", "N/A"))
-    refund_amt   = inner.get("RefundAmount", 0)
-    booking_id   = str(inner.get("BookingID", "N/A"))
-=======
     orig_flight    = str(inner.get("OriginalFlight", "N/A"))
     cancelled_dt   = str(inner.get("CancelledDate", "N/A"))
     refund_amt     = inner.get("RefundAmount", 0)
@@ -802,7 +766,6 @@ def generate_refund_noalt_pdf(data: dict) -> bytes:
     discount       = inner.get("DiscountAmount", 0)
     booking_id     = str(inner.get("BookingID", "N/A"))
     passenger_name = str(inner.get("PassengerName", "Valued Passenger"))
->>>>>>> Stashed changes
 
     story = []
 
