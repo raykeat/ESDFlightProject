@@ -225,21 +225,9 @@ async function loadFlightDetail() {
     }
 
     if (!flight.value) {
-      try {
-        const compositeResponse = await axios.get(`http://localhost:5011/flight-search/${flightID.value}`)
-        flight.value = compositeResponse.data.flight
-        seats.value = Array.isArray(compositeResponse.data.seats) ? compositeResponse.data.seats : []
-      } catch (compositeError) {
-        console.warn('Flight search composite unavailable, falling back to direct services.', compositeError)
-
-        const [flightResponse, seatsResponse] = await Promise.all([
-          axios.get(`http://localhost:3003/flight/${flightID.value}`),
-          axios.get(`http://localhost:5003/seats/${flightID.value}`).catch(() => ({ data: [] })),
-        ])
-
-        flight.value = flightResponse.data
-        seats.value = Array.isArray(seatsResponse.data) ? seatsResponse.data : []
-      }
+      const compositeResponse = await axios.get(`http://localhost:5011/flight-search/${flightID.value}`)
+      flight.value = compositeResponse.data.flight
+      seats.value = Array.isArray(compositeResponse.data.seats) ? compositeResponse.data.seats : []
     }
 
     selectedSeats.value = [...initialAssignments.value]

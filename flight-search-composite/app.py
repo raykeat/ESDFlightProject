@@ -10,6 +10,7 @@ Orchestrates:
 3. Return merged response to Passenger UI
 
 Endpoints:
+    GET /flight-search/available   — Search flights with seat-capacity filtering
     GET /flight-search/<flightID>  — Fetch flight + seats for selected flight
     GET /health                    — Health check
 """
@@ -19,7 +20,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 # ==========================================
@@ -50,6 +51,111 @@ def health():
         "status":  "UP",
         "service": "flight-search-composite",
     }), 200
+
+
+def get_available_seat_count(flight_id):
+    try:
+        res = requests.get(
+            f"{SEATS_SERVICE_URL}/seats/{flight_id}",
+            timeout=10,
+        )
+        if not res.ok:
+            logger.warning(
+                "Seats Service returned %d for flightID=%s while counting seats",
+                res.status_code, flight_id
+            )
+            return 0
+
+        seats = res.json()
+        if not isinstance(seats, list):
+            return 0
+
+        return sum(
+            1 for seat in seats
+            if str(seat.get("Status", "")).strip().lower() == "available"
+        )
+    except requests.exceptions.RequestException as e:
+        logger.warning("Seats Service unreachable for flightID=%s: %s", flight_id, e)
+        return 0
+
+
+@app.get("/flight-search/available")
+def search_available_flights():
+    origin = request.args.get("origin")
+    dest = request.args.get("dest")
+    date_from = request.args.get("dateFrom")
+    date_to = request.args.get("dateTo")
+    passengers_raw = request.args.get("passengers", "1")
+
+    try:
+        passengers = int(passengers_raw)
+        if passengers < 1:
+            raise ValueError
+    except ValueError:
+        return jsonify({
+            "error": "Bad Request",
+            "code": "INVALID_PASSENGER_COUNT",
+            "message": "passengers must be a positive integer",
+        }), 400
+
+    logger.info(
+        "flight availability search origin=%s dest=%s dateFrom=%s dateTo=%s passengers=%d",
+        origin, dest, date_from, date_to, passengers
+    )
+
+    try:
+        flights_res = requests.get(
+            f"{FLIGHT_SERVICE_URL}/flight/available",
+            params={
+                "origin": origin,
+                "dest": dest,
+                "dateFrom": date_from,
+                "dateTo": date_to,
+            },
+            timeout=10,
+        )
+    except requests.exceptions.RequestException as e:
+        return jsonify({
+            "error": "Service Unavailable",
+            "code": "FLIGHT_SERVICE_UNREACHABLE",
+            "message": f"Could not reach Flight Service: {e}",
+        }), 503
+
+    if not flights_res.ok:
+        return jsonify({
+            "error": "Service Error",
+            "code": "FLIGHT_SERVICE_ERROR",
+            "message": f"Flight Service returned {flights_res.status_code}",
+        }), 502
+
+    flights = flights_res.json()
+    if not isinstance(flights, list):
+        return jsonify([]), 200
+
+    filtered_flights = []
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {
+            executor.submit(get_available_seat_count, flight.get("FlightID")): flight
+            for flight in flights if flight.get("FlightID") is not None
+        }
+
+        for future in as_completed(futures):
+            flight = futures[future]
+            available_seats = future.result()
+            if available_seats >= passengers:
+                merged = dict(flight)
+                merged["AvailableSeats"] = available_seats
+                filtered_flights.append(merged)
+
+    filtered_flights.sort(
+        key=lambda item: (
+            item.get("FlightDate", ""),
+            item.get("DepartureTime", ""),
+            item.get("FlightID", 0),
+        )
+    )
+
+    return jsonify(filtered_flights), 200
 
 
 # ==========================================

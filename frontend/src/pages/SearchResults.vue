@@ -106,8 +106,14 @@ function addDays(dateText, days) {
 }
 
 async function fetchFlights(origin, dest, dateFrom, dateTo) {
-  const response = await axios.get('http://localhost:3003/flight/available', {
-    params: { origin, dest, dateFrom, dateTo },
+  const response = await axios.get('http://localhost:5011/flight-search/available', {
+    params: {
+      origin,
+      dest,
+      dateFrom,
+      dateTo,
+      passengers: searchParams.value.passengers,
+    },
   })
   return response.data.map(formatFlight).sort((a, b) => new Date(a.departureTime) - new Date(b.departureTime))
 }
