@@ -163,7 +163,7 @@ def _detail_row_table(rows: list, col_l: float, col_r: float) -> Table:
         ("RIGHTPADDING",   (0, 0), (-1, -1), 10),
         ("TOPPADDING",     (0, 0), (-1, -1), 8),
         ("BOTTOMPADDING",  (0, 0), (-1, -1), 8),
-        ("VALIGN",         (0, 0), (-1, -1), "MIDDLE"),
+        ("VALIGN",         (0, 0), (-1, -1), "TOP"),
     ]))
     return t
 
@@ -812,19 +812,27 @@ def generate_refund_noalt_pdf(data: dict) -> bytes:
 def _pdf_table(data_rows: list, col_widths=None) -> Table:
     """Helper — builds a styled two-column label/value table."""
     col_widths = col_widths or [5*cm, 11*cm]
-    t = Table(data_rows, colWidths=col_widths)
+    base = getSampleStyleSheet()
+    s_lbl = ParagraphStyle("pt_lbl", parent=base["Normal"], fontSize=10,
+                           textColor=colors.HexColor("#6b7280"))
+    s_val = ParagraphStyle("pt_val", parent=base["Normal"], fontSize=10,
+                           fontName="Helvetica-Bold", textColor=colors.HexColor("#111827"))
+    wrapped = []
+    for row in data_rows:
+        if len(row) == 2:
+            wrapped.append([Paragraph(str(row[0]), s_lbl), Paragraph(str(row[1]), s_val)])
+        else:
+            wrapped.append(row)
+    t = Table(wrapped, colWidths=col_widths)
     t.setStyle(TableStyle([
         ("BACKGROUND",     (0, 0), (-1, -1), colors.white),
-        ("TEXTCOLOR",      (0, 0), (0, -1), colors.HexColor("#6b7280")),
-        ("TEXTCOLOR",      (1, 0), (1, -1), colors.HexColor("#111827")),
-        ("FONTNAME",       (1, 0), (1, -1), "Helvetica-Bold"),
-        ("FONTSIZE",       (0, 0), (-1, -1), 10),
         ("ROWBACKGROUNDS", (0, 0), (-1, -1), [colors.HexColor("#f9fafb"), colors.white]),
         ("GRID",           (0, 0), (-1, -1), 0.5, colors.HexColor("#e5e7eb")),
         ("LEFTPADDING",    (0, 0), (-1, -1), 10),
         ("RIGHTPADDING",   (0, 0), (-1, -1), 10),
         ("TOPPADDING",     (0, 0), (-1, -1), 7),
         ("BOTTOMPADDING",  (0, 0), (-1, -1), 7),
+        ("VALIGN",         (0, 0), (-1, -1), "TOP"),
     ]))
     return t
 
@@ -888,31 +896,37 @@ def generate_voucher_bundle_pdf(data: dict) -> bytes:
 
     story.append(Paragraph("Voucher Details", s["teal"]))
 
-    header = ["#", "Type", "Code", "Value", "Miles", "Expiry", "Provider"]
+    base     = getSampleStyleSheet()
+    s_hdr    = ParagraphStyle("bt_hdr",  parent=base["Normal"], fontSize=9,
+                              fontName="Helvetica-Bold", textColor=colors.HexColor("#6b7280"))
+    s_cell   = ParagraphStyle("bt_cell", parent=base["Normal"], fontSize=9,
+                              textColor=colors.HexColor("#111827"))
+
+    COL_WIDTHS = [0.8*cm, 2.5*cm, 3.5*cm, 2*cm, 2*cm, 2.5*cm, 2.7*cm]  # total = 16cm
+
+    header = [Paragraph(h, s_hdr) for h in ["#", "Type", "Code", "Value", "Miles", "Expiry", "Provider"]]
     rows   = [header]
     for i, v in enumerate(vouchers, start=1):
         rows.append([
-            str(i),
-            str(v.get("voucherType") or v.get("type") or "VOUCHER"),
-            str(v.get("voucherCode") or v.get("code") or "N/A"),
-            str(v.get("voucherValue", "N/A")),
-            str(v.get("milesRedeemed", "N/A")),
-            str(v.get("expiryDate", "N/A")),
-            str(v.get("providerName") or "-"),
+            Paragraph(str(i), s_cell),
+            Paragraph(str(v.get("voucherType") or v.get("type") or "VOUCHER"), s_cell),
+            Paragraph(str(v.get("voucherCode") or v.get("code") or "N/A"), s_cell),
+            Paragraph(str(v.get("voucherValue", "N/A")), s_cell),
+            Paragraph(str(v.get("milesRedeemed", "N/A")), s_cell),
+            Paragraph(str(v.get("expiryDate", "N/A")), s_cell),
+            Paragraph(str(v.get("providerName") or "-"), s_cell),
         ])
 
-    bundle_table = Table(rows, colWidths=[1*cm, 2.5*cm, 3*cm, 2*cm, 2*cm, 2.5*cm, 3*cm])
+    bundle_table = Table(rows, colWidths=COL_WIDTHS)
     bundle_table.setStyle(TableStyle([
         ("BACKGROUND",    (0, 0), (-1, 0),  colors.HexColor("#f3f4f6")),
-        ("TEXTCOLOR",     (0, 0), (-1, 0),  colors.HexColor("#6b7280")),
-        ("FONTNAME",      (0, 0), (-1, 0),  "Helvetica-Bold"),
-        ("FONTSIZE",      (0, 0), (-1, -1), 9),
         ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.HexColor("#f9fafb"), colors.white]),
         ("GRID",          (0, 0), (-1, -1), 0.5, colors.HexColor("#e5e7eb")),
         ("LEFTPADDING",   (0, 0), (-1, -1), 6),
         ("RIGHTPADDING",  (0, 0), (-1, -1), 6),
         ("TOPPADDING",    (0, 0), (-1, -1), 6),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("VALIGN",        (0, 0), (-1, -1), "TOP"),
     ]))
     story.append(bundle_table)
 

@@ -104,7 +104,7 @@ def process_path_a_message(msg):
             "NewDate":          new_flight_date,
             "NewDepartureTime": new_departure_time,
             "SeatNumber":       assigned_seat_number,
-            "AcceptRejectLink": f"https://blazeair.com/offer?offerID={offer_id}",
+            "AcceptRejectLink": f"http://localhost:5173/offer?offerID={offer_id}",
         },
     }
 
