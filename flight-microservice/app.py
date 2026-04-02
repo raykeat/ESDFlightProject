@@ -20,6 +20,11 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({"status": "OK", "service": "flight-service"}), 200
+
 # Flight Model
 class Flight(db.Model):
     __tablename__ = 'flights'

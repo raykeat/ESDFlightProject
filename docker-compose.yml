@@ -14,6 +14,12 @@ services:
     depends_on:
       record-db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     networks:
       - app-network
 
@@ -53,7 +59,22 @@ services:
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
       - PASSENGER_SERVICE_URL=https://personal-4whagfbm.outsystemscloud.com/Passenger_Srv/rest/PassengerAPI/  # OutSystems
     depends_on:
-      - record-service
+      record-service:
+        condition: service_healthy
+      flight-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       - app-network
 
@@ -72,6 +93,12 @@ services:
     depends_on:
       flight-db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3000/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - app-network
 
@@ -110,6 +137,12 @@ services:
     depends_on:
       seats-db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5003/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     networks:
       - app-network
 
@@ -151,6 +184,12 @@ services:
     depends_on:
       payment-db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     networks:
       - app-network
 
@@ -189,6 +228,12 @@ services:
     depends_on:
       offer-db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     networks:
       - app-network
 
@@ -225,8 +270,18 @@ services:
       - PORT=5010
       - FLASK_ENV=development
     depends_on:
-      - flight-service
-      - seats-service
+      flight-service:
+        condition: service_healthy
+      seats-service:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5010/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     networks:
       - app-network
 
@@ -243,8 +298,16 @@ services:
       - PORT=5011
       - FLASK_ENV=development
     depends_on:
-      - flight-service
-      - seats-service
+      flight-service:
+        condition: service_healthy
+      seats-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5011/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     networks:
       - app-network
 
@@ -273,6 +336,14 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3004/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     networks:
       - app-network
 
@@ -365,11 +436,13 @@ services:
       kafka:
         condition: service_healthy
       flight-service:
-        condition: service_started
+        condition: service_healthy
       seats-service:
-        condition: service_started
+        condition: service_healthy
       record-service:
-        condition: service_started
+        condition: service_healthy
+      offer-service:
+        condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
     deploy:
@@ -392,9 +465,15 @@ services:
       kafka:
         condition: service_healthy
       seats-service:
-        condition: service_started
+        condition: service_healthy
       offer-service:
-        condition: service_started
+        condition: service_healthy
+      record-service:
+        condition: service_healthy
+      flight-service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
     deploy:
@@ -416,9 +495,13 @@ services:
       kafka:
         condition: service_healthy
       payment-service:
-        condition: service_started
+        condition: service_healthy
       record-service:
-        condition: service_started
+        condition: service_healthy
+      flight-service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
     deploy:
