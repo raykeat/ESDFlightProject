@@ -23,6 +23,7 @@ const NOTIFICATION_SERVICE_URL = (process.env.NOTIFICATION_SERVICE_URL || 'http:
 const SEATS_SERVICE_URL = (process.env.SEATS_SERVICE_URL || 'http://seats-service:5003').replace(/\/$/, '');
 const RECORD_SERVICE_URL = (process.env.RECORD_SERVICE_URL || 'http://record-service:3000').replace(/\/$/, '');
 const OFFER_SERVICE_URL = (process.env.OFFER_SERVICE_URL || 'http://offer-service:5000').replace(/\/$/, '');
+const MILES_EARN_SERVICE_URL = (process.env.MILES_EARN_SERVICE_URL || 'http://miles-earn-service:5009').replace(/\/$/, '');
 const RABBITMQ_URL             = process.env.RABBITMQ_URL            || 'amqp://guest:guest@rabbitmq:5672';
 
 // ==========================================
@@ -559,6 +560,21 @@ app.post('/api/bookings/finalize', async (req, res) => {
         message: 'Payment not completed yet',
         payment,
       });
+    }
+
+    // Award miles based on payment amount (non-blocking)
+    try {
+      await axios.post(`${MILES_EARN_SERVICE_URL}/miles/earn`, {
+        passengerID: payment.passengerID,
+        flightCost: payment.amount,
+        bookingReference: `BK-${String(bookingID).padStart(5, '0')}`,
+        currency: 'SGD',
+        milesPerDollar: 1,
+      });
+      console.log(`✓ Awarded miles for booking ${bookingID}`);
+    } catch (milesError) {
+      console.warn(`⚠ Failed to award miles for booking ${bookingID}:`, milesError.response?.data || milesError.message);
+      // Do not block booking confirmation if miles earning fails
     }
 
     const outboundBookingIDs = parseIdList(groupBookingIDs);
