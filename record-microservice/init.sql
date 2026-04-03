@@ -18,6 +18,9 @@ CREATE TABLE IF NOT EXISTS booking (
     inFlightPerksVoucherID INT NULL,
     inFlightPerksVoucherCode VARCHAR(50) NULL,
     inFlightPerksAppliedAt TIMESTAMP NULL,
+    milesAwarded INT NULL,
+    milesTransactionID INT NULL,
+    milesAwardedAt TIMESTAMP NULL,
     
     CreatedTime TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

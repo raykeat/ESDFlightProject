@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS flights (
     FlightDuration TIME NOT NULL,
     ArrivalTime    TIME NOT NULL,
     Price          DECIMAL(10,2) NOT NULL,
-    Status         ENUM('available', 'unavailable', 'cancelled') NOT NULL DEFAULT 'available',
+    Status         ENUM('available', 'unavailable', 'cancelled', 'landed') NOT NULL DEFAULT 'available',
     CancellationReason VARCHAR(255) NULL,
     Meals          VARCHAR(50) NOT NULL,
     Beverages      VARCHAR(50) NOT NULL,

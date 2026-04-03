@@ -53,6 +53,9 @@ function ensureBookingSchema() {
     'ALTER TABLE booking ADD COLUMN inFlightPerksVoucherID INT NULL',
     'ALTER TABLE booking ADD COLUMN inFlightPerksVoucherCode VARCHAR(50) NULL',
     'ALTER TABLE booking ADD COLUMN inFlightPerksAppliedAt TIMESTAMP NULL',
+    'ALTER TABLE booking ADD COLUMN milesAwarded INT NULL',
+    'ALTER TABLE booking ADD COLUMN milesTransactionID INT NULL',
+    'ALTER TABLE booking ADD COLUMN milesAwardedAt TIMESTAMP NULL',
   ];
 
   addColumnStatements.forEach((statement) => {
@@ -283,6 +286,9 @@ app.get('/records', (req, res) => {
       inFlightPerksVoucherID,
       inFlightPerksVoucherCode,
       inFlightPerksAppliedAt,
+      milesAwarded,
+      milesTransactionID,
+      milesAwardedAt,
       CreatedTime AS createdAt,
       CreatedTime AS createdTime,
       CreatedTime AS CreatedTime
@@ -341,6 +347,9 @@ app.get('/records/passenger/:passengerID', (req, res) => {
       inFlightPerksVoucherID,
       inFlightPerksVoucherCode,
       inFlightPerksAppliedAt,
+      milesAwarded,
+      milesTransactionID,
+      milesAwardedAt,
       CreatedTime AS createdAt,
       CreatedTime AS createdTime
     FROM booking
@@ -383,6 +392,9 @@ app.get('/records/:bookingID', (req, res) => {
       inFlightPerksVoucherID,
       inFlightPerksVoucherCode,
       inFlightPerksAppliedAt,
+      milesAwarded,
+      milesTransactionID,
+      milesAwardedAt,
       CreatedTime AS createdAt,
       CreatedTime AS createdTime
     FROM booking
@@ -500,6 +512,66 @@ app.put('/records/:bookingID/rebook', (req, res) => {
         seatNumber,
         BookingStatus: status,
       });
+    }
+  );
+});
+
+// ==========================================
+// PUT /records/:bookingID/miles-awarded
+// Mark a booking as having miles awarded (idempotent)
+// ==========================================
+app.put('/records/:bookingID/miles-awarded', (req, res) => {
+  const { bookingID } = req.params;
+  const { milesAwarded, transactionID } = req.body;
+
+  if (!Number.isFinite(Number(milesAwarded)) || Number(milesAwarded) <= 0) {
+    return res.status(400).json({ error: 'milesAwarded must be a positive number' });
+  }
+
+  pool.query(
+    `UPDATE booking
+     SET milesAwarded = ?, milesTransactionID = ?, milesAwardedAt = NOW()
+     WHERE BookingID = ? AND milesAwardedAt IS NULL`,
+    [Number(milesAwarded), transactionID || null, bookingID],
+    (err, result) => {
+      if (err) {
+        console.error(err);
+        return res.status(500).json({ error: err.message });
+      }
+
+      if (result.affectedRows > 0) {
+        return res.json({
+          success: true,
+          bookingID: Number(bookingID),
+          milesAwarded: Number(milesAwarded),
+          transactionID: transactionID || null,
+          alreadyAwarded: false,
+        });
+      }
+
+      pool.query(
+        'SELECT BookingID, milesAwarded, milesTransactionID, milesAwardedAt FROM booking WHERE BookingID = ?',
+        [bookingID],
+        (selectErr, rows) => {
+          if (selectErr) {
+            console.error(selectErr);
+            return res.status(500).json({ error: selectErr.message });
+          }
+
+          if (!rows.length) {
+            return res.status(404).json({ error: 'Booking not found' });
+          }
+
+          return res.json({
+            success: true,
+            bookingID: Number(bookingID),
+            milesAwarded: rows[0].milesAwarded,
+            transactionID: rows[0].milesTransactionID,
+            milesAwardedAt: rows[0].milesAwardedAt,
+            alreadyAwarded: true,
+          });
+        }
+      );
     }
   );
 });

@@ -10,6 +10,9 @@ const loading         = ref(true)
 const error           = ref(null)
 const filterStatus    = ref('Available')
 const searchQuery     = ref('')
+const landingStatusByFlightId = ref({})
+const showLandModal   = ref(false)
+const selectedLandingFlight = ref(null)
 const showCancelModal = ref(false)
 const selectedFlight  = ref(null)
 const cancelReason    = ref('')
@@ -21,7 +24,7 @@ const affectedPassengersCount = ref(0)
 const countingAffectedPassengers = ref(false)
 const affectedPassengersByFlightId = ref({})
 
-const STATUS_FILTERS = ['Available', 'Unavailable', 'Cancelled']
+const STATUS_FILTERS = ['Available', 'Unavailable', 'Landed', 'Cancelled']
 
 onMounted(async () => {
   const session = sessionStorage.getItem('staffSession')
@@ -138,6 +141,16 @@ function openCancelModal(flight) {
   loadAffectedPassengers(flight)
 }
 
+function openLandModal(flight) {
+  selectedLandingFlight.value = flight
+  showLandModal.value = true
+}
+
+function closeLandModal() {
+  showLandModal.value = false
+  selectedLandingFlight.value = null
+}
+
 function closeCancelModal() {
   showCancelModal.value = false
   selectedFlight.value  = null
@@ -189,6 +202,39 @@ async function confirmCancellation() {
   }
 }
 
+async function markFlightAsLanded(flight) {
+  const flightID = flight?.FlightID
+  if (!flightID) return
+
+  landingStatusByFlightId.value = {
+    ...landingStatusByFlightId.value,
+    [flightID]: true,
+  }
+
+  try {
+    await axios.put(`http://localhost:3003/flight/${flightID}/landed`)
+    const idx = flights.value.findIndex(f => f.FlightID === flightID)
+    if (idx !== -1) flights.value[idx].Status = 'landed'
+  } catch (err) {
+    const message = err.response?.data?.message || 'Failed to mark flight as landed.'
+    window.alert(message)
+  } finally {
+    landingStatusByFlightId.value = {
+      ...landingStatusByFlightId.value,
+      [flightID]: false,
+    }
+  }
+}
+
+async function confirmMarkFlightAsLanded() {
+  const flight = selectedLandingFlight.value
+  if (!flight?.FlightID) return
+
+  showLandModal.value = false
+  await markFlightAsLanded(flight)
+  selectedLandingFlight.value = null
+}
+
 function logout() {
   sessionStorage.removeItem('staffSession')
   router.push('/staff/login')
@@ -198,6 +244,7 @@ function statusStyle(status) {
   const s = status?.toLowerCase()
   if (s === 'available')   return { bg: '#f0fdf4', color: '#15803d', border: '#bbf7d0', dot: '#22c55e' }
   if (s === 'unavailable') return { bg: '#fefce8', color: '#a16207', border: '#fef08a', dot: '#eab308' }
+  if (s === 'landed')      return { bg: '#ecfeff', color: '#0e7490', border: '#a5f3fc', dot: '#06b6d4' }
   if (s === 'cancelled')   return { bg: '#fef2f2', color: '#dc2626', border: '#fecaca', dot: '#ef4444' }
   return                          { bg: '#f9fafb', color: '#6b7280', border: '#e5e7eb', dot: '#9ca3af' }
 }
@@ -256,7 +303,7 @@ function statusStyle(status) {
         </div>
         <!-- Stat pills -->
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
-          <div v-for="s in [{label:'Total', key:'All', color:'#60a5fa'}, {label:'Available', key:'Available', color:'#4ade80'}, {label:'Cancelled', key:'Cancelled', color:'#f87171'}]" :key="s.key"
+          <div v-for="s in [{label:'Total', key:'All', color:'#60a5fa'}, {label:'Available', key:'Available', color:'#4ade80'}, {label:'Landed', key:'Landed', color:'#22d3ee'}, {label:'Cancelled', key:'Cancelled', color:'#f87171'}]" :key="s.key"
             style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:10px 16px; text-align:center; min-width:70px;">
             <p :style="{fontSize:'20px', fontWeight:'800', color:s.color, margin:'0 0 2px', lineHeight:'1'}">{{ countByStatus(s.key) }}</p>
             <p style="font-size:10px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:rgba(255,255,255,0.4); margin:0;">{{ s.label }}</p>
@@ -421,10 +468,24 @@ function statusStyle(status) {
           </div>
 
           <!-- Action -->
-          <div>
-            <button v-if="flight.Status?.toLowerCase() !== 'cancelled'"
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button
+              v-if="flight.Status?.toLowerCase() !== 'cancelled' && flight.Status?.toLowerCase() !== 'landed'"
+              @click="openLandModal(flight)"
+              :disabled="Boolean(landingStatusByFlightId[flight.FlightID])"
+              style="display:flex; align-items:center; gap:5px; background:white; color:#0e7490; border:1.5px solid #a5f3fc; border-radius:8px; padding:6px 10px; font-size:12px; font-weight:600; cursor:pointer; transition:all 0.2s; letter-spacing:0.02em;"
+              onmouseover="this.style.background='#ecfeff'; this.style.borderColor='#22d3ee'"
+              onmouseout="this.style.background='white'; this.style.borderColor='#a5f3fc'"
+            >
+              <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path d="M20 6L9 17l-5-5"/>
+              </svg>
+              {{ landingStatusByFlightId[flight.FlightID] ? 'Updating...' : 'Mark Landed' }}
+            </button>
+
+            <button v-if="flight.Status?.toLowerCase() !== 'cancelled' && flight.Status?.toLowerCase() !== 'landed'"
               @click="openCancelModal(flight)"
-              style="display:flex; align-items:center; gap:5px; background:white; color:#dc2626; border:1.5px solid #fecaca; border-radius:8px; padding:6px 14px; font-size:12px; font-weight:600; cursor:pointer; transition:all 0.2s; letter-spacing:0.02em;"
+              style="display:flex; align-items:center; gap:5px; background:white; color:#dc2626; border:1.5px solid #fecaca; border-radius:8px; padding:6px 10px; font-size:12px; font-weight:600; cursor:pointer; transition:all 0.2s; letter-spacing:0.02em;"
               onmouseover="this.style.background='#fef2f2'; this.style.borderColor='#ef4444'"
               onmouseout="this.style.background='white'; this.style.borderColor='#fecaca'"
             >
@@ -433,7 +494,9 @@ function statusStyle(status) {
               </svg>
               Cancel
             </button>
-            <span v-else style="font-size:11px; color:#cbd5e1; font-style:italic;">—</span>
+
+            <span v-if="flight.Status?.toLowerCase() === 'landed'" style="font-size:11px; color:#0891b2; font-style:italic;">Landed</span>
+            <span v-else-if="flight.Status?.toLowerCase() === 'cancelled'" style="font-size:11px; color:#cbd5e1; font-style:italic;">—</span>
           </div>
         </div>
 
@@ -444,6 +507,69 @@ function statusStyle(status) {
           </p>
         </div>
 
+      </div>
+    </div>
+
+    <!-- ── Land Confirmation Modal ───────────────────────── -->
+    <div v-if="showLandModal"
+      style="position:fixed; inset:0; background:rgba(15,23,42,0.65); backdrop-filter:blur(6px); display:flex; align-items:center; justify-content:center; z-index:100; padding:24px;"
+      @click.self="closeLandModal">
+
+      <div style="background:white; border-radius:24px; max-width:520px; width:100%; box-shadow:0 40px 80px rgba(0,0,0,0.3); overflow:hidden;">
+        <div style="height:4px; background:linear-gradient(90deg,#0e7490,#06b6d4);"></div>
+
+        <div style="padding:28px 32px 24px;">
+          <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px;">
+            <div style="display:flex; align-items:center; gap:14px;">
+              <div style="width:48px; height:48px; background:#ecfeff; border:1px solid #a5f3fc; border-radius:14px; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                <svg width="22" height="22" fill="none" stroke="#0e7490" stroke-width="2" viewBox="0 0 24 24">
+                  <path d="M20 6L9 17l-5-5"/>
+                </svg>
+              </div>
+              <div>
+                <h2 style="font-size:19px; font-weight:700; color:#0f172a; margin:0 0 3px;">Mark flight as landed?</h2>
+                <p style="font-size:13px; color:#64748b; margin:0; line-height:1.5;">Passengers will see this flight as completed in My Bookings and miles will be released for eligible bookings.</p>
+              </div>
+            </div>
+            <button @click="closeLandModal"
+              style="width:32px; height:32px; background:#f1f5f9; border:none; border-radius:8px; display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; transition:background 0.15s;"
+              onmouseover="this.style.background='#e2e8f0'"
+              onmouseout="this.style.background='#f1f5f9'"
+            >
+              <svg width="13" height="13" fill="none" stroke="#64748b" stroke-width="2.5" viewBox="0 0 24 24">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+
+          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:16px; padding:18px 20px; margin-bottom:16px;">
+            <p style="font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#64748b; margin:0 0 10px;">Flight details</p>
+            <p style="font-size:18px; font-weight:800; color:#0f172a; margin:0 0 6px;">{{ selectedLandingFlight?.FlightNumber || '—' }}</p>
+            <p style="font-size:13px; color:#475569; margin:0;">{{ selectedLandingFlight?.Origin }} to {{ selectedLandingFlight?.Destination }}</p>
+            <p style="font-size:12px; color:#64748b; margin:8px 0 0;">{{ selectedLandingFlight?.Date }} · {{ selectedLandingFlight?.DepartureTime }} - {{ selectedLandingFlight?.ArrivalTime }}</p>
+          </div>
+
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:12px; padding:12px 14px;">
+            <div>
+              <p style="font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#166534; margin:0 0 4px;">Confirmation</p>
+              <p style="font-size:13px; color:#14532d; margin:0;">This action can be reversed only by updating the flight status again.</p>
+            </div>
+            <div style="font-size:24px; font-weight:800; color:#16a34a; line-height:1;">Landed</div>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; border-top:1px solid #f1f5f9;">
+          <button @click="closeLandModal"
+            style="padding:16px; border:none; background:white; font-size:14px; font-weight:600; color:#64748b; cursor:pointer; transition:all 0.2s; border-radius:0 0 0 24px; letter-spacing:0.02em;"
+            onmouseover="this.style.background='#f8fafc'; this.style.color='#0f172a'"
+            onmouseout="this.style.background='white'; this.style.color='#64748b'"
+          >Keep Scheduled</button>
+          <button @click="confirmMarkFlightAsLanded"
+            style="padding:16px; border:none; background:#0e7490; font-size:14px; font-weight:700; color:white; cursor:pointer; transition:background 0.2s; border-radius:0 0 24px 0; letter-spacing:0.02em;"
+            onmouseover="this.style.background='#155e75'"
+            onmouseout="this.style.background='#0e7490'"
+          >Mark Landed</button>
+        </div>
       </div>
     </div>
 

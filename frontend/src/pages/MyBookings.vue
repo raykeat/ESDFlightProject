@@ -735,6 +735,29 @@ function statusLabel(booking) {
   return status || 'Booking'
 }
 
+function getFlightStatus(booking) {
+  return normalizedStatus(getFlight(booking)?.Status || getFlight(booking)?.status)
+}
+
+function flightCompletionLabel(booking) {
+  const status = getFlightStatus(booking).toLowerCase()
+  if (status === 'landed') return 'Completed'
+  if (status === 'cancelled') return 'Cancelled'
+  if (!status) return 'Scheduled'
+  return status.charAt(0).toUpperCase() + status.slice(1)
+}
+
+function flightCompletionBadgeClass(booking) {
+  const status = getFlightStatus(booking).toLowerCase()
+  if (status === 'landed') return 'text-emerald-700'
+  if (status === 'cancelled') return 'text-rose-700'
+  return 'text-[#132238]'
+}
+
+function isFlightCompleted(booking) {
+  return getFlightStatus(booking).toLowerCase() === 'landed'
+}
+
 function statusBadgeClass(booking) {
   if (hasPendingOffer(booking)) return 'border-[#f8d6df] bg-[#fff5f7] text-[#d72660]'
   if (hasAcceptedOffer(booking)) return 'border-[#f4d6a6] bg-[#fff7e8] text-[#9a6200]'
@@ -1185,8 +1208,9 @@ function routeArtStyle(booking) {
                     </div>
 
                     <div>
-                      <p class="text-[11px] font-bold uppercase tracking-[0.12em] text-[#8a96a8]">Departure Status</p>
-                      <p class="mt-2 text-sm font-semibold text-[#132238]">{{ normalizedStatus(booking.status) || 'Confirmed' }}</p>
+                      <p class="text-[11px] font-bold uppercase tracking-[0.12em] text-[#8a96a8]">Flight Status</p>
+                      <p class="mt-2 text-sm font-semibold" :class="flightCompletionBadgeClass(booking)">{{ flightCompletionLabel(booking) }}</p>
+                      <p v-if="isFlightCompleted(booking)" class="mt-1 text-xs font-medium text-emerald-600">This flight has been completed.</p>
                     </div>
                   </div>
                 </div>
