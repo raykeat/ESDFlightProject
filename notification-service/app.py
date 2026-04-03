@@ -296,6 +296,38 @@ def generate_booking_pdf(data: dict) -> bytes:
     receipt_rows.append([Paragraph("Status",      s_lbl), Paragraph("Confirmed", s_val)])
 
     story.append(_detail_row_table(receipt_rows, COL_L, COL_R))
+
+    passengers = data.get("passengers") or []
+    if len(passengers) > 1:
+        story.append(Spacer(1, 0.3 * cm))
+        story.append(Paragraph("Passenger Details", s_sec))
+        s_p_hdr = ps("s_p_hdr", fontSize=9, fontName="Helvetica-Bold", textColor=colors.HexColor("#6b7280"), alignment=1)
+        s_p_val = ps("s_p_val", fontSize=9, textColor=colors.HexColor("#111827"), alignment=1)
+        pax_header = [
+            Paragraph("Passenger", s_p_hdr),
+            Paragraph("Seat", s_p_hdr),
+            Paragraph("Booking Ref", s_p_hdr),
+        ]
+        pax_rows = [pax_header]
+        for pax in passengers:
+            pax_rows.append([
+                Paragraph(str(pax.get("name") or "Passenger"), s_p_val),
+                Paragraph(str(pax.get("seatNumber") or "N/A"), s_p_val),
+                Paragraph(f"#{pax.get('bookingID', '-')}", s_p_val),
+            ])
+        pax_table = Table(pax_rows, colWidths=[INNER_W * 0.50, INNER_W * 0.22, INNER_W * 0.28])
+        pax_table.setStyle(TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, 0),  colors.HexColor("#f3f4f6")),
+            ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.HexColor("#f9fafb"), colors.white]),
+            ("GRID",          (0, 0), (-1, -1), 0.5, BORDER),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 8),
+            ("TOPPADDING",    (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        story.append(pax_table)
+
     story.append(Spacer(1, 0.4 * cm))
     story.append(HRFlowable(width=PAGE_W, thickness=0.5, color=BORDER))
     story.append(Paragraph("Thank you for flying with BlazeAir. Please keep this document for your records.", s_foot))
@@ -538,6 +570,31 @@ def flight_cancelled_alt_template(data: dict) -> dict:
     accept_link    = inner.get("AcceptRejectLink", "#")
     booking_id     = inner.get("BookingID", "N/A")
     passenger_name = inner.get("PassengerName", "Valued Passenger")
+    group_size     = int(inner.get("GroupSize") or 1)
+    is_group       = group_size > 1
+
+    group_row_html = (
+        f'<tr><td style="padding:10px 12px;color:#6b7280;">Passengers in Group</td>'
+        f'<td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{group_size}</td></tr>'
+    ) if is_group else ""
+    group_seat_row_html = (
+        f'<tr><td style="padding:10px 12px;color:#6b7280;">Seats</td>'
+        f'<td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">To be assigned — seats kept together</td></tr>'
+    ) if is_group else (
+        f'<tr><td style="padding:10px 12px;color:#6b7280;">Seat Number</td>'
+        f'<td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{seat_number}</td></tr>'
+    )
+    group_intro = (
+        f"Dear {passenger_name}, your group booking of {group_size} passengers has been affected. "
+        "We have found an alternative flight that accommodates your entire group at no extra charge."
+    ) if is_group else (
+        f"Dear {passenger_name}, we have found an alternative flight for you at no extra charge."
+    )
+    group_refund_note = (
+        "If you reject, a full refund will be issued for all passengers in your group."
+    ) if is_group else (
+        "If you reject, you will receive a full refund for your original booking."
+    )
 
     return {
         "subject": "Your Flight Has Been Cancelled - Rebooking Offer Inside",
@@ -545,20 +602,21 @@ def flight_cancelled_alt_template(data: dict) -> dict:
         <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;max-width:700px;margin:20px auto;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;background:#ffffff;">
             <div style="background:#b45309;padding:24px 28px;color:#ffffff;">
                 <h2 style="margin:0;font-size:28px;line-height:1.2;">Your Flight Has Been Cancelled</h2>
-                <p style="margin:10px 0 0;font-size:14px;opacity:0.95;">Dear {passenger_name}, we have found an alternative flight for you at no extra charge.</p>
+                <p style="margin:10px 0 0;font-size:14px;opacity:0.95;">{group_intro}</p>
             </div>
             <div style="padding:24px 28px;">
                 <h3 style="color:#dc2626;margin-top:0;">Cancelled Flight</h3>
                 <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:20px;">
                     <tr><td style="padding:10px 12px;color:#6b7280;">Flight Number</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{orig_flight}</td></tr>
                     <tr><td style="padding:10px 12px;color:#6b7280;">Booking ID</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{booking_id}</td></tr>
+                    {group_row_html}
                 </table>
                 <h3 style="color:#1d4ed8;">Proposed Alternative Flight</h3>
                 <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:20px;">
                     <tr><td style="padding:10px 12px;color:#6b7280;">Flight Number</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{new_flight}</td></tr>
                     <tr><td style="padding:10px 12px;color:#6b7280;">Date</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{new_date}</td></tr>
                     <tr><td style="padding:10px 12px;color:#6b7280;">Departure Time</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{new_dep_time}</td></tr>
-                    <tr><td style="padding:10px 12px;color:#6b7280;">Seat Number</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{seat_number}</td></tr>
+                    {group_seat_row_html}
                     <tr><td style="padding:10px 12px;color:#6b7280;">Fare Difference</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#059669;">None - covered by airline</td></tr>
                 </table>
                 <p style="margin-bottom:16px;color:#374151;">Please respond to this offer within 24 hours:</p>
@@ -566,14 +624,16 @@ def flight_cancelled_alt_template(data: dict) -> dict:
                     <a href="{accept_link}&decision=accept" style="display:inline-block;background:#1d4ed8;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;margin-right:12px;">Accept Rebooking</a>
                     <a href="{accept_link}&decision=reject" style="display:inline-block;background:#dc2626;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;">Reject and Refund</a>
                 </div>
-                <p style="margin-top:16px;color:#6b7280;font-size:12px;">If you reject, you will receive a full refund for your original booking.</p>
+                <p style="margin-top:16px;color:#6b7280;font-size:12px;">{group_refund_note}</p>
             </div>
         </div>
         """,
         "text": (
             f"Your flight {orig_flight} has been cancelled. "
-            f"Alternative: {new_flight} on {new_date} at {new_dep_time} (Seat: {seat_number}) at no extra charge. "
-            f"Accept or reject: {accept_link}"
+            + (f"Group booking: {group_size} passengers. " if is_group else "")
+            + f"Alternative: {new_flight} on {new_date} at {new_dep_time} at no extra charge. "
+            + (f"Seats will be kept together. " if is_group else f"Seat: {seat_number}. ")
+            + f"Accept or reject: {accept_link}"
         ),
     }
 
@@ -584,14 +644,38 @@ def flight_cancelled_noalt_template(data: dict) -> dict:
     RabbitMQ routing key: flight.cancelled.noalt
     Payload structure: { "type": "...", "email": "...", "data": { ... } }
     """
-    inner          = data.get("data", data)
-    orig_flight    = inner.get("OriginalFlight", "N/A")
-    cancelled_dt   = inner.get("CancelledDate", "N/A")
-    refund_amt     = inner.get("RefundAmount", 0)
-    coupon_code    = inner.get("CouponCode", "N/A")
-    discount       = inner.get("DiscountAmount", 0)
-    booking_id     = inner.get("BookingID", "N/A")
-    passenger_name = inner.get("PassengerName", "Valued Passenger")
+    inner           = data.get("data", data)
+    orig_flight     = inner.get("OriginalFlight", "N/A")
+    cancelled_dt    = inner.get("CancelledDate", "N/A")
+    refund_amt      = inner.get("RefundAmount", 0)
+    coupon_code     = inner.get("CouponCode", "N/A")
+    discount        = inner.get("DiscountAmount", 0)
+    booking_id      = inner.get("BookingID", "N/A")
+    passenger_name  = inner.get("PassengerName", "Valued Passenger")
+    passenger_names = inner.get("PassengerNames") or [passenger_name]
+    is_group        = len(passenger_names) > 1
+
+    if is_group:
+        names_list_html = "".join(
+            f'<li style="margin:2px 0;color:#111827;">{name}</li>'
+            for name in passenger_names
+        )
+        passengers_block_html = (
+            f'<tr><td style="padding:10px 12px;color:#6b7280;vertical-align:top;">Passengers</td>'
+            f'<td style="padding:10px 12px;text-align:right;font-weight:700;">'
+            f'<ul style="margin:0;padding:0;list-style:none;">{names_list_html}</ul>'
+            f'</td></tr>'
+        )
+        intro_text = (
+            f"Dear {passenger_name}, we sincerely apologise. Your group booking of "
+            f"{len(passenger_names)} passengers has been affected. No alternative flight is "
+            "available and a full refund has been issued for all passengers."
+        )
+        refund_note = "The refund covers all passengers in your group. Allow 5 to 7 business days."
+    else:
+        passengers_block_html = ""
+        intro_text = f"Dear {passenger_name}, we sincerely apologise. No alternative flight is available and a full refund has been issued."
+        refund_note = "Allow 5 to 7 business days."
 
     return {
         "subject": "Your Flight Has Been Cancelled - Full Refund Issued",
@@ -599,7 +683,7 @@ def flight_cancelled_noalt_template(data: dict) -> dict:
         <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;max-width:700px;margin:20px auto;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;background:#ffffff;">
             <div style="background:#dc2626;padding:24px 28px;color:#ffffff;">
                 <h2 style="margin:0;font-size:28px;line-height:1.2;">Your Flight Has Been Cancelled</h2>
-                <p style="margin:10px 0 0;font-size:14px;opacity:0.95;">Dear {passenger_name}, we sincerely apologise. No alternative flight is available and a full refund has been issued.</p>
+                <p style="margin:10px 0 0;font-size:14px;opacity:0.95;">{intro_text}</p>
             </div>
             <div style="padding:24px 28px;">
                 <h3 style="color:#dc2626;margin-top:0;">Cancelled Flight</h3>
@@ -607,11 +691,12 @@ def flight_cancelled_noalt_template(data: dict) -> dict:
                     <tr><td style="padding:10px 12px;color:#6b7280;">Flight Number</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{orig_flight}</td></tr>
                     <tr><td style="padding:10px 12px;color:#6b7280;">Booking ID</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{booking_id}</td></tr>
                     <tr><td style="padding:10px 12px;color:#6b7280;">Date</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#111827;">{cancelled_dt}</td></tr>
+                    {passengers_block_html}
                 </table>
                 <h3 style="color:#059669;">Refund Confirmation</h3>
                 <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:20px;">
                     <tr><td style="padding:10px 12px;color:#6b7280;">Refund Amount</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#059669;">${_format_money(refund_amt)}</td></tr>
-                    <tr><td style="padding:10px 12px;color:#6b7280;">Refund Status</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#059669;">Processed - allow 5 to 7 business days</td></tr>
+                    <tr><td style="padding:10px 12px;color:#6b7280;">Refund Status</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#059669;">Processed - {refund_note}</td></tr>
                 </table>
                 <p style="margin-top:18px;color:#4b5563;font-size:13px;">We apologise for the inconvenience and hope to see you on board again soon.</p>
             </div>
@@ -620,7 +705,7 @@ def flight_cancelled_noalt_template(data: dict) -> dict:
         "text": (
             f"Your flight {orig_flight} on {cancelled_dt} has been cancelled. "
             f"No alternative flight is available. "
-            f"Full refund of ${_format_money(refund_amt)} issued. Allow 5 to 7 business days. "
+            f"Full refund of ${_format_money(refund_amt)} issued. {refund_note} "
             "We apologise for the inconvenience."
         ),
     }
@@ -772,7 +857,7 @@ def generate_rebooking_offer_pdf(data: dict) -> bytes:
     s_brand  = ps("rb_brand",  fontSize=13, fontName="Helvetica-Bold", textColor=WHITE)
     s_h1     = ps("rb_h1",     fontSize=17, fontName="Helvetica-Bold", textColor=WHITE, alignment=1)
     s_sub    = ps("rb_sub",    fontSize=10, textColor=colors.HexColor("#fde68a"), alignment=1)
-    s_fn     = ps("rb_fn",     fontSize=26, fontName="Helvetica-Bold", textColor=WHITE, alignment=1)
+    s_fn     = ps("rb_fn",     fontSize=18, fontName="Helvetica-Bold", textColor=WHITE, alignment=1)
     s_lbl_w  = ps("rb_lbl_w",  fontSize=9,  textColor=LGRAY, alignment=1)
     s_val_w  = ps("rb_val_w",  fontSize=11, fontName="Helvetica-Bold", textColor=WHITE, alignment=1)
     s_sec_r  = ps("rb_sec_r",  fontSize=12, fontName="Helvetica-Bold", textColor=colors.HexColor("#dc2626"), spaceBefore=12, spaceAfter=4)
@@ -791,6 +876,8 @@ def generate_rebooking_offer_pdf(data: dict) -> bytes:
     accept_link    = str(inner.get("AcceptRejectLink", "N/A"))
     booking_id     = str(inner.get("BookingID", "N/A"))
     passenger_name = str(inner.get("PassengerName", "Valued Passenger"))
+    group_size     = int(inner.get("GroupSize") or 1)
+    is_group       = group_size > 1
     THIRD          = INNER_W / 3
 
     story = []
@@ -818,20 +905,22 @@ def generate_rebooking_offer_pdf(data: dict) -> bytes:
     # Cancelled flight details
     story.append(Spacer(1, 0.4 * cm))
     story.append(Paragraph("Cancelled Flight", s_sec_r))
-    story.append(_detail_row_table(
-        [
-            [Paragraph("Passenger Name", s_lbl), Paragraph(passenger_name, s_val)],
-            [Paragraph("Flight Number",  s_lbl), Paragraph(orig_flight,    s_val)],
-            [Paragraph("Booking ID",     s_lbl), Paragraph(booking_id,     s_val)],
-        ],
-        COL_L, COL_R,
-    ))
+    cancelled_rows = [
+        [Paragraph("Passenger Name", s_lbl), Paragraph(passenger_name, s_val)],
+        [Paragraph("Flight Number",  s_lbl), Paragraph(orig_flight,    s_val)],
+        [Paragraph("Booking ID",     s_lbl), Paragraph(booking_id,     s_val)],
+    ]
+    if is_group:
+        cancelled_rows.append([Paragraph("Passengers in Group", s_lbl), Paragraph(str(group_size), s_val)])
+    story.append(_detail_row_table(cancelled_rows, COL_L, COL_R))
 
     # Alternative flight (navy boarding-pass block)
+    seat_label = "Seats (kept together)" if is_group else "Seat"
+    seat_value = f"{group_size} seats" if is_group else seat_number
     details_sub = Table(
         [
-            [Paragraph("Date",    s_lbl_w), Paragraph("Dep. Time",   s_lbl_w), Paragraph("Seat", s_lbl_w)],
-            [Paragraph(new_date,  s_val_w), Paragraph(new_dep_time,  s_val_w), Paragraph(seat_number, s_val_w)],
+            [Paragraph("Date",    s_lbl_w), Paragraph("Dep. Time",   s_lbl_w), Paragraph(seat_label, s_lbl_w)],
+            [Paragraph(new_date,  s_val_w), Paragraph(new_dep_time,  s_val_w), Paragraph(seat_value, s_val_w)],
         ],
         colWidths=[THIRD, THIRD, THIRD],
     )
@@ -860,7 +949,8 @@ def generate_rebooking_offer_pdf(data: dict) -> bytes:
         ("RIGHTPADDING",  (0, 0), (-1, -1), 0.5 * cm),
         ("TOPPADDING",    (0, 0), (0, 0), 0.4 * cm),
         ("TOPPADDING",    (0, 1), (0, -2), 0.15 * cm),
-        ("BOTTOMPADDING", (0, 0), (0, -2), 0.15 * cm),
+        ("BOTTOMPADDING", (0, 0), (0, 0), 0.15 * cm),
+        ("BOTTOMPADDING", (0, 1), (0, 1), 0.25 * cm),
         ("BOTTOMPADDING", (0, -1), (0, -1), 0),
     ]))
     story.append(Spacer(1, 0.4 * cm))
@@ -871,7 +961,12 @@ def generate_rebooking_offer_pdf(data: dict) -> bytes:
     story.append(Paragraph(f"Accept or reject at: {accept_link}", s_link))
     story.append(Spacer(1, 0.3 * cm))
     story.append(HRFlowable(width=PAGE_W, thickness=0.5, color=BORDER))
-    story.append(Paragraph("If you reject, a full refund will be issued to your original payment method.", s_foot))
+    refund_note = (
+        "If you reject, a full refund will be issued for all passengers in your group."
+        if is_group else
+        "If you reject, a full refund will be issued to your original payment method."
+    )
+    story.append(Paragraph(refund_note, s_foot))
 
     return _pdf_build(story)
 

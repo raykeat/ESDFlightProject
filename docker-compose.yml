@@ -121,7 +121,7 @@ services:
       - ./flight-microservice/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - app-network
-    mem_limit: 512m
+    mem_limit: 1g
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s

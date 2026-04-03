@@ -103,12 +103,36 @@ def process_path_b_message(msg):
     original_flight_number = orig_flight_data.get("FlightNumber", "")
     cancelled_date = orig_flight_data.get("FlightDate", "")
 
+    # Build list of all passenger names in the group
+    passenger_names = [passenger_name]
+    for gid in group_booking_ids:
+        if int(gid) == int(booking_id):
+            continue
+        try:
+            record_resp = requests.get(f"{RECORD_SERVICE_URL}/records/{gid}", timeout=10)
+            if record_resp.status_code < 400:
+                record_data = get_json_or_none(record_resp) or {}
+                pax_id = record_data.get("PassengerID") or record_data.get("passengerID")
+                if pax_id:
+                    pax_endpoint = f"{PASSENGER_SERVICE_URL.rstrip('/')}/getpassenger/{pax_id}/"
+                    pax_resp = requests.get(pax_endpoint, timeout=10)
+                    if pax_resp.status_code == 404:
+                        pax_resp = requests.get(pax_endpoint.rstrip('/'), timeout=10)
+                    if pax_resp.status_code < 400:
+                        pax_data = get_json_or_none(pax_resp) or {}
+                        name = f"{pax_data.get('FirstName', '')} {pax_data.get('LastName', '')}".strip()
+                        if name:
+                            passenger_names.append(name)
+        except Exception as exc:
+            logger.warning("Could not fetch passenger name for booking %s: %s", gid, str(exc))
+
     notification_payload = {
         "type":  "flight.cancelled.noalt",
         "email": passenger_email,
         "data": {
             "PassengerID":    passenger_id,
             "PassengerName":  passenger_name,
+            "PassengerNames": passenger_names,
             "BookingID":      booking_id,
             "OriginalFlight": original_flight_number,
             "CancelledDate":  cancelled_date,
