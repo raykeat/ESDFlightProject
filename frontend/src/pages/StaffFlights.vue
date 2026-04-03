@@ -41,7 +41,7 @@ async function loadFlights() {
     let response
 
     try {
-      response = await axios.get(apiUrl('/api/flights'))
+      response = await axios.get(apiUrl('/api/flight'))
     } catch (primaryError) {
       console.warn('Primary flights endpoint unavailable, falling back to available flights endpoint.', primaryError)
       response = await axios.get(apiUrl('/api/flight/available'))

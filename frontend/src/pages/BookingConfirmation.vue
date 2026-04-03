@@ -226,8 +226,9 @@ async function loadActivePerksVoucher() {
   perksError.value = ''
 
   try {
-    const loyaltyUrl = import.meta.env.VITE_LOYALTY_SERVICE_URL || 'http://localhost:5008'
-    const response = await axios.get(`${loyaltyUrl}/api/loyalty/vouchers/${currentPassenger.value.passenger_id}?status=ACTIVE`)
+    const response = await axios.get(
+      apiUrl(`/api/loyalty/vouchers/${currentPassenger.value.passenger_id}?status=ACTIVE`)
+    )
     const vouchers = Array.isArray(response.data) ? response.data : (response.data?.vouchers || [])
     activePerksVoucher.value = vouchers.find((voucher) => (voucher.voucherType || voucher.type) === 'IN_FLIGHT_PERKS') || null
     selectedPerksVoucher.value = activePerksVoucher.value

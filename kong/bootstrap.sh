@@ -19,6 +19,11 @@ upsert_service() {
     --data "url=$url" >/dev/null
 }
 
+delete_service_if_exists() {
+  name="$1"
+  curl -fsS -X DELETE "$ADMIN_URL/services/$name" >/dev/null 2>&1 || true
+}
+
 upsert_route() {
   service_name="$1"
   route_name="$2"
@@ -29,6 +34,26 @@ upsert_route() {
     --data "name=$route_name" \
     --data "paths[]=$path" \
     --data "strip_path=$strip_path" >/dev/null
+}
+
+ensure_route_rate_limit() {
+  route_name="$1"
+  minute_limit="$2"
+
+  existing_id="$(curl -fsS "$ADMIN_URL/routes/$route_name/plugins" | tr ',' '\n' | grep '"name":"rate-limiting"' | head -n 1 | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' || true)"
+
+  if [ -n "$existing_id" ]; then
+    curl -fsS -X PATCH "$ADMIN_URL/plugins/$existing_id" \
+      --data "config.minute=$minute_limit" \
+      --data "config.policy=local" \
+      --data "config.limit_by=ip" >/dev/null
+  else
+    curl -fsS -X POST "$ADMIN_URL/routes/$route_name/plugins" \
+      --data "name=rate-limiting" \
+      --data "config.minute=$minute_limit" \
+      --data "config.policy=local" \
+      --data "config.limit_by=ip" >/dev/null
+  fi
 }
 
 ensure_service_rate_limit() {
@@ -48,6 +73,21 @@ ensure_service_rate_limit() {
       --data "config.minute=$minute_limit" \
       --data "config.policy=local" \
       --data "config.limit_by=ip" >/dev/null
+  fi
+}
+
+ensure_global_file_log() {
+  existing_id="$(curl -fsS "$ADMIN_URL/plugins" | tr ',' '\n' | grep '"name":"file-log"' | head -n 1 | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' || true)"
+
+  if [ -n "$existing_id" ]; then
+    curl -fsS -X PATCH "$ADMIN_URL/plugins/$existing_id" \
+      --data "config.path=/dev/stdout" \
+      --data "config.reopen=false" >/dev/null
+  else
+    curl -fsS -X POST "$ADMIN_URL/plugins" \
+      --data "name=file-log" \
+      --data "config.path=/dev/stdout" \
+      --data "config.reopen=false" >/dev/null
   fi
 }
 
@@ -101,30 +141,31 @@ wait_for_kong
 upsert_service "booking-api" "http://booking-composite-service:3001"
 upsert_route "booking-api" "booking-api-bookings" "/api/bookings" "false"
 upsert_route "booking-api" "booking-api-rebooking" "/api/rebooking" "false"
+upsert_route "booking-api" "booking-api-rebooking-accept" "/api/rebooking/accept" "false"
+upsert_route "booking-api" "booking-api-rebooking-reject" "/api/rebooking/reject" "false"
 
 upsert_service "record-api" "http://record-service:3000/records"
 upsert_route "record-api" "record-api-route" "/api/records" "true"
 
-upsert_service "flight-api-flight" "http://flight-service:3000/flight"
-upsert_route "flight-api-flight" "flight-api-flight-route" "/api/flight" "true"
-
-upsert_service "flight-api-flights" "http://flight-service:3000/flights"
-upsert_route "flight-api-flights" "flight-api-flights-route" "/api/flights" "true"
+delete_service_if_exists "flight-api-flight"
+delete_service_if_exists "flight-api-flights"
+upsert_service "flight-api" "http://flight-service:3000/flight"
+upsert_route "flight-api" "flight-api-flight-route" "/api/flight" "true"
 
 upsert_service "seats-api" "http://seats-service:5003/seats"
 upsert_route "seats-api" "seats-api-route" "/api/seats" "true"
 
+delete_service_if_exists "payments-api"
 upsert_service "payment-api" "http://payment-service:5000/payment"
 upsert_route "payment-api" "payment-api-route" "/api/payment" "true"
 
-upsert_service "payments-api" "http://payment-service:5000/payments"
-upsert_route "payments-api" "payments-api-route" "/api/payments" "true"
+delete_service_if_exists "offer-api-offer"
+delete_service_if_exists "offer-api-offers"
+upsert_service "offer-api" "http://offer-service:5000/offer"
+upsert_route "offer-api" "offer-api-offer-route" "/api/offer" "true"
 
-upsert_service "offer-api-offer" "http://offer-service:5000/offer"
-upsert_route "offer-api-offer" "offer-api-offer-route" "/api/offer" "true"
-
-upsert_service "offer-api-offers" "http://offer-service:5000/offers"
-upsert_route "offer-api-offers" "offer-api-offers-route" "/api/offers" "true"
+upsert_service "loyalty-api" "http://loyalty-composite-service:5008/api/loyalty"
+upsert_route "loyalty-api" "loyalty-api-route" "/api/loyalty" "true"
 
 upsert_service "flight-search-api" "http://flight-search-composite:5011/flight-search"
 upsert_route "flight-search-api" "flight-search-api-route" "/api/flight-search" "true"
@@ -135,5 +176,8 @@ upsert_route "flight-cancel-api" "flight-cancel-api-route" "/api/cancel" "true"
 ensure_global_cors
 ensure_service_rate_limit "flight-search-api" "30"
 ensure_service_rate_limit "flight-cancel-api" "5"
+ensure_route_rate_limit "booking-api-rebooking-accept" "5"
+ensure_route_rate_limit "booking-api-rebooking-reject" "5"
+ensure_global_file_log
 
 echo "Kong bootstrap completed."

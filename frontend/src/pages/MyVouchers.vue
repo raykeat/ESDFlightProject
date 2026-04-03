@@ -3,6 +3,7 @@ import { onMounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePassengerSession } from '../composables/usePassengerSession'
 import axios from 'axios'
+import { apiUrl } from '../config/api'
 
 const router = useRouter()
 const { currentPassenger, isSignedIn } = usePassengerSession()
@@ -37,10 +38,8 @@ async function fetchVouchers() {
   errorMessage.value = ''
   try {
     const passengerID = currentPassenger.value?.passenger_id
-    const loyaltyUrl = import.meta.env.VITE_LOYALTY_SERVICE_URL || 'http://localhost:5008'
-
     const response = await axios.get(
-      `${loyaltyUrl}/api/loyalty/vouchers/${passengerID}`
+      apiUrl(`/api/loyalty/vouchers/${passengerID}`)
     )
 
     // The loyalty service returns the array directly from voucher service

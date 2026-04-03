@@ -162,6 +162,7 @@ class Flight(db.Model):
         }
 
 
+@app.route('/flight', methods=['GET'])
 @app.route('/flights', methods=['GET'])
 def get_flights():
     try:
@@ -192,6 +193,7 @@ def get_flight_v2(flight_id):
     return get_flight(flight_id)
 
 
+@app.route('/flight/<int:flight_id>', methods=['PUT'])
 @app.route('/flights/<int:flight_id>', methods=['PUT'])
 def update_flight_v2(flight_id):
     try:

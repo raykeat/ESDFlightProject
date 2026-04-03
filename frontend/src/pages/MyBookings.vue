@@ -86,22 +86,10 @@ async function loadData() {
 }
 
 async function loadOffers(passengerId) {
-  try {
-    const response = await axios.get(apiUrl('/api/offers'), {
-      params: { passengerID: passengerId },
-    })
-    return response.data
-  } catch (primaryError) {
-    const status = primaryError?.response?.status
-    if (status && status !== 404) {
-      throw primaryError
-    }
-
-    const fallback = await axios.get(apiUrl('/api/offer'), {
-      params: { passengerID: passengerId },
-    })
-    return fallback.data
-  }
+  const response = await axios.get(apiUrl('/api/offer'), {
+    params: { passengerID: passengerId },
+  })
+  return response.data
 }
 
 function normalizeCollectionResponse(payload) {
@@ -157,13 +145,7 @@ async function hydrateFlightDetails() {
 
   const map = {}
   const results = await Promise.allSettled(
-    uniqueFlightIds.map(async (flightID) => {
-      try {
-        return await axios.get(apiUrl(`/api/flight/${flightID}`))
-      } catch (primaryError) {
-        return await axios.get(apiUrl(`/api/flights/${flightID}`))
-      }
-    })
+    uniqueFlightIds.map(async (flightID) => axios.get(apiUrl(`/api/flight/${flightID}`)))
   )
 
   results.forEach((result, idx) => {
@@ -597,9 +579,7 @@ async function applyPerksToBooking(booking) {
   perksFlowMessage.value = ''
 
   try {
-    const bookingServiceUrl = import.meta.env.VITE_BOOKING_SERVICE_URL || 'http://localhost:3010'
-
-    await axios.post(`${bookingServiceUrl}/api/bookings/${bookingID}/in-flight-perks`, {
+    await axios.post(apiUrl(`/api/bookings/${bookingID}/in-flight-perks`), {
       passengerID: currentPassenger.value.passenger_id,
       voucherID: selectedPerksVoucher.value.voucherID,
       voucherCode: selectedPerksVoucher.value.voucherCode,
