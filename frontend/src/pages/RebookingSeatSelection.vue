@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import SeatSelector from './SeatSelector.vue'
 import { usePassengerSession } from '../composables/usePassengerSession'
+import { apiUrl } from '../config/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -74,22 +75,22 @@ async function loadContext() {
       throw new Error('Invalid rebooking link.')
     }
 
-    const offerResponse = await axios.get(`http://localhost:5002/offer/${offerID}`)
+    const offerResponse = await axios.get(apiUrl(`/api/offer/${offerID}`))
     offer.value = offerResponse.data
 
     if (String(offer.value.status) !== 'Pending Response') {
       throw new Error(`This offer has already been ${String(offer.value.status).toLowerCase()}.`)
     }
 
-    const primaryBookingResponse = await axios.get(`http://localhost:3010/api/bookings/${offer.value.bookingID}`)
+    const primaryBookingResponse = await axios.get(apiUrl(`/api/bookings/${offer.value.bookingID}`))
     const primaryBooking = primaryBookingResponse.data
     const bookerID = Number(primaryBooking.bookedByPassengerID || primaryBooking.BookedByPassengerID || primaryBooking.passengerID || primaryBooking.PassengerID)
     const createdAt = String(primaryBooking.createdAt || primaryBooking.createdTime || primaryBooking.CreatedTime || '')
 
     const [allBookingsResponse, newFlightResponse, seatsResponse] = await Promise.all([
-      axios.get(`http://localhost:3010/api/bookings/passenger/${bookerID}`),
-      axios.get(`http://localhost:3003/flight/${offer.value.newFlightID}`),
-      axios.get(`http://localhost:5003/seats/${offer.value.newFlightID}`),
+      axios.get(apiUrl(`/api/bookings/passenger/${bookerID}`)),
+      axios.get(apiUrl(`/api/flight/${offer.value.newFlightID}`)),
+      axios.get(apiUrl(`/api/seats/${offer.value.newFlightID}`)),
     ])
 
     groupBookings.value = (Array.isArray(allBookingsResponse.data) ? allBookingsResponse.data : [])
@@ -127,7 +128,7 @@ async function confirmRebookingSeats() {
   error.value = null
 
   try {
-    await axios.post('http://localhost:3010/api/rebooking/accept', {
+    await axios.post(apiUrl('/api/rebooking/accept'), {
       offerID,
       bookingIDs: groupBookings.value.map((record) => Number(record.bookingID || record.BookingID)),
       seatAssignments: selectedSeats.value,

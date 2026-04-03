@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { usePassengerSession } from '../composables/usePassengerSession'
+import { apiUrl } from '../config/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -39,7 +40,7 @@ async function loadOffer() {
   error.value = null
 
   try {
-    const offerRes = await axios.get(`http://localhost:5002/offer/${offerID}`)
+    const offerRes = await axios.get(apiUrl(`/api/offer/${offerID}`))
     offer.value = offerRes.data
 
     if (offer.value.status !== 'Pending Response') {
@@ -48,8 +49,8 @@ async function loadOffer() {
     }
 
     const [origRes, newRes] = await Promise.all([
-      axios.get(`http://localhost:3003/flight/${offer.value.origFlightID}`),
-      axios.get(`http://localhost:3003/flight/${offer.value.newFlightID}`)
+      axios.get(apiUrl(`/api/flight/${offer.value.origFlightID}`)),
+      axios.get(apiUrl(`/api/flight/${offer.value.newFlightID}`))
     ])
 
     const mapFlight = (flight) => {
@@ -93,7 +94,7 @@ async function rejectOffer() {
   showConfirm.value = null
 
   try {
-    await axios.post('http://localhost:3010/api/rebooking/reject', {
+    await axios.post(apiUrl('/api/rebooking/reject'), {
       offerID
     })
 

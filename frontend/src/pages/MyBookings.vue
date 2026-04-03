@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 import { usePassengerSession } from '../composables/usePassengerSession'
+import { apiUrl } from '../config/api'
 
 const router = useRouter()
 const { currentPassenger } = usePassengerSession()
@@ -38,9 +39,9 @@ async function loadData() {
     const passengerId = currentPassenger.value.passenger_id
 
     const [bookingsRes, offersRes, paymentsRes] = await Promise.allSettled([
-      axios.get(`http://localhost:3010/api/bookings/passenger/${passengerId}`),
+      axios.get(apiUrl(`/api/bookings/passenger/${passengerId}`)),
       loadOffers(passengerId),
-      axios.get('http://localhost:5001/payment'),
+      axios.get(apiUrl('/api/payment')),
     ])
 
     if (bookingsRes.status !== 'fulfilled') {
@@ -69,7 +70,7 @@ async function loadData() {
 
 async function loadOffers(passengerId) {
   try {
-    const response = await axios.get(`http://localhost:5002/offers`, {
+    const response = await axios.get(apiUrl('/api/offers'), {
       params: { passengerID: passengerId },
     })
     return response.data
@@ -79,7 +80,7 @@ async function loadOffers(passengerId) {
       throw primaryError
     }
 
-    const fallback = await axios.get(`http://localhost:5002/offer`, {
+    const fallback = await axios.get(apiUrl('/api/offer'), {
       params: { passengerID: passengerId },
     })
     return fallback.data
@@ -124,9 +125,9 @@ async function hydrateFlightDetails() {
   const results = await Promise.allSettled(
     uniqueFlightIds.map(async (flightID) => {
       try {
-        return await axios.get(`http://localhost:3003/flight/${flightID}`)
+        return await axios.get(apiUrl(`/api/flight/${flightID}`))
       } catch (primaryError) {
-        return await axios.get(`http://localhost:3003/flights/${flightID}`)
+        return await axios.get(apiUrl(`/api/flights/${flightID}`))
       }
     })
   )
@@ -674,7 +675,7 @@ async function resumePendingBooking(booking) {
   resumingBookingIds.value = next
 
   try {
-    const response = await axios.post('http://localhost:3010/api/bookings/resume-payment', {
+    const response = await axios.post(apiUrl('/api/bookings/resume-payment'), {
       bookingID: booking.bookingID,
       frontendBaseUrl: window.location.origin,
     })

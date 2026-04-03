@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { usePassengerSession } from '../composables/usePassengerSession'
+import { apiUrl } from '../config/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -90,7 +91,7 @@ function formatTime(value) {
 async function fetchFlightDetails(flightID) {
   if (!flightID) return null
   try {
-    const response = await axios.get(`http://localhost:3003/flight/${flightID}`)
+    const response = await axios.get(apiUrl(`/api/flight/${flightID}`))
     return response.data
   } catch {
     return null
@@ -101,7 +102,7 @@ async function fetchBookingGroup(ids) {
   if (!ids.length) return []
 
   const results = await Promise.allSettled(
-    ids.map((id) => axios.get(`http://localhost:3010/api/bookings/${id}`))
+    ids.map((id) => axios.get(apiUrl(`/api/bookings/${id}`)))
   )
 
   return results
@@ -132,7 +133,7 @@ onMounted(async () => {
     }
 
     const finalizeResponse = await axios.post(
-      'http://localhost:3010/api/bookings/finalize',
+      apiUrl('/api/bookings/finalize'),
       finalizePayload
     )
     payment.value = finalizeResponse.data.payment

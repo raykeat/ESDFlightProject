@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { usePassengerSession } from '../composables/usePassengerSession'
 import { useBookingDraft } from '../composables/useBookingDraft'
+import { apiUrl } from '../config/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -175,7 +176,7 @@ async function confirmBooking() {
       cancelUrl.searchParams.set('cancelled', 'true')
       payload.cancelUrl = cancelUrl.toString()
 
-      const bookingResponse = await axios.post('http://localhost:3010/api/bookings', payload)
+      const bookingResponse = await axios.post(apiUrl('/api/bookings'), payload)
       finalSessionUrl = bookingResponse.data.sessionUrl
 
       const currentUrl = new URL(window.location.href)

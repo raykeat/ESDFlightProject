@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { usePassengerSession } from '../composables/usePassengerSession'
 import { useBookingDraft } from '../composables/useBookingDraft'
+import { apiUrl } from '../config/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -106,7 +107,7 @@ function addDays(dateText, days) {
 }
 
 async function fetchFlights(origin, dest, dateFrom, dateTo) {
-  const response = await axios.get('http://localhost:5011/flight-search/available', {
+  const response = await axios.get(apiUrl('/api/flight-search/available'), {
     params: {
       origin,
       dest,

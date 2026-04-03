@@ -5,6 +5,7 @@ import axios from 'axios'
 import SeatSelector from './SeatSelector.vue'
 import { usePassengerSession } from '../composables/usePassengerSession'
 import { useBookingDraft } from '../composables/useBookingDraft'
+import { apiUrl } from '../config/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -225,7 +226,7 @@ async function loadFlightDetail() {
     }
 
     if (!flight.value) {
-      const compositeResponse = await axios.get(`http://localhost:5011/flight-search/${flightID.value}`)
+      const compositeResponse = await axios.get(apiUrl(`/api/flight-search/${flightID.value}`))
       flight.value = compositeResponse.data.flight
       seats.value = Array.isArray(compositeResponse.data.seats) ? compositeResponse.data.seats : []
     }
