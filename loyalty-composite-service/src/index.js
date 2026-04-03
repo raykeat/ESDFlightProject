@@ -18,18 +18,15 @@ const VOUCHER_TYPES = {
     name: 'Travel Credit',
     rate: 100,
     minMiles: 500,
+    description: 'Convert miles into cash-style credit to reduce the amount paid on flight bookings.',
     calculateValue: (miles) => miles / 100
   },
-  UPGRADE: {
-    name: 'Cabin Upgrade',
-    rate: 2000,
-    minMiles: 2000,
-    calculateValue: () => 1
-  },
-  LOUNGE_PASS: {
-    name: 'Lounge Pass',
+  IN_FLIGHT_PERKS: {
+    name: 'In-flight Perks Voucher',
     rate: 500,
     minMiles: 500,
+    benefits: ['Food Credits', 'Entertainment Bundles', 'Wi-Fi Passes'],
+    description: 'Redeem for food credits, entertainment bundles, and Wi-Fi passes during your trip.',
     calculateValue: () => 1
   },
   PARTNER_GIFT: {
@@ -77,7 +74,7 @@ app.get('/api/loyalty/balance/:passengerID', async (req, res) => {
 // Convert miles to a single voucher
 // ==========================================
 app.post('/api/loyalty/convert', async (req, res) => {
-  const { passengerID, voucherType, milesToConvert, passengerEmail, passengerName, upgradeClass } = req.body;
+  const { passengerID, voucherType, milesToConvert, passengerEmail, passengerName } = req.body;
 
   // Validation
   if (!passengerID || !voucherType) {
@@ -435,23 +432,13 @@ app.get('/api/loyalty/vouchers/:passengerID', async (req, res) => {
 function calculateNextVoucherSuggestion(remainingMiles) {
   const suggestions = [];
 
-  if (remainingMiles >= VOUCHER_TYPES.LOUNGE_PASS.minMiles) {
+  if (remainingMiles >= VOUCHER_TYPES.IN_FLIGHT_PERKS.minMiles) {
     suggestions.push({
-      type: 'LOUNGE_PASS',
-      name: 'Lounge Pass',
-      milesNeeded: VOUCHER_TYPES.LOUNGE_PASS.rate,
-      currentProgress: `${remainingMiles}/${VOUCHER_TYPES.LOUNGE_PASS.rate}`,
-      eligible: remainingMiles >= VOUCHER_TYPES.LOUNGE_PASS.rate
-    });
-  }
-
-  if (remainingMiles >= VOUCHER_TYPES.UPGRADE.minMiles) {
-    suggestions.push({
-      type: 'UPGRADE',
-      name: 'Cabin Upgrade',
-      milesNeeded: VOUCHER_TYPES.UPGRADE.rate,
-      currentProgress: `${remainingMiles}/${VOUCHER_TYPES.UPGRADE.rate}`,
-      eligible: remainingMiles >= VOUCHER_TYPES.UPGRADE.rate
+      type: 'IN_FLIGHT_PERKS',
+      name: 'In-flight Perks Voucher',
+      milesNeeded: VOUCHER_TYPES.IN_FLIGHT_PERKS.rate,
+      currentProgress: `${remainingMiles}/${VOUCHER_TYPES.IN_FLIGHT_PERKS.rate}`,
+      eligible: remainingMiles >= VOUCHER_TYPES.IN_FLIGHT_PERKS.rate
     });
   }
 

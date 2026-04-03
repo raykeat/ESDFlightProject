@@ -38,20 +38,16 @@ const VOUCHER_TYPES = {
     rate: 100,  // 100 miles = $1
     minMiles: 500,
     expiryDays: 365,
+    description: 'Convert miles into cash-style credit to reduce the amount paid on flight bookings.',
     calculateValue: (miles) => miles / 100
   },
-  UPGRADE: {
-    name: 'Cabin Upgrade',
-    rate: 2000,  // 2000 miles per upgrade
-    minMiles: 2000,
-    expiryDays: 180,
-    calculateValue: () => 1  // 1 upgrade
-  },
-  LOUNGE_PASS: {
-    name: 'Lounge Pass',
+  IN_FLIGHT_PERKS: {
+    name: 'In-flight Perks Voucher',
     rate: 500,  // 500 miles per pass
     minMiles: 500,
     expiryDays: 90,
+    benefits: ['Food Credits', 'Entertainment Bundles', 'Wi-Fi Passes'],
+    description: 'Redeem for food credits, entertainment bundles, and Wi-Fi passes during your trip.',
     calculateValue: () => 1  // 1 pass
   },
   PARTNER_GIFT: {

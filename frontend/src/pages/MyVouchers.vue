@@ -72,10 +72,8 @@ function getVoucherIcon(type) {
   switch (type) {
     case 'TRAVEL_CREDIT':
       return '✈️'
-    case 'UPGRADE':
-      return '⬆️'
-    case 'LOUNGE_PASS':
-      return '🏨'
+    case 'IN_FLIGHT_PERKS':
+      return '🛫'
     case 'PARTNER_GIFT':
       return '🎟️'
     default:
@@ -87,10 +85,8 @@ function getVoucherDisplayName(type) {
   switch (type) {
     case 'TRAVEL_CREDIT':
       return 'Travel Credit'
-    case 'UPGRADE':
-      return 'Cabin Upgrade'
-    case 'LOUNGE_PASS':
-      return 'Lounge Pass'
+    case 'IN_FLIGHT_PERKS':
+      return 'In-flight Perks Voucher'
     case 'PARTNER_GIFT':
       return 'Partner Gift Card'
     default:
@@ -98,9 +94,55 @@ function getVoucherDisplayName(type) {
   }
 }
 
+function getVoucherDescription(type) {
+  switch (type) {
+    case 'TRAVEL_CREDIT':
+      return 'Convert miles into cash-style credit to reduce the amount paid on flight bookings.'
+    case 'IN_FLIGHT_PERKS':
+      return 'Redeem for food credits, entertainment bundles, and Wi-Fi passes during your trip.'
+    default:
+      return ''
+  }
+}
+
+function getVoucherBenefits(type) {
+  switch (type) {
+    case 'IN_FLIGHT_PERKS':
+      return ['Food Credits', 'Entertainment Bundles', 'Wi-Fi Passes']
+    default:
+      return []
+  }
+}
+
 function copyToClipboard(code) {
   navigator.clipboard.writeText(code)
   alert('Voucher code copied to clipboard!')
+}
+
+function openVoucherFlow(voucher) {
+  const type = voucher.voucherType || voucher.type
+
+  if (type === 'IN_FLIGHT_PERKS') {
+    router.push({
+      name: 'my-bookings',
+      query: {
+        voucherID: String(voucher.voucherID || ''),
+        voucherCode: String(voucher.voucherCode || voucher.code || ''),
+        voucherType: type,
+        voucherName: getVoucherDisplayName(type),
+      },
+    })
+    return
+  }
+
+  if (type === 'TRAVEL_CREDIT') {
+    router.push('/search-results')
+    return
+  }
+
+  if (voucher.redemptionUrl) {
+    window.open(voucher.redemptionUrl, '_blank', 'noopener,noreferrer')
+  }
 }
 
 function backToHome() {
@@ -182,6 +224,9 @@ function convertMore() {
             <h3 class="mt-2 text-lg font-semibold text-[#1d1d1f]">
               {{ getVoucherDisplayName(voucher.voucherType || voucher.type) }}
             </h3>
+            <p v-if="getVoucherDescription(voucher.voucherType || voucher.type)" class="mt-2 text-sm text-[#6e6e73]">
+              {{ getVoucherDescription(voucher.voucherType || voucher.type) }}
+            </p>
           </div>
 
           <!-- Voucher Code -->
@@ -216,13 +261,23 @@ function convertMore() {
             </div>
           </div>
 
+          <div v-if="getVoucherBenefits(voucher.voucherType || voucher.type).length > 0" class="mt-4 flex flex-wrap gap-2">
+            <span
+              v-for="benefit in getVoucherBenefits(voucher.voucherType || voucher.type)"
+              :key="benefit"
+              class="inline-flex rounded-lg bg-[#f5f5f7] px-3 py-1 text-xs text-[#6e6e73]"
+            >
+              {{ benefit }}
+            </span>
+          </div>
+
           <!-- Actions -->
           <div v-if="voucher.status === 'ACTIVE'" class="mt-6">
             <button
-              @click="() => router.push('/search-results')"
+              @click="openVoucherFlow(voucher)"
               class="w-full rounded-lg bg-gradient-to-r from-[#e63946] to-[#f43f5e] px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-white transition hover:shadow-[0_4px_12px_rgba(230,57,70,0.3)]"
             >
-              Use This Voucher
+              {{ (voucher.voucherType || voucher.type) === 'IN_FLIGHT_PERKS' ? 'Use Voucher' : 'Use This Voucher' }}
             </button>
             <a
               v-if="voucher.redemptionUrl"
