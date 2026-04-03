@@ -14,6 +14,9 @@ const sessionID = route.query.session_id
 const returnBookingID = route.query.returnBookingID || null
 const groupBookingIDs = route.query.groupBookingIDs || ''
 const returnGroupBookingIDs = route.query.returnGroupBookingIDs || ''
+const selectedPerksVoucherID = route.query.selectedPerksVoucherID || null
+const selectedPerksVoucherCode = route.query.selectedPerksVoucherCode || null
+const selectedPerksVoucherType = route.query.selectedPerksVoucherType || null
 
 const booking = ref(null)
 const returnBooking = ref(null)
@@ -22,6 +25,7 @@ const returnGroupBookings = ref([])
 const outboundFlight = ref(null)
 const returnFlight = ref(null)
 const payment = ref(null)
+const perksAttachment = ref(null)
 const loading = ref(true)
 const error = ref(null)
 
@@ -132,11 +136,18 @@ onMounted(async () => {
       departureDate: route.query.departureDate || null,
     }
 
+    if (selectedPerksVoucherID && selectedPerksVoucherCode && selectedPerksVoucherType === 'IN_FLIGHT_PERKS') {
+      finalizePayload.selectedPerksVoucherID = Number(selectedPerksVoucherID)
+      finalizePayload.selectedPerksVoucherCode = String(selectedPerksVoucherCode)
+      finalizePayload.selectedPerksVoucherType = String(selectedPerksVoucherType)
+    }
+
     const finalizeResponse = await axios.post(
       apiUrl('/api/bookings/finalize'),
       finalizePayload
     )
     payment.value = finalizeResponse.data.payment
+    perksAttachment.value = finalizeResponse.data.perksAttachment || null
 
     const outboundIds = parseIdList(groupBookingIDs)
     const returnIds = parseIdList(returnGroupBookingIDs)
@@ -377,6 +388,17 @@ onMounted(async () => {
                 <p>View your itinerary and any future changes from My Bookings.</p>
                 <p>Keep your passport details ready for check-in and airport verification.</p>
               </div>
+            </div>
+
+            <div v-if="selectedPerksVoucherType === 'IN_FLIGHT_PERKS'" class="rounded-[30px] border p-6 text-left shadow-[0_16px_36px_rgba(15,23,42,0.05)]" :class="perksAttachment?.success ? 'border-[#c8f1df] bg-[#f4fffa]' : 'border-[#f4d6a6] bg-[#fff9ef]'">
+              <p class="text-[11px] font-bold uppercase tracking-[0.16em] text-[#9a6200]">In-flight perks</p>
+              <p v-if="perksAttachment?.success" class="mt-3 text-sm text-[#126a4e]">
+                Your in-flight perks voucher has been attached to this booking.
+              </p>
+              <p v-else class="mt-3 text-sm text-[#5f6b7d]">
+                Your booking is confirmed, but we could not attach the in-flight perks voucher automatically.
+                {{ perksAttachment?.message || '' }}
+              </p>
             </div>
           </aside>
         </div>

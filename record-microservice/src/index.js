@@ -41,11 +41,31 @@ function waitForDB(retries = 10, delay = 3000) {
     } else {
       console.log('✓ Connected to record-db');
       connection.release();
+      ensureBookingSchema();
     }
   });
 }
 
 waitForDB();
+
+function ensureBookingSchema() {
+  const addColumnStatements = [
+    'ALTER TABLE booking ADD COLUMN inFlightPerksVoucherID INT NULL',
+    'ALTER TABLE booking ADD COLUMN inFlightPerksVoucherCode VARCHAR(50) NULL',
+    'ALTER TABLE booking ADD COLUMN inFlightPerksAppliedAt TIMESTAMP NULL',
+  ];
+
+  addColumnStatements.forEach((statement) => {
+    pool.query(statement, (err) => {
+      if (!err) return;
+      if (err.errno !== 1060) {
+        console.error('Schema migration warning:', err.message);
+      }
+    });
+  });
+
+  console.log('Booking schema migration check complete');
+}
 
 // ==========================================
 // GET /health
@@ -132,6 +152,98 @@ app.post('/records', (req, res) => {
 });
 
 // ==========================================
+// PUT /records/:bookingID/perks
+// Attach in-flight perks metadata to a booking
+// ==========================================
+app.put('/records/:bookingID/perks', (req, res) => {
+  const { bookingID } = req.params;
+  const { passengerID, voucherID, voucherCode } = req.body;
+
+  if (!passengerID || !voucherID || !voucherCode) {
+    return res.status(400).json({ error: 'passengerID, voucherID, and voucherCode are required' });
+  }
+
+  pool.query(
+    'SELECT BookingID, BookedByPassengerID, PassengerID, bookingstatus, inFlightPerksVoucherID FROM booking WHERE BookingID = ?',
+    [bookingID],
+    (selectErr, rows) => {
+      if (selectErr) {
+        console.error(selectErr);
+        return res.status(500).json({ error: selectErr.message });
+      }
+
+      if (!rows.length) {
+        return res.status(404).json({ error: 'Booking not found' });
+      }
+
+      const booking = rows[0];
+      const ownerID = Number(booking.BookedByPassengerID || booking.PassengerID);
+
+      if (ownerID !== Number(passengerID)) {
+        return res.status(403).json({ error: 'Booking does not belong to this passenger' });
+      }
+
+      if (String(booking.bookingstatus) !== 'Confirmed') {
+        return res.status(409).json({ error: 'In-flight perks can only be attached to confirmed bookings' });
+      }
+
+      if (booking.inFlightPerksVoucherID) {
+        return res.status(409).json({ error: 'In-flight perks are already attached to this booking' });
+      }
+
+      pool.query(
+        `UPDATE booking
+         SET inFlightPerksVoucherID = ?, inFlightPerksVoucherCode = ?, inFlightPerksAppliedAt = NOW()
+         WHERE BookingID = ?`,
+        [voucherID, voucherCode, bookingID],
+        (updateErr, result) => {
+          if (updateErr) {
+            console.error(updateErr);
+            return res.status(500).json({ error: updateErr.message });
+          }
+
+          if (result.affectedRows === 0) {
+            return res.status(404).json({ error: 'Booking not found' });
+          }
+
+          res.json({
+            success: true,
+            message: 'In-flight perks attached successfully',
+          });
+        }
+      );
+    }
+  );
+});
+
+// ==========================================
+// DELETE /records/:bookingID/perks
+// Remove attached in-flight perks metadata
+// ==========================================
+app.delete('/records/:bookingID/perks', (req, res) => {
+  const { bookingID } = req.params;
+
+  pool.query(
+    `UPDATE booking
+     SET inFlightPerksVoucherID = NULL, inFlightPerksVoucherCode = NULL, inFlightPerksAppliedAt = NULL
+     WHERE BookingID = ?`,
+    [bookingID],
+    (err, result) => {
+      if (err) {
+        console.error(err);
+        return res.status(500).json({ error: err.message });
+      }
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ error: 'Booking not found' });
+      }
+
+      res.json({ success: true, message: 'In-flight perks removed successfully' });
+    }
+  );
+});
+
+// ==========================================
 // GET /records?flightID={flightID}
 // Get booking records by flight
 // ==========================================
@@ -168,6 +280,9 @@ app.get('/records', (req, res) => {
       bookingstatus AS status,
       bookingstatus AS BookingStatus,
       bookingstatus AS bookingstatus,
+      inFlightPerksVoucherID,
+      inFlightPerksVoucherCode,
+      inFlightPerksAppliedAt,
       CreatedTime AS createdAt,
       CreatedTime AS createdTime,
       CreatedTime AS CreatedTime
@@ -223,6 +338,9 @@ app.get('/records/passenger/:passengerID', (req, res) => {
       AmountPaid AS amountPaid,
       bookingstatus AS status,
       bookingstatus AS bookingstatus,
+      inFlightPerksVoucherID,
+      inFlightPerksVoucherCode,
+      inFlightPerksAppliedAt,
       CreatedTime AS createdAt,
       CreatedTime AS createdTime
     FROM booking
@@ -262,6 +380,9 @@ app.get('/records/:bookingID', (req, res) => {
       AmountPaid AS amountPaid,
       bookingstatus AS status,
       bookingstatus AS bookingstatus,
+      inFlightPerksVoucherID,
+      inFlightPerksVoucherCode,
+      inFlightPerksAppliedAt,
       CreatedTime AS createdAt,
       CreatedTime AS createdTime
     FROM booking

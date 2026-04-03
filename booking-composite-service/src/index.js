@@ -18,10 +18,12 @@ app.use(express.json());
 const PASSENGER_SERVICE_URL = (process.env.PASSENGER_SERVICE_URL || 'http://passenger-service:3000').replace(/\/$/, '');
 const FLIGHT_SERVICE_URL = (process.env.FLIGHT_SERVICE_URL || 'http://flight-service:3000').replace(/\/$/, '');
 const PAYMENT_SERVICE_URL = (process.env.PAYMENT_SERVICE_URL || 'http://payment-service:5000').replace(/\/$/, '');
+const VOUCHER_SERVICE_URL = (process.env.VOUCHER_SERVICE_URL || 'http://voucher-service:5005').replace(/\/$/, '');
 const NOTIFICATION_SERVICE_URL = (process.env.NOTIFICATION_SERVICE_URL || 'http://notification-service:3000').replace(/\/$/, '');
 const SEATS_SERVICE_URL = (process.env.SEATS_SERVICE_URL || 'http://seats-service:5003').replace(/\/$/, '');
 const RECORD_SERVICE_URL = (process.env.RECORD_SERVICE_URL || 'http://record-service:3000').replace(/\/$/, '');
 const OFFER_SERVICE_URL = (process.env.OFFER_SERVICE_URL || 'http://offer-service:5000').replace(/\/$/, '');
+const MILES_EARN_SERVICE_URL = (process.env.MILES_EARN_SERVICE_URL || 'http://miles-earn-service:5009').replace(/\/$/, '');
 const RABBITMQ_URL             = process.env.RABBITMQ_URL            || 'amqp://guest:guest@rabbitmq:5672';
 
 // ==========================================
@@ -282,6 +284,9 @@ app.post('/api/bookings', async (req, res) => {
     cancelUrl,
     frontendBaseUrl,
     travelers,
+    selectedPerksVoucherID,
+    selectedPerksVoucherCode,
+    selectedPerksVoucherType,
   } = req.body;
   
   if (!passengerID || !flightID || !seatNumber) {
@@ -435,6 +440,12 @@ app.post('/api/bookings', async (req, res) => {
       successUrl += `&returnGroupBookingIDs=${encodeURIComponent(returnBookings.map((booking) => booking.bookingID).join(','))}`;
     }
 
+    if (selectedPerksVoucherID && selectedPerksVoucherCode && selectedPerksVoucherType === 'IN_FLIGHT_PERKS') {
+      successUrl += `&selectedPerksVoucherID=${encodeURIComponent(String(selectedPerksVoucherID))}`;
+      successUrl += `&selectedPerksVoucherCode=${encodeURIComponent(String(selectedPerksVoucherCode))}`;
+      successUrl += `&selectedPerksVoucherType=${encodeURIComponent(String(selectedPerksVoucherType))}`;
+    }
+
     const totalAmount = outboundFare + returnFare;
     const finalCancelUrl = new URL(buildCancelUrl(
       cancelUrl,
@@ -519,6 +530,9 @@ app.post('/api/bookings/finalize', async (req, res) => {
     seatNumber,
     returnFlightID,
     returnSeatNumber,
+    selectedPerksVoucherID,
+    selectedPerksVoucherCode,
+    selectedPerksVoucherType,
   } = req.body;
 
   if (!bookingID || !sessionID || !flightID || !seatNumber) {
@@ -546,6 +560,21 @@ app.post('/api/bookings/finalize', async (req, res) => {
         message: 'Payment not completed yet',
         payment,
       });
+    }
+
+    // Award miles based on payment amount (non-blocking)
+    try {
+      await axios.post(`${MILES_EARN_SERVICE_URL}/miles/earn`, {
+        passengerID: payment.passengerID,
+        flightCost: payment.amount,
+        bookingReference: `BK-${String(bookingID).padStart(5, '0')}`,
+        currency: 'SGD',
+        milesPerDollar: 1,
+      });
+      console.log(`✓ Awarded miles for booking ${bookingID}`);
+    } catch (milesError) {
+      console.warn(`⚠ Failed to award miles for booking ${bookingID}:`, milesError.response?.data || milesError.message);
+      // Do not block booking confirmation if miles earning fails
     }
 
     const outboundBookingIDs = parseIdList(groupBookingIDs);
@@ -626,6 +655,27 @@ app.post('/api/bookings/finalize', async (req, res) => {
       }
     }
 
+    let perksAttachment = null;
+    if (selectedPerksVoucherID && selectedPerksVoucherCode && selectedPerksVoucherType === 'IN_FLIGHT_PERKS') {
+      try {
+        const bookingServiceUrl = process.env.BOOKING_SERVICE_INTERNAL_URL || `http://localhost:${process.env.PORT || 3001}`;
+        const perksResponse = await axios.post(`${bookingServiceUrl}/api/bookings/${bookingID}/in-flight-perks`, {
+          passengerID: payment.passengerID,
+          voucherID: Number(selectedPerksVoucherID),
+          voucherCode: String(selectedPerksVoucherCode),
+        });
+        perksAttachment = {
+          success: true,
+          message: perksResponse.data?.message || 'In-flight perks attached successfully',
+        };
+      } catch (perksError) {
+        perksAttachment = {
+          success: false,
+          message: perksError.response?.data?.message || perksError.response?.data?.error || perksError.message,
+        };
+      }
+    }
+
     // 6) Publish booking.confirmed to RabbitMQ → Notification Service sends email
     await publishBookingConfirmed({
       booking_id:      bookingID,
@@ -651,6 +701,7 @@ app.post('/api/bookings/finalize', async (req, res) => {
       returnBookingID: returnBookingID || null,
       bookingIDs: allBookingIDs,
       payment,
+      perksAttachment,
     });
 
   } catch (error) {
@@ -683,6 +734,96 @@ app.get('/api/bookings/passenger/:passengerID', async (req, res) => {
     res.json(response.data);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch bookings', message: error.message });
+  }
+});
+
+app.post('/api/bookings/:bookingID/in-flight-perks', async (req, res) => {
+  const { bookingID } = req.params;
+  const { passengerID, voucherID, voucherCode } = req.body;
+
+  if (!passengerID || !voucherID || !voucherCode) {
+    return res.status(400).json({
+      error: 'passengerID, voucherID, and voucherCode are required',
+    });
+  }
+
+  try {
+    const bookingResponse = await axios.get(`${RECORD_SERVICE_URL}/records/${bookingID}`);
+    const booking = bookingResponse.data || {};
+    const ownerID = Number(booking.bookedByPassengerID || booking.BookedByPassengerID || booking.passengerID || booking.PassengerID);
+
+    if (ownerID !== Number(passengerID)) {
+      return res.status(403).json({
+        error: 'This booking does not belong to the signed-in passenger',
+      });
+    }
+
+    if (String(booking.status || booking.bookingstatus || '').trim() !== 'Confirmed') {
+      return res.status(409).json({
+        error: 'In-flight perks can only be attached to confirmed bookings',
+      });
+    }
+
+    if (booking.inFlightPerksVoucherID || booking.InFlightPerksVoucherID) {
+      return res.status(409).json({
+        error: 'In-flight perks are already attached to this booking',
+      });
+    }
+
+    const voucherResponse = await axios.get(`${VOUCHER_SERVICE_URL}/vouchers/code/${encodeURIComponent(voucherCode)}`);
+    const voucher = voucherResponse.data || {};
+
+    if (Number(voucher.passengerID) !== Number(passengerID)) {
+      return res.status(403).json({
+        error: 'This voucher does not belong to the signed-in passenger',
+      });
+    }
+
+    if (voucher.voucherType !== 'IN_FLIGHT_PERKS') {
+      return res.status(400).json({
+        error: 'Only in-flight perks vouchers can be attached to bookings',
+      });
+    }
+
+    if (voucher.status !== 'ACTIVE') {
+      return res.status(409).json({
+        error: 'This voucher is no longer active',
+      });
+    }
+
+    await axios.put(`${RECORD_SERVICE_URL}/records/${bookingID}/perks`, {
+      passengerID,
+      voucherID,
+      voucherCode,
+    });
+
+    try {
+      await axios.put(`${VOUCHER_SERVICE_URL}/vouchers/${voucherID}/redeem`, {
+        bookingID: Number(bookingID),
+      });
+    } catch (redeemError) {
+      await axios.delete(`${RECORD_SERVICE_URL}/records/${bookingID}/perks`).catch(() => {});
+      throw redeemError;
+    }
+
+    const updatedBookingResponse = await axios.get(`${RECORD_SERVICE_URL}/records/${bookingID}`);
+
+    return res.status(200).json({
+      success: true,
+      message: 'In-flight perks attached successfully',
+      booking: updatedBookingResponse.data,
+      voucher: {
+        voucherID,
+        voucherCode,
+      },
+    });
+  } catch (error) {
+    const message = error.response?.data?.error || error.response?.data?.message || error.message;
+    return res.status(error.response?.status || 500).json({
+      success: false,
+      error: 'Failed to attach in-flight perks',
+      message,
+    });
   }
 });
 

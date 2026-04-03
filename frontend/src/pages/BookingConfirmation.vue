@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { usePassengerSession } from '../composables/usePassengerSession'
@@ -14,6 +14,10 @@ const { bookingDraft } = useBookingDraft()
 const loading = ref(false)
 const error = ref(null)
 const sessionUrl = ref(route.query.sessionUrl || null)
+const activePerksVoucher = ref(null)
+const selectedPerksVoucher = ref(null)
+const perksLoading = ref(false)
+const perksError = ref('')
 
 const isRoundTrip = computed(() => route.query.tripType === 'round-trip' && Boolean(route.query.outboundFlightID))
 const draftTravelers = computed(() => bookingDraft.value?.travelers || [])
@@ -150,6 +154,12 @@ async function confirmBooking() {
         travelers: buildTravelerPayload(),
       }
 
+      if (selectedPerksVoucher.value) {
+        payload.selectedPerksVoucherID = selectedPerksVoucher.value.voucherID
+        payload.selectedPerksVoucherCode = selectedPerksVoucher.value.voucherCode || selectedPerksVoucher.value.code
+        payload.selectedPerksVoucherType = selectedPerksVoucher.value.voucherType || selectedPerksVoucher.value.type
+      }
+
       if (isRoundTrip.value) {
         payload.returnFlightID = bookingDetails.value.flightID
         payload.returnSeatNumber = bookingDetails.value.seatNumber
@@ -187,6 +197,11 @@ async function confirmBooking() {
       if (bookingResponse.data.returnBookingIDs?.length) {
         currentUrl.searchParams.set('returnGroupBookingIDs', bookingResponse.data.returnBookingIDs.join(','))
       }
+      if (selectedPerksVoucher.value) {
+        currentUrl.searchParams.set('selectedPerksVoucherID', String(selectedPerksVoucher.value.voucherID))
+        currentUrl.searchParams.set('selectedPerksVoucherCode', String(selectedPerksVoucher.value.voucherCode || selectedPerksVoucher.value.code || ''))
+        currentUrl.searchParams.set('selectedPerksVoucherType', String(selectedPerksVoucher.value.voucherType || selectedPerksVoucher.value.type || ''))
+      }
       window.history.replaceState({}, '', currentUrl.toString())
     }
 
@@ -199,6 +214,34 @@ async function confirmBooking() {
 }
 
 const wasCancelled = route.query.cancelled === 'true'
+
+onMounted(async () => {
+  await loadActivePerksVoucher()
+})
+
+async function loadActivePerksVoucher() {
+  if (!currentPassenger.value?.passenger_id) return
+
+  perksLoading.value = true
+  perksError.value = ''
+
+  try {
+    const loyaltyUrl = import.meta.env.VITE_LOYALTY_SERVICE_URL || 'http://localhost:5008'
+    const response = await axios.get(`${loyaltyUrl}/api/loyalty/vouchers/${currentPassenger.value.passenger_id}?status=ACTIVE`)
+    const vouchers = Array.isArray(response.data) ? response.data : (response.data?.vouchers || [])
+    activePerksVoucher.value = vouchers.find((voucher) => (voucher.voucherType || voucher.type) === 'IN_FLIGHT_PERKS') || null
+    selectedPerksVoucher.value = activePerksVoucher.value
+  } catch (err) {
+    perksError.value = 'We could not check for an unused in-flight perks voucher right now.'
+  } finally {
+    perksLoading.value = false
+  }
+}
+
+function togglePerksVoucherSelection() {
+  if (!activePerksVoucher.value) return
+  selectedPerksVoucher.value = selectedPerksVoucher.value ? null : activePerksVoucher.value
+}
 </script>
 
 <template>
@@ -336,6 +379,35 @@ const wasCancelled = route.query.cancelled === 'true'
               </div>
             </div>
           </div>
+        </div>
+
+        <div v-if="activePerksVoucher" class="mt-8 rounded-2xl border border-[#f4d6a6] bg-[#fff9ef] p-5">
+          <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-[0.12em] text-[#9a6200]">Optional add-on</p>
+              <h3 class="mt-2 text-lg font-semibold text-[#1d1d1f]">Your in-flight perks voucher is selected by default</h3>
+              <p class="mt-1 text-sm text-[#6e6e73]">
+                You already have an unused in-flight perks voucher, and it will be attached to this booking after payment unless you turn it off.
+              </p>
+              <p v-if="travelerSummaries.length > 1" class="mt-2 text-sm font-medium text-[#9a6200]">
+                This voucher will apply to the primary passenger only.
+              </p>
+            </div>
+            <button
+              @click="togglePerksVoucherSelection"
+              class="rounded-xl border px-4 py-2 text-sm font-semibold transition"
+              :class="selectedPerksVoucher ? 'border-[#9a6200] bg-[#9a6200] text-white' : 'border-[#f4d6a6] bg-white text-[#9a6200] hover:bg-[#fffaf2]'"
+            >
+              {{ selectedPerksVoucher ? 'Voucher selected' : 'Attach voucher' }}
+            </button>
+          </div>
+
+          <div v-if="selectedPerksVoucher" class="mt-4 rounded-xl border border-[#f4d6a6] bg-white p-4 text-sm text-[#5f6b7d]">
+            {{ selectedPerksVoucher.voucherCode || selectedPerksVoucher.code || 'Selected voucher' }} will be attached after your payment is confirmed.
+          </div>
+
+          <p v-if="perksLoading" class="mt-3 text-sm text-[#6e6e73]">Checking your active vouchers...</p>
+          <p v-if="perksError" class="mt-3 text-sm text-[#b42318]">{{ perksError }}</p>
         </div>
 
         <div class="mt-8 rounded-2xl bg-[#f5f5f7] p-4">

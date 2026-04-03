@@ -1,11 +1,12 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import axios from 'axios'
 import { usePassengerSession } from '../composables/usePassengerSession'
 import { apiUrl } from '../config/api'
 
 const router = useRouter()
+const route = useRoute()
 const { currentPassenger } = usePassengerSession()
 
 const bookings = ref([])
@@ -20,8 +21,24 @@ const searchQuery = ref('')
 const expandedBookingIds = ref(new Set())
 const expandedInfoBookingIds = ref(new Set())
 const resumingBookingIds = ref(new Set())
+const applyingPerksBookingIds = ref(new Set())
+const selectedPerksVoucher = ref(null)
+const perksFlowMessage = ref('')
+const perksFlowError = ref('')
 
 const BOOKING_TABS = ['All', 'Awaiting Payment', 'Upcoming', 'Awaiting Review']
+
+watch(
+  () => route.query,
+  (query) => {
+    selectedPerksVoucher.value = parsePerksVoucherQuery(query)
+    if (!selectedPerksVoucher.value) {
+      perksFlowMessage.value = ''
+      perksFlowError.value = ''
+    }
+  },
+  { immediate: true, deep: true }
+)
 
 onMounted(async () => {
   if (!currentPassenger.value) {
@@ -102,6 +119,23 @@ function normalizeCollectionResponse(payload) {
   if (Array.isArray(data?.value)) return data.value
   if (Array.isArray(data?.data)) return data.data
   return []
+}
+
+function parsePerksVoucherQuery(query) {
+  const voucherID = Number(query?.voucherID)
+  const voucherCode = String(query?.voucherCode || '').trim()
+  const voucherType = String(query?.voucherType || '').trim()
+
+  if (!voucherID || !voucherCode || voucherType !== 'IN_FLIGHT_PERKS') {
+    return null
+  }
+
+  return {
+    voucherID,
+    voucherCode,
+    voucherType,
+    voucherName: String(query?.voucherName || 'In-flight Perks Voucher'),
+  }
 }
 
 async function hydrateFlightDetails() {
@@ -523,6 +557,66 @@ function passengerCountLabel(booking) {
   return `${count} passenger${count === 1 ? '' : 's'}`
 }
 
+function hasInFlightPerks(booking) {
+  return Boolean(
+    booking?.inFlightPerksVoucherID
+    || booking?.InFlightPerksVoucherID
+    || booking?.inFlightPerksVoucherCode
+    || booking?.InFlightPerksVoucherCode
+  )
+}
+
+function inFlightPerksLabel(booking) {
+  const code = booking?.inFlightPerksVoucherCode || booking?.InFlightPerksVoucherCode
+  if (!code) return 'In-flight perks attached'
+  return `In-flight perks attached: ${code}`
+}
+
+function canApplyPerksToBooking(booking) {
+  return Boolean(
+    selectedPerksVoucher.value
+    && normalizedStatus(booking.status) === 'Confirmed'
+    && !hasInFlightPerks(booking)
+  )
+}
+
+function isApplyingPerks(booking) {
+  return applyingPerksBookingIds.value.has(Number(booking.bookingID))
+}
+
+async function applyPerksToBooking(booking) {
+  if (!selectedPerksVoucher.value) {
+    return
+  }
+
+  const bookingID = Number(booking.bookingID)
+  const next = new Set(applyingPerksBookingIds.value)
+  next.add(bookingID)
+  applyingPerksBookingIds.value = next
+  perksFlowError.value = ''
+  perksFlowMessage.value = ''
+
+  try {
+    const bookingServiceUrl = import.meta.env.VITE_BOOKING_SERVICE_URL || 'http://localhost:3010'
+
+    await axios.post(`${bookingServiceUrl}/api/bookings/${bookingID}/in-flight-perks`, {
+      passengerID: currentPassenger.value.passenger_id,
+      voucherID: selectedPerksVoucher.value.voucherID,
+      voucherCode: selectedPerksVoucher.value.voucherCode,
+    })
+
+    perksFlowMessage.value = `Applied ${selectedPerksVoucher.value.voucherName} to booking #${bookingID}.`
+    selectedPerksVoucher.value = null
+    await loadData()
+  } catch (err) {
+    perksFlowError.value = err.response?.data?.message || err.response?.data?.error || 'Unable to attach in-flight perks right now.'
+  } finally {
+    const reset = new Set(applyingPerksBookingIds.value)
+    reset.delete(bookingID)
+    applyingPerksBookingIds.value = reset
+  }
+}
+
 function bookingNumberLabel(booking) {
   const ids = (Array.isArray(booking?.bookingIDs) ? booking.bookingIDs : [booking?.bookingID])
     .map((id) => Number(id))
@@ -935,6 +1029,33 @@ function routeArtStyle(booking) {
         </button>
       </div>
 
+      <div
+        v-if="selectedPerksVoucher"
+        class="mb-6 rounded-[28px] border border-[#f4d6a6] bg-[#fff9ef] p-5 shadow-[0_16px_40px_rgba(15,23,42,0.05)]"
+      >
+        <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#9a6200]">In-flight perks voucher selected</p>
+        <div class="mt-2 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p class="text-lg font-semibold text-[#132238]">{{ selectedPerksVoucher.voucherName }}</p>
+            <p class="mt-1 text-sm text-[#5f6b7d]">Pick one confirmed booking below to attach this voucher. The voucher will be marked used once applied.</p>
+          </div>
+          <button
+            @click="selectedPerksVoucher = null"
+            class="rounded-xl border border-[#f4d6a6] bg-white px-4 py-2 text-sm font-semibold text-[#9a6200] transition hover:bg-[#fffaf2]"
+          >
+            Clear Selection
+          </button>
+        </div>
+      </div>
+
+      <div v-if="perksFlowMessage" class="mb-6 rounded-[24px] border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-700">
+        {{ perksFlowMessage }}
+      </div>
+
+      <div v-if="perksFlowError" class="mb-6 rounded-[24px] border border-rose-200 bg-rose-50 px-5 py-4 text-sm font-medium text-rose-700">
+        {{ perksFlowError }}
+      </div>
+
       <div v-if="loading" class="space-y-4">
         <div v-for="i in 3" :key="i" class="h-72 animate-pulse rounded-[28px] bg-white shadow-[0_16px_40px_rgba(15,23,42,0.05)]"></div>
       </div>
@@ -1069,6 +1190,15 @@ function routeArtStyle(booking) {
                       <p class="mt-2 text-sm font-semibold text-[#132238]">{{ normalizedStatus(booking.status) || 'Confirmed' }}</p>
                     </div>
                   </div>
+                </div>
+
+                <div v-if="hasInFlightPerks(booking)" class="mt-4 rounded-2xl border border-[#c8f1df] bg-[#f4fffa] p-4">
+                  <p class="text-[11px] font-bold uppercase tracking-[0.14em] text-[#12a36d]">Add-on applied</p>
+                  <p class="mt-2 text-sm font-semibold text-[#132238]">{{ inFlightPerksLabel(booking) }}</p>
+                  <p class="mt-1 text-sm text-[#5f6b7d]">This booking already has your in-flight perks voucher attached.</p>
+                  <p v-if="(booking.travellerCount || booking.bookings?.length || 1) > 1" class="mt-2 text-sm font-medium text-[#9a6200]">
+                    This voucher will apply to the primary passenger only.
+                  </p>
                 </div>
 
                 <div
@@ -1259,6 +1389,13 @@ function routeArtStyle(booking) {
                   </div>
 
                   <div class="flex flex-wrap gap-3">
+                    <button
+                      v-if="canApplyPerksToBooking(booking)"
+                      @click="applyPerksToBooking(booking)"
+                      class="inline-flex items-center gap-2 rounded-xl border border-[#f4d6a6] bg-[#fff9ef] px-4 py-3 text-sm font-semibold text-[#9a6200] transition hover:bg-[#fff6e4]"
+                    >
+                      <span>{{ isApplyingPerks(booking) ? 'Applying...' : 'Apply Perks Here' }}</span>
+                    </button>
                     <button
                       @click="toggleFlightInfo(booking)"
                       class="inline-flex items-center gap-2 rounded-xl border border-black/10 px-4 py-3 text-sm font-semibold text-[#1d1d1f] transition hover:border-[#e63946]/30 hover:bg-[#f7f7f8]"

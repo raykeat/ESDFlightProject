@@ -56,6 +56,7 @@ services:
       - FLIGHT_SERVICE_URL=http://flight-service:3000
       - PAYMENT_SERVICE_URL=http://payment-service:5000
       - NOTIFICATION_SERVICE_URL=http://notification-service:3004
+      - MILES_EARN_SERVICE_URL=http://miles-earn-service:5009
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
       - PASSENGER_SERVICE_URL=https://personal-4whagfbm.outsystemscloud.com/Passenger_Srv/rest/PassengerAPI/  # OutSystems
     depends_on:
@@ -67,6 +68,8 @@ services:
         condition: service_healthy
       notification-service:
         condition: service_healthy
+      miles-earn-service:
+        condition: service_started
       rabbitmq:
         condition: service_healthy
     healthcheck:
@@ -728,6 +731,32 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # ========== MILES EARN SERVICE ==========
+  miles-earn-service:
+    build: ./miles-earn-microservice
+    container_name: miles-earn-app
+    ports:
+      - "5009:5009"
+    environment:
+      - PORT=5009
+      - MILES_PER_DOLLAR=1
+      - MILES_BALANCE_URL=http://miles-balance-service:5006
+      - MILES_TRANSACTION_URL=http://miles-transaction-service:5007
+    depends_on:
+      miles-balance-service:
+        condition: service_started
+      miles-transaction-service:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5009/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - app-network
+    restart: unless-stopped
 
   # ========== LOYALTY COMPOSITE SERVICE ==========
   loyalty-composite-service:

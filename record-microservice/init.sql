@@ -15,6 +15,9 @@ CREATE TABLE IF NOT EXISTS booking (
     seatNumber VARCHAR(50),      -- Supports comma-separated seats like '1A, 1B'
     returnFlightID INT,           -- Supports round-trip
     returnSeatNumber VARCHAR(50), -- Supports round-trip return seats
+    inFlightPerksVoucherID INT NULL,
+    inFlightPerksVoucherCode VARCHAR(50) NULL,
+    inFlightPerksAppliedAt TIMESTAMP NULL,
     
     CreatedTime TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
