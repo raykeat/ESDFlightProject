@@ -121,6 +121,125 @@ function getNormalizedSeatNumber(record) {
   return firstNonEmpty(record.seatNumber, record.SeatNumber, record.seatID, record.SeatID);
 }
 
+async function awardMilesForBookingIfCompleted({ bookingID, force = false }) {
+  const bookingResponse = await axios.get(`${RECORD_SERVICE_URL}/records/${bookingID}`);
+  const booking = bookingResponse.data;
+
+  if (String(booking.status || '').toLowerCase() !== 'confirmed') {
+    return { awarded: false, reason: 'booking_not_confirmed' };
+  }
+
+  if (booking.milesAwardedAt) {
+    return {
+      awarded: false,
+      reason: 'already_awarded',
+      milesAwardedAt: booking.milesAwardedAt,
+      milesAwarded: booking.milesAwarded || null,
+      transactionID: booking.milesTransactionID || null,
+    };
+  }
+
+  const passengerID = Number(firstNonEmpty(booking.passengerID, booking.PassengerID));
+  if (!passengerID) {
+    return { awarded: false, reason: 'guest_or_missing_passenger' };
+  }
+
+  const flightID = Number(firstNonEmpty(booking.flightID, booking.FlightID));
+  const flightResponse = await axios.get(`${FLIGHT_SERVICE_URL}/flight/${flightID}`);
+  const flight = flightResponse.data || {};
+
+  if (String(flight.Status || '').toLowerCase() === 'cancelled') {
+    return { awarded: false, reason: 'flight_cancelled' };
+  }
+
+  const flightStatus = String(flight.Status || '').toLowerCase();
+  const hasCompleted = flightStatus === 'landed';
+
+  if (!force && !hasCompleted) {
+    return {
+      awarded: false,
+      reason: 'flight_not_landed',
+      flightStatus: flight.Status || null,
+    };
+  }
+
+  const amountPaid = Number(firstNonEmpty(booking.amountPaid, booking.amount, booking.AmountPaid));
+  const earnResponse = await axios.post(`${MILES_EARN_SERVICE_URL}/miles/earn`, {
+    passengerID,
+    flightCost: amountPaid,
+    bookingReference: `BK-${String(bookingID).padStart(5, '0')}`,
+    currency: 'SGD',
+    milesPerDollar: 1,
+  });
+
+  await axios.put(`${RECORD_SERVICE_URL}/records/${bookingID}/miles-awarded`, {
+    milesAwarded: earnResponse.data.earnedMiles,
+    transactionID: earnResponse.data.transactionID,
+  });
+
+  return {
+    awarded: true,
+    bookingID,
+    passengerID,
+    flightID,
+    earnedMiles: earnResponse.data.earnedMiles,
+    transactionID: earnResponse.data.transactionID,
+    newBalance: earnResponse.data.newBalance,
+    forced: force,
+  };
+}
+
+async function awardMilesForFlight(flightID, force = false) {
+  const bookingsResponse = await axios.get(`${RECORD_SERVICE_URL}/records`, {
+    params: {
+      FlightID: flightID,
+      bookingstatus: 'Confirmed',
+    },
+  });
+
+  const bookings = Array.isArray(bookingsResponse.data) ? bookingsResponse.data : [];
+  const results = await Promise.allSettled(
+    bookings.map((booking) => awardMilesForBookingIfCompleted({
+      bookingID: Number(firstNonEmpty(booking.bookingID, booking.BookingID)),
+      force,
+    }))
+  );
+
+  const summary = {
+    flightID: Number(flightID),
+    totalBookings: bookings.length,
+    awarded: 0,
+    skipped: 0,
+    failed: 0,
+    details: [],
+  };
+
+  results.forEach((result, index) => {
+    const booking = bookings[index];
+    const bookingID = Number(firstNonEmpty(booking.bookingID, booking.BookingID));
+
+    if (result.status === 'fulfilled') {
+      const value = result.value || {};
+      if (value.awarded) {
+        summary.awarded += 1;
+      } else {
+        summary.skipped += 1;
+      }
+      summary.details.push({ bookingID, ...value });
+    } else {
+      summary.failed += 1;
+      summary.details.push({
+        bookingID,
+        awarded: false,
+        reason: 'error',
+        message: result.reason?.response?.data?.message || result.reason?.message || String(result.reason),
+      });
+    }
+  });
+
+  return summary;
+}
+
 function splitAmount(totalAmount, parts) {
   const totalCents = Math.round(Number(totalAmount || 0) * 100);
   const base = Math.floor(totalCents / parts);
@@ -562,21 +681,6 @@ app.post('/api/bookings/finalize', async (req, res) => {
       });
     }
 
-    // Award miles based on payment amount (non-blocking)
-    try {
-      await axios.post(`${MILES_EARN_SERVICE_URL}/miles/earn`, {
-        passengerID: payment.passengerID,
-        flightCost: payment.amount,
-        bookingReference: `BK-${String(bookingID).padStart(5, '0')}`,
-        currency: 'SGD',
-        milesPerDollar: 1,
-      });
-      console.log(`✓ Awarded miles for booking ${bookingID}`);
-    } catch (milesError) {
-      console.warn(`⚠ Failed to award miles for booking ${bookingID}:`, milesError.response?.data || milesError.message);
-      // Do not block booking confirmation if miles earning fails
-    }
-
     const outboundBookingIDs = parseIdList(groupBookingIDs);
     if (!outboundBookingIDs.length) outboundBookingIDs.push(Number(bookingID));
     const inboundBookingIDs = parseIdList(returnGroupBookingIDs);
@@ -711,6 +815,71 @@ app.post('/api/bookings/finalize', async (req, res) => {
       success: false,
       error: 'Failed to finalise booking',
       message,
+    });
+  }
+});
+
+// ==========================================
+// POST /api/bookings/:bookingID/award-miles
+// Award miles only when flight has completed.
+// For demo: pass { force: true } to award immediately.
+// ==========================================
+app.post('/api/bookings/:bookingID/award-miles', async (req, res) => {
+  const { bookingID } = req.params;
+  const { force = false } = req.body || {};
+
+  if (!Number.isFinite(Number(bookingID)) || Number(bookingID) <= 0) {
+    return res.status(400).json({ error: 'bookingID must be a positive number' });
+  }
+
+  try {
+    const result = await awardMilesForBookingIfCompleted({
+      bookingID: Number(bookingID),
+      force: Boolean(force),
+    });
+
+    if (result.awarded) {
+      return res.status(200).json({ success: true, ...result });
+    }
+
+    if (result.reason === 'already_awarded') {
+      return res.status(200).json({ success: true, ...result });
+    }
+
+    if (result.reason === 'flight_not_landed' || result.reason === 'booking_not_confirmed') {
+      return res.status(409).json({ success: false, ...result });
+    }
+
+    return res.status(400).json({ success: false, ...result });
+  } catch (error) {
+    return res.status(error.response?.status || 500).json({
+      success: false,
+      error: 'Failed to award miles',
+      message: error.response?.data || error.message,
+    });
+  }
+});
+
+// ==========================================
+// POST /api/flights/:flightID/award-miles
+// Award miles for all confirmed bookings on a landed flight.
+// ==========================================
+app.post('/api/flights/:flightID/award-miles', async (req, res) => {
+  const { flightID } = req.params;
+  const { force = false } = req.body || {};
+
+  if (!Number.isFinite(Number(flightID)) || Number(flightID) <= 0) {
+    return res.status(400).json({ error: 'flightID must be a positive number' });
+  }
+
+  try {
+    const summary = await awardMilesForFlight(Number(flightID), Boolean(force));
+    return res.status(200).json({ success: true, ...summary });
+  } catch (error) {
+    return res.status(error.response?.status || 500).json({
+      success: false,
+      error: 'Failed to award flight miles',
+      message: error.response?.data || error.message,
     });
   }
 });
