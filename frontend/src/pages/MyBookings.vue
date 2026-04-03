@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import axios from 'axios'
 import { usePassengerSession } from '../composables/usePassengerSession'
+import { apiUrl } from '../config/api'
 
 const router = useRouter()
 const route = useRoute()
@@ -55,9 +56,9 @@ async function loadData() {
     const passengerId = currentPassenger.value.passenger_id
 
     const [bookingsRes, offersRes, paymentsRes] = await Promise.allSettled([
-      axios.get(`http://localhost:3010/api/bookings/passenger/${passengerId}`),
+      axios.get(apiUrl(`/api/bookings/passenger/${passengerId}`)),
       loadOffers(passengerId),
-      axios.get('http://localhost:5001/payment'),
+      axios.get(apiUrl('/api/payment')),
     ])
 
     if (bookingsRes.status !== 'fulfilled') {
@@ -85,22 +86,10 @@ async function loadData() {
 }
 
 async function loadOffers(passengerId) {
-  try {
-    const response = await axios.get(`http://localhost:5002/offers`, {
-      params: { passengerID: passengerId },
-    })
-    return response.data
-  } catch (primaryError) {
-    const status = primaryError?.response?.status
-    if (status && status !== 404) {
-      throw primaryError
-    }
-
-    const fallback = await axios.get(`http://localhost:5002/offer`, {
-      params: { passengerID: passengerId },
-    })
-    return fallback.data
-  }
+  const response = await axios.get(apiUrl('/api/offer'), {
+    params: { passengerID: passengerId },
+  })
+  return response.data
 }
 
 function normalizeCollectionResponse(payload) {
@@ -156,13 +145,7 @@ async function hydrateFlightDetails() {
 
   const map = {}
   const results = await Promise.allSettled(
-    uniqueFlightIds.map(async (flightID) => {
-      try {
-        return await axios.get(`http://localhost:3003/flight/${flightID}`)
-      } catch (primaryError) {
-        return await axios.get(`http://localhost:3003/flights/${flightID}`)
-      }
-    })
+    uniqueFlightIds.map(async (flightID) => axios.get(apiUrl(`/api/flight/${flightID}`)))
   )
 
   results.forEach((result, idx) => {
@@ -596,9 +579,7 @@ async function applyPerksToBooking(booking) {
   perksFlowMessage.value = ''
 
   try {
-    const bookingServiceUrl = import.meta.env.VITE_BOOKING_SERVICE_URL || 'http://localhost:3010'
-
-    await axios.post(`${bookingServiceUrl}/api/bookings/${bookingID}/in-flight-perks`, {
+    await axios.post(apiUrl(`/api/bookings/${bookingID}/in-flight-perks`), {
       passengerID: currentPassenger.value.passenger_id,
       voucherID: selectedPerksVoucher.value.voucherID,
       voucherCode: selectedPerksVoucher.value.voucherCode,
@@ -791,7 +772,7 @@ async function resumePendingBooking(booking) {
   resumingBookingIds.value = next
 
   try {
-    const response = await axios.post('http://localhost:3010/api/bookings/resume-payment', {
+    const response = await axios.post(apiUrl('/api/bookings/resume-payment'), {
       bookingID: booking.bookingID,
       frontendBaseUrl: window.location.origin,
     })

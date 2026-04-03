@@ -3,6 +3,7 @@ import { onMounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePassengerSession } from '../composables/usePassengerSession'
 import axios from 'axios'
+import { apiUrl } from '../config/api'
 
 const router = useRouter()
 const { currentPassenger, isSignedIn } = usePassengerSession()
@@ -180,15 +181,13 @@ async function executeConversion() {
     const lastName = currentPassenger.value?.LastName || currentPassenger.value?.lastName || ''
     const passengerName = `${firstName} ${lastName}`.trim()
     const passengerEmail = currentPassenger.value?.Email || currentPassenger.value?.email || ''
-    const loyaltyUrl = import.meta.env.VITE_LOYALTY_SERVICE_URL || 'http://localhost:5008'
-    
     let response
     
     if (selectedVouchers.value.length === 1) {
       // Single conversion
       const voucher = selectedVoucherDetails.value[0]
       response = await axios.post(
-        `${loyaltyUrl}/api/loyalty/convert`,
+        apiUrl('/api/loyalty/convert'),
         {
           passengerID,
           passengerEmail,
@@ -201,7 +200,7 @@ async function executeConversion() {
     } else {
       // Bundle conversion
       response = await axios.post(
-        `${loyaltyUrl}/api/loyalty/convert-bundle`,
+        apiUrl('/api/loyalty/convert-bundle'),
         {
           passengerID,
           passengerEmail,

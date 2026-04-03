@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
+import { apiUrl } from '../config/api'
 
 const router = useRouter()
 
@@ -40,10 +41,10 @@ async function loadFlights() {
     let response
 
     try {
-      response = await axios.get('http://localhost:3003/flights')
+      response = await axios.get(apiUrl('/api/flight'))
     } catch (primaryError) {
       console.warn('Primary flights endpoint unavailable, falling back to available flights endpoint.', primaryError)
-      response = await axios.get('http://localhost:3003/flight/available')
+      response = await axios.get(apiUrl('/api/flight/available'))
     }
 
     flights.value = Array.isArray(response.data)
@@ -63,7 +64,7 @@ async function loadFlights() {
 async function fetchAffectedPassengersCount(flightID) {
   if (!flightID) return 0
 
-  const response = await axios.get('http://localhost:3002/records', {
+  const response = await axios.get(apiUrl('/api/records'), {
     params: {
       FlightID: flightID,
       bookingstatus: 'Confirmed',
@@ -188,7 +189,7 @@ async function confirmCancellation() {
   cancelling.value  = true
   cancelError.value = ''
   try {
-    const res = await axios.post('http://localhost:5010/cancel', {
+    const res = await axios.post(apiUrl('/api/cancel'), {
       flightID:           selectedFlight.value.FlightID,
       cancellationReason: cancelReason.value.trim()
     })

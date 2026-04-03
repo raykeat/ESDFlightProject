@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { usePassengerSession } from '../composables/usePassengerSession'
 import { useBookingDraft } from '../composables/useBookingDraft'
+import { apiUrl } from '../config/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -185,7 +186,7 @@ async function confirmBooking() {
       cancelUrl.searchParams.set('cancelled', 'true')
       payload.cancelUrl = cancelUrl.toString()
 
-      const bookingResponse = await axios.post('http://localhost:3010/api/bookings', payload)
+      const bookingResponse = await axios.post(apiUrl('/api/bookings'), payload)
       finalSessionUrl = bookingResponse.data.sessionUrl
 
       const currentUrl = new URL(window.location.href)
@@ -225,8 +226,9 @@ async function loadActivePerksVoucher() {
   perksError.value = ''
 
   try {
-    const loyaltyUrl = import.meta.env.VITE_LOYALTY_SERVICE_URL || 'http://localhost:5008'
-    const response = await axios.get(`${loyaltyUrl}/api/loyalty/vouchers/${currentPassenger.value.passenger_id}?status=ACTIVE`)
+    const response = await axios.get(
+      apiUrl(`/api/loyalty/vouchers/${currentPassenger.value.passenger_id}?status=ACTIVE`)
+    )
     const vouchers = Array.isArray(response.data) ? response.data : (response.data?.vouchers || [])
     activePerksVoucher.value = vouchers.find((voucher) => (voucher.voucherType || voucher.type) === 'IN_FLIGHT_PERKS') || null
     selectedPerksVoucher.value = activePerksVoucher.value
