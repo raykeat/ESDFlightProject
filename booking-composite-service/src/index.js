@@ -258,11 +258,11 @@ async function getGroupBookingsForOffer(offer) {
     primaryBooking.PassengerID,
     offer.passengerID
   ));
-  const createdAt = String(firstNonEmpty(
-    primaryBooking.createdAt,
-    primaryBooking.createdTime,
-    primaryBooking.CreatedTime
-  ) || '');
+  const flightID = Number(firstNonEmpty(
+    primaryBooking.flightID,
+    primaryBooking.FlightID,
+    offer.origFlightID
+  ));
 
   const allBookingsResponse = await axios.get(`${RECORD_SERVICE_URL}/records/passenger/${bookerID}`);
   const allBookings = Array.isArray(allBookingsResponse.data) ? allBookingsResponse.data : [];
@@ -275,9 +275,8 @@ async function getGroupBookingsForOffer(offer) {
         record.passengerID,
         record.PassengerID
       )) === bookerID;
-      const sameCreatedAt = String(firstNonEmpty(record.createdAt, record.createdTime, record.CreatedTime) || '') === createdAt;
-      const sameFlight = Number(firstNonEmpty(record.flightID, record.FlightID)) === Number(offer.origFlightID);
-      return sameBooker && sameCreatedAt && sameFlight;
+      const sameFlight = Number(firstNonEmpty(record.flightID, record.FlightID)) === flightID;
+      return sameBooker && sameFlight;
     })
     .sort((a, b) => Number(firstNonEmpty(a.bookingID, a.BookingID)) - Number(firstNonEmpty(b.bookingID, b.BookingID)));
 }
@@ -1283,20 +1282,26 @@ app.post('/api/bookings/resume-payment', async (req, res) => {
 
     const allBookingsResponse = await axios.get(`${RECORD_SERVICE_URL}/records/passenger/${bookerID}`);
     const allBookings = Array.isArray(allBookingsResponse.data) ? allBookingsResponse.data : [];
-    const groupCreatedAt = firstNonEmpty(seedBooking.createdAt, seedBooking.createdTime, seedBooking.CreatedTime);
+    const groupFlightID = Number(firstNonEmpty(seedBooking.flightID, seedBooking.FlightID));
 
     const pendingGroup = allBookings
       .filter((record) => {
-        const createdAt = firstNonEmpty(record.createdAt, record.createdTime, record.CreatedTime);
         return Number(firstNonEmpty(record.bookedByPassengerID, record.BookedByPassengerID, record.passengerID, record.PassengerID)) === bookerID
           && String(record.status) === 'Pending'
-          && String(createdAt) === String(groupCreatedAt);
+          && Number(firstNonEmpty(record.flightID, record.FlightID)) === groupFlightID;
       })
       .sort((a, b) => Number(firstNonEmpty(a.bookingID, a.BookingID)) - Number(firstNonEmpty(b.bookingID, b.BookingID)));
 
     if (!pendingGroup.length) {
       return res.status(404).json({ error: 'No pending booking group found' });
     }
+
+    const groupCreatedAt = pendingGroup.reduce((oldest, record) => {
+      const createdAt = firstNonEmpty(record.createdAt, record.createdTime, record.CreatedTime);
+      if (!oldest) return createdAt;
+      if (!createdAt) return oldest;
+      return String(createdAt) < String(oldest) ? createdAt : oldest;
+    }, firstNonEmpty(seedBooking.createdAt, seedBooking.createdTime, seedBooking.CreatedTime));
 
     if (isPendingRecordExpired(groupCreatedAt)) {
       await cleanupPendingRecords(pendingGroup);

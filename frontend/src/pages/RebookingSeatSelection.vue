@@ -120,7 +120,7 @@ async function loadContext() {
     const primaryBookingResponse = await axios.get(apiUrl(`/api/bookings/${offer.value.bookingID}`))
     const primaryBooking = primaryBookingResponse.data
     const bookerID = Number(primaryBooking.bookedByPassengerID || primaryBooking.BookedByPassengerID || primaryBooking.passengerID || primaryBooking.PassengerID)
-    const createdAt = String(primaryBooking.createdAt || primaryBooking.createdTime || primaryBooking.CreatedTime || '')
+    const flightID = Number(primaryBooking.flightID || primaryBooking.FlightID || offer.value.origFlightID)
 
     const [allBookingsResponse, newFlightResponse, seatsResponse] = await Promise.all([
       axios.get(apiUrl(`/api/bookings/passenger/${bookerID}`)),
@@ -131,9 +131,8 @@ async function loadContext() {
     groupBookings.value = (Array.isArray(allBookingsResponse.data) ? allBookingsResponse.data : [])
       .filter((record) => {
         const sameBooker = Number(record.bookedByPassengerID || record.BookedByPassengerID || record.passengerID || record.PassengerID) === bookerID
-        const sameCreatedAt = String(record.createdAt || record.createdTime || record.CreatedTime || '') === createdAt
-        const sameFlight = Number(record.flightID || record.FlightID) === Number(offer.value.origFlightID)
-        return sameBooker && sameCreatedAt && sameFlight
+        const sameFlight = Number(record.flightID || record.FlightID) === flightID
+        return sameBooker && sameFlight
       })
       .sort((a, b) => Number(a.bookingID || a.BookingID) - Number(b.bookingID || b.BookingID))
 

@@ -87,8 +87,8 @@ def get_confirmed_bookings(flight_id):
 
 def get_booking_group_key(booking):
     booked_by = booking.get("BookedByPassengerID") or booking.get("bookedByPassengerID") or booking.get("PassengerID") or booking.get("passengerID")
-    created = booking.get("CreatedTime") or booking.get("createdTime") or booking.get("createdAt") or ""
-    return f"{booked_by}|{created}"
+    flight_id = booking.get("FlightID") or booking.get("flightID") or ""
+    return f"{booked_by}|{flight_id}"
 
 
 def get_primary_booking(group):
@@ -100,7 +100,6 @@ def get_primary_booking(group):
 
 def normalize_booking_group(group, original_flight_id):
     primary = get_primary_booking(group)
-    created_at = primary.get("CreatedTime") or primary.get("createdTime") or primary.get("createdAt") or ""
     booked_by = primary.get("BookedByPassengerID") or primary.get("bookedByPassengerID") or primary.get("PassengerID") or primary.get("passengerID")
     total_amount = sum(float(member.get("AmountPaid") or member.get("amountPaid") or member.get("amount") or 0) for member in group)
     booking_ids = [
@@ -111,8 +110,6 @@ def normalize_booking_group(group, original_flight_id):
 
     return {
         "groupKey": get_booking_group_key(primary),
-        "createdAt": created_at,
-        "createdAtDt": parse_datetime(str(created_at).split(" ")[0], str(created_at).split(" ")[1] if " " in str(created_at) else "00:00:00") if created_at else datetime.max,
         "bookedByPassengerID": int(booked_by) if booked_by else None,
         "primaryPassengerID": int(primary.get("PassengerID") or primary.get("passengerID") or booked_by),
         "primaryBookingID": int(primary.get("BookingID") or primary.get("bookingID")),
@@ -132,7 +129,6 @@ def build_booking_groups(bookings, original_flight_id):
     groups = [normalize_booking_group(group, original_flight_id) for group in grouped.values()]
     groups.sort(
         key=lambda item: (
-            item["createdAt"] or "",
             item["primaryBookingID"],
         )
     )
@@ -313,13 +309,18 @@ def run_consumer_loop():
 
     while True:
         for message in consumer:
+            processed_ok = False
             try:
                 event = json.loads(message.value.decode("utf-8"))
                 fan_out_passengers(event, producer)
+                processed_ok = True
             except Exception as exc:
                 logger.error("Error processing cancellation event: %s", str(exc))
             finally:
-                consumer.commit()
+                if processed_ok:
+                    consumer.commit()
+                else:
+                    logger.warning("Skipping Kafka commit due to processing failure; message will be retried")
 
 
 if __name__ == "__main__":
