@@ -19,6 +19,7 @@ KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:29092")
 PASSENGER_SERVICE_URL = os.getenv("PASSENGER_SERVICE_URL", "https://personal-4whagfbm.outsystemscloud.com/Passenger_Srv/rest/PassengerAPI")
 PAYMENT_SERVICE_URL = os.getenv("PAYMENT_SERVICE_URL", "http://payment-service:5000")
 RECORD_SERVICE_URL = os.getenv("RECORD_SERVICE_URL", "http://record-service:3000")
+VOUCHER_SERVICE_URL = os.getenv("VOUCHER_SERVICE_URL", "http://voucher-service:5005")
 FLIGHT_SERVICE_URL = os.getenv("FLIGHT_SERVICE_URL", "http://flight-service:3000")
 RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672")
 
@@ -41,6 +42,38 @@ def update_record_status(booking_id, status):
     if response.status_code >= 400:
         raise RuntimeError(f"Record update failed ({status}): {response.status_code} {response.text}")
 
+
+def restore_vouchers_for_booking(booking_id):
+    try:
+        response = requests.get(f"{RECORD_SERVICE_URL}/records/{booking_id}", timeout=10)
+        if response.status_code >= 400:
+            raise RuntimeError(f"Failed to fetch booking record: {response.status_code} {response.text}")
+
+        booking = get_json_or_none(response) or {}
+        voucher_ids = []
+        travel_credit_voucher_id = booking.get("travelCreditVoucherID") or booking.get("TravelCreditVoucherID")
+        in_flight_perks_voucher_id = booking.get("inFlightPerksVoucherID") or booking.get("InFlightPerksVoucherID")
+
+        if travel_credit_voucher_id:
+            voucher_ids.append(int(travel_credit_voucher_id))
+        if in_flight_perks_voucher_id:
+            voucher_ids.append(int(in_flight_perks_voucher_id))
+
+        for voucher_id in voucher_ids:
+            voucher_response = requests.put(
+                f"{VOUCHER_SERVICE_URL}/vouchers/{voucher_id}/status",
+                json={"status": "ACTIVE"},
+                timeout=10,
+            )
+            if voucher_response.status_code >= 400:
+                logger.warning(
+                    "Could not restore voucher %s for booking %s: %s",
+                    voucher_id,
+                    booking_id,
+                    voucher_response.text,
+                )
+    except Exception as exc:
+        logger.warning("Failed to restore vouchers for booking %s: %s", booking_id, str(exc))
 
 
 def process_path_b_message(msg):
@@ -66,8 +99,7 @@ def process_path_b_message(msg):
             "BookingID": booking_id,
             "PassengerID": passenger_id,
             "Amount": amount_paid,
-            "refundType": "partial",
-            "refundAmount": amount_paid,
+            "refundType": "full",
         },
         timeout=10,
     )
@@ -85,10 +117,12 @@ def process_path_b_message(msg):
             logger.error("Failed to set Refund Failed for BookingID=%s: %s", booking_id, str(exc))
 
         logger.error(
-            "Refund failed for BookingID=%s PassengerID=%s: %s",
+            "Refund failed for BookingID=%s PassengerID=%s: Status=%s Response=%s Payload=%s",
             booking_id,
             passenger_id,
-            refund_payload or refund_response.text,
+            refund_response.status_code,
+            refund_response.text,
+            refund_payload,
         )
         return
 
@@ -96,6 +130,12 @@ def process_path_b_message(msg):
     for group_booking_id in group_booking_ids:
         if int(group_booking_id) != int(booking_id):
             update_record_status(group_booking_id, "Cancelled")
+
+    restore_vouchers_for_booking(booking_id)
+    for group_booking_id in group_booking_ids:
+        if int(group_booking_id) != int(booking_id):
+            restore_vouchers_for_booking(group_booking_id)
+
     refund_amount = refund_payload.get("RefundAmount", amount_paid)
 
     orig_flight_response = requests.get(f"{FLIGHT_SERVICE_URL}/flights/{orig_flight_id}", timeout=10)

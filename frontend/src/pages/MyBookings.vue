@@ -22,6 +22,7 @@ const expandedBookingIds = ref(new Set())
 const expandedInfoBookingIds = ref(new Set())
 const resumingBookingIds = ref(new Set())
 const applyingPerksBookingIds = ref(new Set())
+const activePerksVouchers = ref([])
 const selectedPerksVoucher = ref(null)
 const perksFlowMessage = ref('')
 const perksFlowError = ref('')
@@ -78,6 +79,7 @@ async function loadData() {
     )
 
     await hydrateFlightDetails()
+    await loadActivePerksVouchers(passengerId)
   } catch (e) {
     error.value = 'Unable to load your bookings right now.'
   } finally {
@@ -90,6 +92,28 @@ async function loadOffers(passengerId) {
     params: { passengerID: passengerId },
   })
   return response.data
+}
+
+async function loadActivePerksVouchers(passengerId) {
+  try {
+    const response = await axios.get(apiUrl(`/api/loyalty/vouchers/${passengerId}?status=ACTIVE`))
+    const vouchers = Array.isArray(response.data) ? response.data : (response.data?.vouchers || [])
+    activePerksVouchers.value = vouchers.filter((voucher) => (voucher.voucherType || voucher.type) === 'IN_FLIGHT_PERKS')
+
+    if (!selectedPerksVoucher.value && activePerksVouchers.value.length === 1) {
+      selectedPerksVoucher.value = activePerksVouchers.value[0]
+    }
+
+    if (selectedPerksVoucher.value) {
+      const match = activePerksVouchers.value.find((voucher) =>
+        Number(voucher.voucherID || voucher.id) === Number(selectedPerksVoucher.value.voucherID)
+        || String(voucher.voucherCode || voucher.code) === String(selectedPerksVoucher.value.voucherCode)
+      )
+      selectedPerksVoucher.value = match || selectedPerksVoucher.value
+    }
+  } catch (err) {
+    console.warn('Could not load active perks vouchers:', err.message)
+  }
 }
 
 function normalizeCollectionResponse(payload) {
@@ -603,6 +627,7 @@ function canApplyPerksToBooking(booking) {
     selectedPerksVoucher.value
     && normalizedStatus(booking.status) === 'Confirmed'
     && !hasInFlightPerks(booking)
+    && !isFlightCancelled(booking)
   )
 }
 
@@ -629,7 +654,12 @@ async function applyPerksToBooking(booking) {
       voucherCode: selectedPerksVoucher.value.voucherCode,
     })
 
-    perksFlowMessage.value = `Applied ${selectedPerksVoucher.value.voucherName} to booking #${bookingID}.`
+    const voucherLabel = selectedPerksVoucher.value.voucherName
+      || selectedPerksVoucher.value.voucherCode
+      || selectedPerksVoucher.value.code
+      || (selectedPerksVoucher.value.voucherType || selectedPerksVoucher.value.type || 'In-flight perks voucher')
+
+    perksFlowMessage.value = `Applied ${voucherLabel} to booking #${bookingID}.`
     selectedPerksVoucher.value = null
     await loadData()
   } catch (err) {
@@ -657,7 +687,13 @@ function isAwaitingReview(booking) {
 }
 
 function isUpcoming(booking) {
-  if (hasPendingOffer(booking) || hasRefund(booking) || isCancelled(booking.status) || isFlightCompleted(booking)) {
+  if (
+    hasPendingOffer(booking)
+    || hasRefund(booking)
+    || isCancelled(booking.status)
+    || isFlightCompleted(booking)
+    || isFlightCancelled(booking)
+  ) {
     return false
   }
 
@@ -673,7 +709,7 @@ function isCompleted(booking) {
 }
 
 function isRefundedOrCancelled(booking) {
-  return hasRefund(booking) || isCancelled(booking.status)
+  return hasRefund(booking) || isCancelled(booking.status) || isFlightCancelled(booking)
 }
 
 const filteredBookings = computed(() => {
@@ -769,6 +805,8 @@ function statusLabel(booking) {
   if (hasAcceptedOffer(booking)) return 'Rebooked Flight'
   if (hasRefund(booking)) return 'Refunded'
 
+  if (isFlightCancelled(booking)) return 'Cancelled'
+
   const status = normalizedStatus(booking.status)
   if (status === 'Refund Failed') return 'Refund Failed'
   if (status === 'Confirmed') return 'Ticket(s) issued'
@@ -782,17 +820,17 @@ function getFlightStatus(booking) {
 }
 
 function flightCompletionLabel(booking) {
+  if (isFlightCancelled(booking)) return 'Cancelled'
   const status = getFlightStatus(booking).toLowerCase()
   if (status === 'landed') return 'Completed'
-  if (status === 'cancelled') return 'Cancelled'
   if (!status) return 'Scheduled'
   return status.charAt(0).toUpperCase() + status.slice(1)
 }
 
 function flightCompletionBadgeClass(booking) {
+  if (isFlightCancelled(booking)) return 'text-rose-700'
   const status = getFlightStatus(booking).toLowerCase()
   if (status === 'landed') return 'text-emerald-700'
-  if (status === 'cancelled') return 'text-rose-700'
   return 'text-[#132238]'
 }
 
@@ -800,10 +838,17 @@ function isFlightCompleted(booking) {
   return getFlightStatus(booking).toLowerCase() === 'landed'
 }
 
+function isFlightCancelled(booking) {
+  const status = getFlightStatus(booking).toLowerCase()
+  return status.startsWith('cancel')
+}
+
 function statusBadgeClass(booking) {
   if (hasPendingOffer(booking)) return 'border-[#f8d6df] bg-[#fff5f7] text-[#d72660]'
   if (hasAcceptedOffer(booking)) return 'border-[#f4d6a6] bg-[#fff7e8] text-[#9a6200]'
   if (hasRefund(booking)) return 'border-[#d9dee8] bg-white text-[#475569]'
+
+  if (isFlightCancelled(booking)) return 'border-rose-200 bg-rose-50 text-rose-700'
 
   const status = normalizedStatus(booking.status)
   if (status === 'Confirmed') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
@@ -817,6 +862,8 @@ function cardAccentClass(booking) {
   if (hasPendingOffer(booking)) return 'bg-[#ffd43b]'
   if (hasAcceptedOffer(booking)) return 'bg-[#d4a64c]'
   if (hasRefund(booking)) return 'bg-slate-400'
+
+  if (isFlightCancelled(booking)) return 'bg-[#e63946]'
 
   const status = normalizedStatus(booking.status)
   if (status === 'Confirmed') return 'bg-[#12c48b]'
@@ -922,6 +969,16 @@ function getOutcomeSummary(booking) {
     }
   }
 
+  if (isFlightCancelled(booking)) {
+    return {
+      title: 'Flight cancelled',
+      detail: 'This flight has been cancelled and your booking has been updated accordingly.',
+      actionLabel: 'Book Again',
+      action: () => router.push('/'),
+      disabled: false,
+    }
+  }
+
   if (normalizedStatus(booking.status) === 'Pending') {
     const minutesLeft = getPendingHoldMinutesLeft(booking)
     const detail = isPendingHoldExpired(booking)
@@ -952,6 +1009,8 @@ function paymentStatusLabel(booking) {
   if (hasRefund(booking)) return 'Refunded'
   if (hasPendingOffer(booking)) return 'Awaiting your review'
   if (hasAcceptedOffer(booking)) return 'Rebooked and confirmed'
+
+  if (isFlightCancelled(booking)) return 'Cancelled'
 
   const status = normalizedStatus(booking.status)
   if (status === 'Pending') return 'Awaiting payment'
@@ -1096,20 +1155,43 @@ function routeArtStyle(booking) {
       </div>
 
       <div
-        v-if="selectedPerksVoucher"
+        v-if="activeTab === 'Upcoming'"
         class="mb-6 rounded-[28px] border border-[#f4d6a6] bg-[#fff9ef] p-5 shadow-[0_16px_40px_rgba(15,23,42,0.05)]"
       >
-        <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#9a6200]">In-flight perks voucher selected</p>
-        <div class="mt-2 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p class="text-lg font-semibold text-[#132238]">{{ selectedPerksVoucher.voucherName }}</p>
-            <p class="mt-1 text-sm text-[#5f6b7d]">Pick one confirmed booking below to attach this voucher. The voucher will be marked used once applied.</p>
+        <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#9a6200]">In-flight perks voucher</p>
+        <div class="mt-2">
+          <p class="text-lg font-semibold text-[#132238]">Choose which voucher you want to attach</p>
+          <p class="mt-1 text-sm text-[#5f6b7d]">Select a voucher here, then apply it to one confirmed upcoming flight below.</p>
+        </div>
+
+        <div class="mt-5 grid gap-3 sm:grid-cols-2">
+          <template v-if="activePerksVouchers.length">
+            <button
+              v-for="voucher in activePerksVouchers"
+              :key="voucher.voucherCode || voucher.code || voucher.voucherID"
+              @click="selectedPerksVoucher = voucher"
+              class="rounded-2xl border p-4 text-left transition"
+              :class="selectedPerksVoucher?.voucherCode === voucher.voucherCode || selectedPerksVoucher?.code === voucher.code
+                ? 'border-[#9a6200] bg-[#fef8e8] shadow-[0_12px_30px_rgba(154,98,0,0.12)]'
+                : 'border-[#f4d6a6] bg-white hover:border-[#9a6200] hover:bg-[#fffaf2]'"
+            >
+              <p class="text-sm font-semibold text-[#132238]">{{ voucher.voucherType || voucher.type || 'In-flight Perks' }}</p>
+              <p class="mt-2 text-sm font-semibold text-[#1d1d1f]">{{ voucher.voucherCode || voucher.code || 'Voucher' }}</p>
+              <p class="mt-2 text-sm text-[#5f6b7d]">Tap to select this voucher for your booking.</p>
+            </button>
+          </template>
+          <div v-else class="rounded-2xl border border-dashed border-[#f4d6a6] bg-white/80 p-6 text-sm text-[#6b7280]">
+            No active in-flight perks vouchers are available right now.
           </div>
+        </div>
+
+        <div v-if="selectedPerksVoucher" class="mt-4 rounded-xl border border-[#f4d6a6] bg-white p-4 text-sm text-[#5f6b7d]">
+          {{ selectedPerksVoucher.voucherCode || selectedPerksVoucher.code || 'Selected voucher' }} is ready to apply.
           <button
             @click="selectedPerksVoucher = null"
-            class="rounded-xl border border-[#f4d6a6] bg-white px-4 py-2 text-sm font-semibold text-[#9a6200] transition hover:bg-[#fffaf2]"
+            class="ml-3 text-sm font-semibold text-[#9a6200] underline"
           >
-            Clear Selection
+            Clear selection
           </button>
         </div>
       </div>
@@ -1266,6 +1348,35 @@ function routeArtStyle(booking) {
                   <p v-if="(booking.travellerCount || booking.bookings?.length || 1) > 1" class="mt-2 text-sm font-medium text-[#9a6200]">
                     This voucher will apply to the primary passenger only.
                   </p>
+                </div>
+
+                <div
+                  v-else-if="isUpcoming(booking) && !hasInFlightPerks(booking)"
+                  class="mt-4 rounded-2xl border border-[#f4d6a6] bg-[#fffaf2] p-4"
+                >
+                  <p class="text-[11px] font-bold uppercase tracking-[0.14em] text-[#8a96a8]">In-flight perks voucher</p>
+                  <p class="mt-2 text-sm text-[#5f6b7d]">
+                    {{ activePerksVouchers.length
+                      ? 'Select an active voucher above, then attach it to this booking below.'
+                      : 'No active in-flight perks vouchers are available right now.' }}
+                  </p>
+
+                  <div class="mt-4 flex flex-wrap items-center gap-3">
+                    <button
+                      v-if="canApplyPerksToBooking(booking)"
+                      @click="applyPerksToBooking(booking)"
+                      class="inline-flex items-center gap-2 rounded-xl border border-[#f4d6a6] bg-[#fff9ef] px-4 py-3 text-sm font-semibold text-[#9a6200] transition hover:bg-[#fff6e4]"
+                    >
+                      <span>{{ isApplyingPerks(booking) ? 'Applying...' : 'Apply selected voucher to this flight' }}</span>
+                    </button>
+                    <p v-else class="text-sm text-[#6b7280] max-w-[32rem]">
+                      {{ selectedPerksVoucher
+                        ? 'This booking is not eligible for in-flight perks.'
+                        : activePerksVouchers.length
+                          ? 'Choose a voucher above to enable this action.'
+                          : 'No vouchers available; refresh later to check for new vouchers.' }}
+                    </p>
+                  </div>
                 </div>
 
                 <div

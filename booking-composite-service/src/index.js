@@ -106,6 +106,26 @@ function parseIdList(value) {
     .filter((id) => Number.isFinite(id) && id > 0);
 }
 
+async function restoreVoucherStatusesForBookingIDs(bookingIDs = []) {
+  const uniqueBookingIDs = [...new Set(bookingIDs.filter((id) => Number.isFinite(Number(id)) && Number(id) > 0))];
+  for (const bookingID of uniqueBookingIDs) {
+    try {
+      const bookingResponse = await axios.get(`${RECORD_SERVICE_URL}/records/${bookingID}`);
+      const booking = bookingResponse.data || {};
+      const voucherIDs = [];
+      const travelCreditVoucherID = firstNonEmpty(booking.travelCreditVoucherID, booking.TravelCreditVoucherID);
+      const inFlightPerksVoucherID = firstNonEmpty(booking.inFlightPerksVoucherID, booking.InFlightPerksVoucherID);
+      if (travelCreditVoucherID) voucherIDs.push(travelCreditVoucherID);
+      if (inFlightPerksVoucherID) voucherIDs.push(inFlightPerksVoucherID);
+      for (const voucherID of voucherIDs) {
+        await axios.put(`${VOUCHER_SERVICE_URL}/vouchers/${voucherID}/status`, { status: 'ACTIVE' });
+      }
+    } catch (restoreError) {
+      console.warn(`Could not restore vouchers for booking ${bookingID}:`, restoreError.response?.data?.message || restoreError.message);
+    }
+  }
+}
+
 function isPendingRecordExpired(createdAt, holdMinutes = 5) {
   if (!createdAt) return true;
   const createdTime = new Date(createdAt);
@@ -1247,11 +1267,30 @@ app.post('/api/rebooking/accept', async (req, res) => {
     }
 
     for (let index = 0; index < normalizedBookingIDs.length; index += 1) {
-      await axios.put(`${RECORD_SERVICE_URL}/records/${normalizedBookingIDs[index]}/rebook`, {
+      const originalRecord = records[index] || {};
+      const rebookPayload = {
         FlightID: newFlightID,
         seatNumber: normalizedSeatAssignments[index],
         BookingStatus: 'Confirmed',
-      });
+      };
+
+      if (originalRecord.travelCreditVoucherID || originalRecord.TravelCreditVoucherID) {
+        rebookPayload.travelCreditVoucherID = Number(firstNonEmpty(originalRecord.travelCreditVoucherID, originalRecord.TravelCreditVoucherID));
+      }
+      if (originalRecord.travelCreditVoucherCode || originalRecord.TravelCreditVoucherCode) {
+        rebookPayload.travelCreditVoucherCode = firstNonEmpty(originalRecord.travelCreditVoucherCode, originalRecord.TravelCreditVoucherCode);
+      }
+      if (originalRecord.travelCreditAppliedAmount || originalRecord.TravelCreditAppliedAmount) {
+        rebookPayload.travelCreditAppliedAmount = Number(firstNonEmpty(originalRecord.travelCreditAppliedAmount, originalRecord.TravelCreditAppliedAmount));
+      }
+      if (originalRecord.inFlightPerksVoucherID || originalRecord.InFlightPerksVoucherID) {
+        rebookPayload.inFlightPerksVoucherID = Number(firstNonEmpty(originalRecord.inFlightPerksVoucherID, originalRecord.InFlightPerksVoucherID));
+      }
+      if (originalRecord.inFlightPerksVoucherCode || originalRecord.InFlightPerksVoucherCode) {
+        rebookPayload.inFlightPerksVoucherCode = firstNonEmpty(originalRecord.inFlightPerksVoucherCode, originalRecord.InFlightPerksVoucherCode);
+      }
+
+      await axios.put(`${RECORD_SERVICE_URL}/records/${normalizedBookingIDs[index]}/rebook`, rebookPayload);
     }
 
     await axios.put(`${OFFER_SERVICE_URL}/offer/${offerID}`, {
@@ -1403,6 +1442,12 @@ app.post('/api/rebooking/reject', async (req, res) => {
     });
 
     const refundPayload = refundResponse.data || {};
+
+    const groupBookingIDs = groupBookings
+      .map((record) => Number(firstNonEmpty(record.bookingID, record.BookingID)))
+      .filter((id) => Number.isFinite(id) && id > 0);
+
+    await restoreVoucherStatusesForBookingIDs(groupBookingIDs);
     const refundStatus = refundPayload.Status || refundPayload.status;
 
     if (refundResponse.status >= 400 || refundStatus !== 'Refunded') {

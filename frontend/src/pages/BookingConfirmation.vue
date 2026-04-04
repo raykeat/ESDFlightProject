@@ -14,9 +14,9 @@ const { bookingDraft } = useBookingDraft()
 const loading = ref(false)
 const error = ref(null)
 const sessionUrl = ref(route.query.sessionUrl || null)
-const activePerksVoucher = ref(null)
+const activePerksVouchers = ref([])
 const selectedPerksVoucher = ref(null)
-const activeTravelCreditVoucher = ref(null)
+const activeTravelCreditVouchers = ref([])
 const selectedTravelCreditVoucher = ref(null)
 const perksLoading = ref(false)
 const perksError = ref('')
@@ -92,6 +92,19 @@ const amountToPay = computed(() => {
   const payable = totalAmount.value - travelCreditDiscountAmount.value
   return Math.max(payable, 0.5)
 })
+
+function getVoucherDisplayName(voucher) {
+  const type = String(voucher?.voucherType || voucher?.type || '').toUpperCase()
+  const code = String(voucher?.voucherCode || voucher?.code || '').trim()
+  const amount = getVoucherAmount(voucher)
+  const label = type === 'TRAVEL_CREDIT'
+    ? 'Travel Credit'
+    : type === 'IN_FLIGHT_PERKS'
+      ? 'In-flight Perks'
+      : type || 'Voucher'
+
+  return `${label}${code ? ` • ${code}` : ''}${amount ? ` • SGD $${amount.toFixed(2)}` : ''}`
+}
 
 const travelerSummaries = computed(() =>
   draftTravelers.value.map((traveller, index) => ({
@@ -258,34 +271,15 @@ onMounted(async () => {
     await releaseTravelCreditVoucherIfCancelled()
   }
 
-  await loadActivePerksVoucher()
-  await loadActiveTravelCreditVoucher()
+  await loadAvailableVouchers()
 })
 
-async function loadActivePerksVoucher() {
+async function loadAvailableVouchers() {
   if (!currentPassenger.value?.passenger_id) return
 
   perksLoading.value = true
-  perksError.value = ''
-
-  try {
-    const response = await axios.get(
-      apiUrl(`/api/loyalty/vouchers/${currentPassenger.value.passenger_id}?status=ACTIVE`)
-    )
-    const vouchers = Array.isArray(response.data) ? response.data : (response.data?.vouchers || [])
-    activePerksVoucher.value = vouchers.find((voucher) => (voucher.voucherType || voucher.type) === 'IN_FLIGHT_PERKS') || null
-    selectedPerksVoucher.value = activePerksVoucher.value
-  } catch (err) {
-    perksError.value = 'We could not check for an unused in-flight perks voucher right now.'
-  } finally {
-    perksLoading.value = false
-  }
-}
-
-async function loadActiveTravelCreditVoucher() {
-  if (!currentPassenger.value?.passenger_id) return
-
   travelCreditLoading.value = true
+  perksError.value = ''
   travelCreditError.value = ''
 
   try {
@@ -293,30 +287,59 @@ async function loadActiveTravelCreditVoucher() {
       apiUrl(`/api/loyalty/vouchers/${currentPassenger.value.passenger_id}?status=ACTIVE`)
     )
     const vouchers = Array.isArray(response.data) ? response.data : (response.data?.vouchers || [])
-    activeTravelCreditVoucher.value = vouchers.find((voucher) => (voucher.voucherType || voucher.type) === 'TRAVEL_CREDIT') || null
-    if (activeTravelCreditVoucher.value && getVoucherAmount(activeTravelCreditVoucher.value) <= maxTravelCreditAmount.value) {
-      selectedTravelCreditVoucher.value = activeTravelCreditVoucher.value
-    } else {
+
+    activePerksVouchers.value = vouchers.filter((voucher) => (voucher.voucherType || voucher.type) === 'IN_FLIGHT_PERKS')
+    activeTravelCreditVouchers.value = vouchers.filter((voucher) => (voucher.voucherType || voucher.type) === 'TRAVEL_CREDIT')
+
+    if (selectedPerksVoucher.value) {
+      const match = activePerksVouchers.value.find((voucher) =>
+        Number(voucher.voucherID || voucher.id) === Number(selectedPerksVoucher.value.voucherID)
+        || String(voucher.voucherCode || voucher.code) === String(selectedPerksVoucher.value.voucherCode)
+      )
+      selectedPerksVoucher.value = match || null
+    }
+
+    if (selectedTravelCreditVoucher.value) {
+      const match = activeTravelCreditVouchers.value.find((voucher) =>
+        Number(voucher.voucherID || voucher.id) === Number(selectedTravelCreditVoucher.value.voucherID)
+        || String(voucher.voucherCode || voucher.code) === String(selectedTravelCreditVoucher.value.voucherCode)
+      )
+      selectedTravelCreditVoucher.value = match || null
+    }
+
+    if (selectedTravelCreditVoucher.value && getVoucherAmount(selectedTravelCreditVoucher.value) > maxTravelCreditAmount.value) {
       selectedTravelCreditVoucher.value = null
-      if (activeTravelCreditVoucher.value) {
-        travelCreditError.value = 'Your Travel Credit is too large for this booking. Please choose a different flight or unselect the voucher.'
-      }
+      travelCreditError.value = 'Your Travel Credit is too large for this booking. Please choose a different flight or unselect the voucher.'
     }
   } catch (err) {
-    travelCreditError.value = 'We could not check for an unused Travel Credit voucher right now.'
+    if (!activePerksVouchers.value.length) {
+      perksError.value = 'We could not check for an unused in-flight perks voucher right now.'
+    }
+    if (!activeTravelCreditVouchers.value.length) {
+      travelCreditError.value = 'We could not check for an unused Travel Credit voucher right now.'
+    }
   } finally {
+    perksLoading.value = false
     travelCreditLoading.value = false
   }
 }
 
 function togglePerksVoucherSelection() {
-  if (!activePerksVoucher.value) return
-  selectedPerksVoucher.value = selectedPerksVoucher.value ? null : activePerksVoucher.value
+  if (!activePerksVouchers.value.length) return
+  if (selectedPerksVoucher.value) {
+    selectedPerksVoucher.value = null
+  } else {
+    selectedPerksVoucher.value = activePerksVouchers.value[0] || null
+  }
 }
 
 function toggleTravelCreditVoucherSelection() {
-  if (!activeTravelCreditVoucher.value) return
-  selectedTravelCreditVoucher.value = selectedTravelCreditVoucher.value ? null : activeTravelCreditVoucher.value
+  if (!activeTravelCreditVouchers.value.length) return
+  if (selectedTravelCreditVoucher.value) {
+    selectedTravelCreditVoucher.value = null
+  } else {
+    selectedTravelCreditVoucher.value = activeTravelCreditVouchers.value[0] || null
+  }
 }
 
 function formatCurrency(value) {
@@ -492,59 +515,102 @@ async function releaseTravelCreditVoucherIfCancelled() {
           </div>
         </div>
 
-        <div v-if="activePerksVoucher" class="mt-8 rounded-2xl border border-[#f4d6a6] bg-[#fff9ef] p-5">
+        <div class="mt-8 rounded-2xl border border-[#f4d6a6] bg-[#fff9ef] p-5">
           <div class="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p class="text-xs font-semibold uppercase tracking-[0.12em] text-[#9a6200]">Optional add-on</p>
-              <h3 class="mt-2 text-lg font-semibold text-[#1d1d1f]">Your in-flight perks voucher is selected by default</h3>
+              <h3 class="mt-2 text-lg font-semibold text-[#1d1d1f]">Choose your in-flight perks voucher after selecting this flight</h3>
               <p class="mt-1 text-sm text-[#6e6e73]">
-                You already have an unused in-flight perks voucher, and it will be attached to this booking after payment unless you turn it off.
+                Pick one unused in-flight perks voucher for this confirmed flight. It will be attached after payment.
               </p>
               <p v-if="travelerSummaries.length > 1" class="mt-2 text-sm font-medium text-[#9a6200]">
                 This voucher will apply to the primary passenger only.
               </p>
             </div>
-            <button
-              @click="togglePerksVoucherSelection"
-              class="rounded-xl border px-4 py-2 text-sm font-semibold transition"
-              :class="selectedPerksVoucher ? 'border-[#9a6200] bg-[#9a6200] text-white' : 'border-[#f4d6a6] bg-white text-[#9a6200] hover:bg-[#fffaf2]'"
-            >
-              {{ selectedPerksVoucher ? 'Voucher selected' : 'Attach voucher' }}
-            </button>
+          </div>
+
+          <div class="mt-5 grid gap-3 sm:grid-cols-2">
+            <template v-if="activePerksVouchers.length">
+              <button
+                v-for="voucher in activePerksVouchers"
+                :key="voucher.voucherCode || voucher.code || voucher.voucherID"
+                @click="selectedPerksVoucher = voucher"
+                class="rounded-2xl border p-4 text-left transition"
+                :class="selectedPerksVoucher?.voucherCode === voucher.voucherCode || selectedPerksVoucher?.code === voucher.code
+                  ? 'border-[#9a6200] bg-[#fef8e8] shadow-[0_12px_30px_rgba(154,98,0,0.12)]'
+                  : 'border-[#f4d6a6] bg-white hover:border-[#9a6200] hover:bg-[#fffaf2]'"
+              >
+                <p class="text-sm font-semibold text-[#132238]">{{ getVoucherDisplayName(voucher) }}</p>
+                <p class="mt-2 text-sm text-[#5f6b7d]">Tap to select this voucher for your booking</p>
+              </button>
+            </template>
+            <div v-else class="rounded-2xl border border-dashed border-[#f4d6a6] bg-white/80 p-6 text-sm text-[#6b7280]">
+              No active in-flight perks vouchers are available right now.
+            </div>
           </div>
 
           <div v-if="selectedPerksVoucher" class="mt-4 rounded-xl border border-[#f4d6a6] bg-white p-4 text-sm text-[#5f6b7d]">
             {{ selectedPerksVoucher.voucherCode || selectedPerksVoucher.code || 'Selected voucher' }} will be attached after your payment is confirmed.
+            <button
+              @click="selectedPerksVoucher = null"
+              class="ml-3 text-sm font-semibold text-[#9a6200] underline"
+            >
+              Clear selection
+            </button>
           </div>
 
           <p v-if="perksLoading" class="mt-3 text-sm text-[#6e6e73]">Checking your active vouchers...</p>
           <p v-if="perksError" class="mt-3 text-sm text-[#b42318]">{{ perksError }}</p>
         </div>
 
-        <div v-if="activeTravelCreditVoucher" class="mt-8 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5">
+        <div class="mt-8 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5">
           <div class="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p class="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">Payment credit</p>
-              <h3 class="mt-2 text-lg font-semibold text-[#1d1d1f]">Your Travel Credit is selected by default</h3>
+              <h3 class="mt-2 text-lg font-semibold text-[#1d1d1f]">Choose a Travel Credit voucher after selecting this flight</h3>
               <p class="mt-1 text-sm text-[#6e6e73]">
-                This voucher reduces the amount charged for your flight booking before payment is sent to Stripe.
+                Pick one Travel Credit voucher to reduce the amount charged for this confirmed flight. The remaining balance will be paid through Stripe.
               </p>
             </div>
-            <button
-              @click="toggleTravelCreditVoucherSelection"
-              class="rounded-xl border px-4 py-2 text-sm font-semibold transition"
-              :class="selectedTravelCreditVoucher ? 'border-emerald-700 bg-emerald-700 text-white' : 'border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50'"
-            >
-              {{ selectedTravelCreditVoucher ? 'Credit selected' : 'Apply credit' }}
-            </button>
+          </div>
+
+          <div class="mt-5 grid gap-3 sm:grid-cols-2">
+            <template v-if="activeTravelCreditVouchers.length">
+              <button
+                v-for="voucher in activeTravelCreditVouchers"
+                :key="voucher.voucherCode || voucher.code || voucher.voucherID"
+                @click="selectedTravelCreditVoucher = voucher"
+                :disabled="getVoucherAmount(voucher) > maxTravelCreditAmount.value"
+                class="rounded-2xl border p-4 text-left transition disabled:cursor-not-allowed disabled:border-[#d1fae5] disabled:bg-[#ecfdf5]"
+                :class="selectedTravelCreditVoucher?.voucherCode === voucher.voucherCode || selectedTravelCreditVoucher?.code === voucher.code
+                  ? 'border-emerald-700 bg-white shadow-[0_12px_30px_rgba(16,185,129,0.12)]'
+                  : 'border-emerald-200 bg-white hover:border-emerald-700 hover:bg-[#f0fdf4]'"
+              >
+                <div class="flex items-center justify-between gap-3">
+                  <p class="text-sm font-semibold text-[#132238]">{{ getVoucherDisplayName(voucher) }}</p>
+                  <span class="text-sm font-semibold text-[#059669]">{{ formatCurrency(getVoucherAmount(voucher)) }}</span>
+                </div>
+                <p class="mt-2 text-sm text-[#5f6b7d]">
+                  {{ getVoucherAmount(voucher) > maxTravelCreditAmount.value ? 'Cannot apply this voucher to this booking' : 'Tap to apply this credit' }}
+                </p>
+              </button>
+            </template>
+            <div v-else class="rounded-2xl border border-dashed border-emerald-200 bg-white/80 p-6 text-sm text-[#166534]">
+              No active Travel Credit vouchers are available right now.
+            </div>
           </div>
 
           <div v-if="selectedTravelCreditVoucher" class="mt-4 rounded-xl border border-emerald-200 bg-white p-4 text-sm text-[#5f6b7d]">
-            {{ selectedTravelCreditVoucher.voucherCode || selectedTravelCreditVoucher.code || 'Selected travel credit' }}
-            will reduce your payment by {{ formatCurrency(travelCreditDiscountAmount) }}.
+            {{ selectedTravelCreditVoucher.voucherCode || selectedTravelCreditVoucher.code || 'Selected travel credit' }} will reduce your payment by {{ formatCurrency(travelCreditDiscountAmount) }}.
+            <button
+              @click="selectedTravelCreditVoucher = null"
+              class="ml-3 text-sm font-semibold text-[#16a34a] underline"
+            >
+              Clear selection
+            </button>
           </div>
 
-          <p v-if="travelCreditLoading" class="mt-3 text-sm text-[#6e6e73]">Checking your active Travel Credit voucher...</p>
+          <p v-if="travelCreditLoading" class="mt-3 text-sm text-[#6e6e73]">Checking your active Travel Credit vouchers...</p>
           <p v-if="travelCreditError" class="mt-3 text-sm text-[#b42318]">{{ travelCreditError }}</p>
         </div>
 

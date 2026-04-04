@@ -522,14 +522,45 @@ app.put('/records/:bookingID/rebook', (req, res) => {
   const flightID = req.body.FlightID || req.body.flightID;
   const seatNumber = req.body.seatNumber || req.body.SeatNumber;
   const status = req.body.BookingStatus || req.body.bookingstatus || req.body.status || 'Confirmed';
+  const travelCreditVoucherID = req.body.travelCreditVoucherID ?? req.body.TravelCreditVoucherID;
+  const travelCreditVoucherCode = req.body.travelCreditVoucherCode ?? req.body.TravelCreditVoucherCode;
+  const travelCreditAppliedAmount = req.body.travelCreditAppliedAmount ?? req.body.TravelCreditAppliedAmount;
+  const inFlightPerksVoucherID = req.body.inFlightPerksVoucherID ?? req.body.InFlightPerksVoucherID;
+  const inFlightPerksVoucherCode = req.body.inFlightPerksVoucherCode ?? req.body.InFlightPerksVoucherCode;
 
   if (!flightID || !seatNumber) {
     return res.status(400).json({ error: 'FlightID and seatNumber are required' });
   }
 
+  const updateFields = ['FlightID = ?', 'seatNumber = ?', 'bookingstatus = ?'];
+  const updateValues = [flightID, seatNumber, status];
+
+  if (typeof travelCreditVoucherID !== 'undefined') {
+    updateFields.push('travelCreditVoucherID = ?');
+    updateValues.push(travelCreditVoucherID);
+  }
+  if (typeof travelCreditVoucherCode !== 'undefined') {
+    updateFields.push('travelCreditVoucherCode = ?');
+    updateValues.push(travelCreditVoucherCode);
+  }
+  if (typeof travelCreditAppliedAmount !== 'undefined') {
+    updateFields.push('travelCreditAppliedAmount = ?');
+    updateValues.push(travelCreditAppliedAmount);
+  }
+  if (typeof inFlightPerksVoucherID !== 'undefined') {
+    updateFields.push('inFlightPerksVoucherID = ?');
+    updateValues.push(inFlightPerksVoucherID);
+  }
+  if (typeof inFlightPerksVoucherCode !== 'undefined') {
+    updateFields.push('inFlightPerksVoucherCode = ?');
+    updateValues.push(inFlightPerksVoucherCode);
+  }
+
+  updateValues.push(bookingID);
+
   pool.query(
-    'UPDATE booking SET FlightID = ?, seatNumber = ?, bookingstatus = ? WHERE BookingID = ?',
-    [flightID, seatNumber, status, bookingID],
+    `UPDATE booking SET ${updateFields.join(', ')} WHERE BookingID = ?`,
+    updateValues,
     (err, result) => {
       if (err) {
         console.error(err);

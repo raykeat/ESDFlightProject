@@ -241,6 +241,9 @@ def cancel_flight():
     }
 
     kafka_published = False
+    if not producer:
+        init_kafka_producer()
+
     if producer:
         try:
             future = producer.send(
@@ -250,7 +253,7 @@ def cancel_flight():
             )
             producer.flush()
             record_metadata = future.get(timeout=10)
-            kafka_published  = True
+            kafka_published = True
             log_event("kafka_published",
                       topic=record_metadata.topic,
                       partition=record_metadata.partition,
@@ -259,7 +262,15 @@ def cancel_flight():
         except KafkaError as e:
             logger.error("Failed to publish to Kafka: %s", str(e))
     else:
-        logger.warning("Kafka producer not available — event not published")
+        logger.error("Kafka producer not available — event not published")
+
+    if not kafka_published:
+        log_event("cancel_flight_failed", flightID=flight_id, reason="Kafka publish failed")
+        return jsonify({
+            "error":   "Service Unavailable",
+            "code":    "KAFKA_PUBLISH_FAILED",
+            "message": "Flight was cancelled, but the cancellation event could not be published to the rebooking pipeline. Please retry when Kafka is available."
+        }), 503
 
     # ── Step 4: Return success to Staff UI ────────────────────
     log_event("cancel_flight_completed",
