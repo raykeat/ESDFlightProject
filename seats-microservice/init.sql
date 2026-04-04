@@ -1522,3 +1522,27 @@ SET
     Status = CASE WHEN SeatNumber IN ('10D', '10E', '10F') THEN 'available' ELSE 'unavailable' END,
     PassengerID = CASE WHEN SeatNumber IN ('10D', '10E', '10F') THEN NULL ELSE 999999 END
 WHERE FlightID = 10005;
+
+-- Scenario 2 demo setup:
+-- BA233 (10001): keep fully empty/available.
+UPDATE seats
+SET Status = 'available', PassengerID = NULL, HoldExpiresAt = NULL
+WHERE FlightID = 10001;
+
+-- BA245 (10003): exactly 1 seat available.
+UPDATE seats
+SET Status = 'unavailable', PassengerID = NULL, HoldExpiresAt = NULL
+WHERE FlightID = 10003;
+
+UPDATE seats
+SET Status = 'available', PassengerID = NULL, HoldExpiresAt = NULL
+WHERE FlightID = 10003 AND SeatNumber = '1A';
+
+-- BA247 (10005): exactly 6 seats available.
+UPDATE seats
+SET Status = 'unavailable', PassengerID = NULL, HoldExpiresAt = NULL
+WHERE FlightID = 10005;
+
+UPDATE seats
+SET Status = 'available', PassengerID = NULL, HoldExpiresAt = NULL
+WHERE FlightID = 10005 AND SeatNumber IN ('1A', '1B', '1C', '1D', '1E', '1F');

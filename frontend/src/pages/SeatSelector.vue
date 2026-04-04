@@ -22,6 +22,10 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  readOnly: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['seatSelected'])
@@ -115,6 +119,7 @@ function emitAssignments() {
 }
 
 function clearAssignment(index) {
+  if (props.readOnly) return
   seatAssignments.value[index] = ''
   emitAssignments()
 }
@@ -124,6 +129,7 @@ function selectTraveler(index) {
 }
 
 function selectSeat(seat) {
+  if (props.readOnly) return
   if (!isSeatAvailable(seat)) return
 
   const currentlyAssignedIndex = getAssignedTravelerIndex(seat.id)

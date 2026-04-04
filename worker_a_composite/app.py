@@ -41,6 +41,52 @@ def update_record_status(booking_id, status):
         raise RuntimeError(f"Record status update failed ({status}): {response.status_code} {response.text}")
 
 
+def resolve_assigned_seat_numbers(msg, new_flight_id):
+    assigned_numbers = msg.get("AssignedSeatNumbers") or []
+    if assigned_numbers:
+        return [str(seat).strip() for seat in assigned_numbers if str(seat).strip()]
+
+    assigned_ids = msg.get("AssignedSeatIDs") or []
+    if not assigned_ids:
+        return []
+
+    seats_response = requests.get(f"{SEAT_SERVICE_URL}/seats/{new_flight_id}", timeout=10)
+    if seats_response.status_code >= 400:
+        raise RuntimeError(f"Failed to fetch seats for mapping IDs: {seats_response.status_code} {seats_response.text}")
+
+    seats_payload = get_json_or_none(seats_response) or []
+    seat_number_by_id = {
+        int(seat.get("SeatID") or seat.get("seatID")): str(seat.get("SeatNumber") or seat.get("seatNumber") or "").strip()
+        for seat in seats_payload
+        if seat.get("SeatID") or seat.get("seatID")
+    }
+
+    resolved = []
+    for seat_id in assigned_ids:
+        seat_number = seat_number_by_id.get(int(seat_id))
+        if not seat_number:
+            raise RuntimeError(f"Could not resolve seat number for SeatID={seat_id} on flight {new_flight_id}")
+        resolved.append(seat_number)
+    return resolved
+
+
+def hold_assigned_seats(new_flight_id, passenger_id, seat_numbers):
+    if not seat_numbers:
+        raise RuntimeError("Assigned seats missing for Path A hold")
+
+    hold_response = requests.post(
+        f"{SEAT_SERVICE_URL}/seats/hold",
+        json={
+            "flightID": int(new_flight_id),
+            "seatNumber": ",".join(seat_numbers),
+            "passengerID": int(passenger_id),
+        },
+        timeout=10,
+    )
+    if hold_response.status_code >= 400:
+        raise RuntimeError(f"Seat hold failed: {hold_response.status_code} {hold_response.text}")
+
+
 def process_path_a_message(msg):
     passenger_id = msg.get("PassengerID")
     booking_id = msg.get("BookingID")
@@ -50,7 +96,10 @@ def process_path_a_message(msg):
     group_size = msg.get("GroupSize") or len(group_booking_ids)
 
     if not passenger_id or not booking_id or not new_flight_id:
-      raise RuntimeError("Missing required group Path A fields")
+        raise RuntimeError("Missing required group Path A fields")
+
+    assigned_seat_numbers = resolve_assigned_seat_numbers(msg, new_flight_id)
+    hold_assigned_seats(new_flight_id, passenger_id, assigned_seat_numbers)
 
     passenger_endpoint = f"{PASSENGER_SERVICE_URL.rstrip('/')}/getpassenger/{passenger_id}/"
     passenger_response = requests.get(passenger_endpoint, timeout=10)
@@ -69,6 +118,7 @@ def process_path_a_message(msg):
             "PassengerID": int(passenger_id),
             "OrigFlightID": int(orig_flight_id),
             "NewFlightID": int(new_flight_id),
+            "AssignedSeats": msg.get("AssignedSeatIDs") or msg.get("AssignedSeatNumbers", []),
         },
         timeout=10,
     )

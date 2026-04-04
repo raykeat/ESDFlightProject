@@ -167,8 +167,7 @@ function isCancelled(status) {
 
 function bookingGroupKey(booking) {
   const bookedBy = Number(booking.bookedByPassengerID || booking.passengerID || booking.bookingID || 0)
-  const createdAt = String(booking.createdAt || '').slice(0, 19)
-  return [bookedBy, booking.flightID, normalizedStatus(booking.status), createdAt].join('|')
+  return [bookedBy, booking.flightID].join('|')
 }
 
 function getFlight(booking) {
@@ -481,27 +480,72 @@ function getTravellerName(bookingRecord) {
   const guestName = `${guestFirst} ${guestLast}`.trim()
 
   if (guestName) return guestName
+
+  const first = bookingRecord?.passengerFirstName || bookingRecord?.PassengerFirstName || ''
+  const last = bookingRecord?.passengerLastName || bookingRecord?.PassengerLastName || ''
+  const fullName = `${first} ${last}`.trim()
+
+  if (fullName) return fullName
+
   if (Number(bookingRecord?.passengerID) === Number(currentPassenger.value?.passenger_id)) {
     return passengerDisplayName()
   }
 
-  return passengerDisplayName()
+  return `Passenger ${Number(bookingRecord?.bookingID) || '--'}`
 }
 
 function getTravellerNames(booking) {
   const records = Array.isArray(booking?.bookings) && booking.bookings.length
-    ? booking.bookings
+    ? getOrderedTravellerRecords(booking)
     : [booking]
 
   return [...new Set(records.map(getTravellerName).filter(Boolean))]
 }
 
+function getBookerRecord(booking) {
+  const records = Array.isArray(booking?.bookings) && booking.bookings.length ? booking.bookings : [booking]
+  const bookedByPassengerID = Number(booking?.bookedByPassengerID || booking?.BookedByPassengerID || booking?.passengerID || booking?.PassengerID)
+
+  return records.find((record) => Number(record?.passengerID || record?.PassengerID) === bookedByPassengerID)
+    || records[0]
+    || null
+}
+
+function getOrderedTravellerRecords(booking) {
+  const records = Array.isArray(booking?.bookings) && booking.bookings.length ? [...booking.bookings] : [booking]
+  const bookerRecord = getBookerRecord(booking)
+
+  return records
+    .sort((left, right) => Number(left.bookingID) - Number(right.bookingID))
+    .sort((left, right) => {
+      if (bookerRecord && Number(left.bookingID) === Number(bookerRecord.bookingID)) return -1
+      if (bookerRecord && Number(right.bookingID) === Number(bookerRecord.bookingID)) return 1
+      return 0
+    })
+}
+
+function getTravellerRoleLabel(bookingRecord, index, booking) {
+  const bookerRecord = getBookerRecord(booking)
+  if (bookerRecord && Number(bookingRecord?.bookingID) === Number(bookerRecord.bookingID)) {
+    return 'Booker'
+  }
+
+  return `Passenger ${index}`
+}
+
 function primaryTravellerName(booking) {
-  return getTravellerNames(booking)[0] || passengerDisplayName()
+  const bookerRecord = getBookerRecord(booking)
+  return getTravellerName(bookerRecord) || getTravellerNames(booking)[0] || passengerDisplayName()
 }
 
 function additionalTravellerCount(booking) {
   return Math.max(getTravellerNames(booking).length - 1, 0)
+}
+
+function travelerListLabel(booking) {
+  const bookerRecord = getBookerRecord(booking)
+  if (!bookerRecord) return passengerDisplayName()
+  return getTravellerName(bookerRecord)
 }
 
 function isPassengerListExpanded(booking) {
@@ -1233,14 +1277,15 @@ function routeArtStyle(booking) {
 
                   <div class="space-y-3">
                     <div
-                      v-for="traveller in booking.bookings"
+                      v-for="(traveller, index) in getOrderedTravellerRecords(booking)"
                       :key="traveller.bookingID"
                       class="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[#f7f7f8] px-4 py-3"
                     >
                       <div>
                         <p class="text-sm font-semibold text-[#132238]">{{ getTravellerName(traveller) }}</p>
                         <p class="mt-1 text-xs text-[#5f6b7d]">
-                          {{ Number(traveller.isGuest) ? `Passport ${traveller.guestPassportNumber || '--'}` : 'Booker' }}
+                          {{ getTravellerRoleLabel(traveller, index, booking) }}
+                          <span v-if="Number(traveller.isGuest) && traveller.guestPassportNumber"> · Passport {{ traveller.guestPassportNumber }}</span>
                         </p>
                       </div>
 

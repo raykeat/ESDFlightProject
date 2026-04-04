@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS offer (
     passengerID  INT             NOT NULL,                              -- FK -> Passenger DB (OutSystems)
     origFlightID INT             NOT NULL,                              -- FK -> Flight DB (cancelled flight)
     newFlightID  INT             NOT NULL,                              -- FK -> Flight DB (alternative); always populated since Offer is Path A only
-    newSeatID    INT             NULL,                                  -- logical reference to Seat Service; no DB-level FK
+    assignedSeats VARCHAR(500)   NULL,                                  -- JSON array of pre-assigned seat numbers for the group booking
     -- coupon-era fields removed; miles/vouchers are handled outside Offer Service
     -- fareDiff removed - airline absorbs all fare differences per disruption policy
     status       ENUM(
@@ -35,8 +35,8 @@ CREATE INDEX idx_offer_isDeleted    ON offer(isDeleted);     -- all queries filt
 -- ==========================================
 -- SAMPLE DATA
 -- ==========================================
-INSERT INTO offer (bookingID, passengerID, origFlightID, newFlightID, newSeatID, status, expiryTime, respondedAt) VALUES
-(9,  1, 36251, 40001, NULL, 'Pending Response', '2027-12-31 23:59:59', NULL),
-(10, 2, 36251, 40001, NULL, 'Accepted',         '2025-03-12 09:15:22', '2025-03-11 14:22:10'),
-(11, 9, 36251, 40001, NULL, 'Rejected',         '2025-03-12 09:15:22', '2025-03-11 16:05:33'),
-(12, 4, 36251, 40001, NULL, 'Expired',          '2025-03-12 09:15:22', NULL);
+INSERT INTO offer (bookingID, passengerID, origFlightID, newFlightID, status, expiryTime, respondedAt) VALUES
+(9,  1, 36251, 40001, 'Pending Response', '2027-12-31 23:59:59', NULL),
+(10, 2, 36251, 40001, 'Accepted',         '2025-03-12 09:15:22', '2025-03-11 14:22:10'),
+(11, 9, 36251, 40001, 'Rejected',         '2025-03-12 09:15:22', '2025-03-11 16:05:33'),
+(12, 4, 36251, 40001, 'Expired',          '2025-03-12 09:15:22', NULL);

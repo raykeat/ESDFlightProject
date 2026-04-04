@@ -73,7 +73,7 @@ class Offer(db.Model):
     passengerID  = db.Column(db.Integer,  nullable=False)   # FK → Passenger DB
     origFlightID = db.Column(db.Integer,  nullable=False)   # FK → Flight DB (cancelled)
     newFlightID  = db.Column(db.Integer,  nullable=True)    # FK → Flight DB (alternative); always populated since Offer is Path A only
-    newSeatID    = db.Column(db.Integer,  nullable=True)    # logical Seat Service reference
+    assignedSeats = db.Column(db.String(500), nullable=True) # JSON array of pre-assigned seat numbers for the group booking
     # fareDiff removed — airline absorbs all fare differences per disruption policy
     status       = db.Column(db.String(50),  nullable=False, default='Pending Response')
     expiryTime   = db.Column(db.DateTime,    nullable=True)  # now+24h for Path A offers
@@ -83,13 +83,21 @@ class Offer(db.Model):
     updatedTime  = db.Column(db.DateTime,    nullable=True,  onupdate=get_sgt_now)
 
     def json(self):
+        import json
+        assigned_seats_list = []
+        if self.assignedSeats:
+            try:
+                assigned_seats_list = json.loads(self.assignedSeats)
+            except (json.JSONDecodeError, TypeError):
+                assigned_seats_list = []
+        
         return {
             'offerID':      self.offerID,
             'bookingID':    self.bookingID,
             'passengerID':  self.passengerID,
             'origFlightID': self.origFlightID,
             'newFlightID':  self.newFlightID,
-            'newSeatID':    self.newSeatID,
+            'assignedSeats': assigned_seats_list,
             'status':       self.status,
             'expiryTime':   self.expiryTime.strftime("%Y-%m-%d %H:%M:%S SGT")  if self.expiryTime  else None,
             'respondedAt':  self.respondedAt.strftime("%Y-%m-%d %H:%M:%S SGT") if self.respondedAt else None,
@@ -286,7 +294,7 @@ def create_offer():
         passenger_id   = data.get('passengerID', data.get('PassengerID'))
         orig_flight_id = data.get('origFlightID', data.get('OrigFlightID'))
         new_flight_id  = data.get('newFlightID', data.get('NewFlightID', None))
-        new_seat_id    = data.get('newSeatID', data.get('NewSeatID', None))
+        assigned_seats = data.get('assignedSeats', data.get('AssignedSeats', None))
         status         = data.get('status', data.get('Status', 'Pending Response'))
         expiry_time    = data.get('expiryTime', data.get('ExpiryTime', None))
 
@@ -334,12 +342,6 @@ def create_offer():
                 'message': 'newFlightID must be a positive integer'
             }), 400
 
-        if new_seat_id is not None and (not isinstance(new_seat_id, int) or new_seat_id <= 0):
-            return jsonify({
-                'error':   'Bad Request',
-                'code':    'INVALID_FIELD_TYPE',
-                'message': 'newSeatID must be a positive integer'
-            }), 400
 
         # ── Validate status ─────────────────────────────────────────
         if status not in VALID_STATUSES:
@@ -392,12 +394,25 @@ def create_offer():
                           expiryTime=str(parsed_expiry))
 
         # ── Create offer ──────────────────────────────────────────────
+        import json
+        assigned_seats_json = None
+        if assigned_seats:
+            if isinstance(assigned_seats, list):
+                assigned_seats_json = json.dumps(assigned_seats)
+            elif isinstance(assigned_seats, str):
+                # Validate it's valid JSON
+                try:
+                    json.loads(assigned_seats)
+                    assigned_seats_json = assigned_seats
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        
         new_offer = Offer(
             bookingID    = booking_id,
             passengerID  = passenger_id,
             origFlightID = orig_flight_id,
             newFlightID  = new_flight_id,
-            newSeatID    = new_seat_id,
+            assignedSeats = assigned_seats_json,
             status       = status,
             expiryTime   = parsed_expiry
         )
@@ -421,7 +436,6 @@ def create_offer():
         db.session.rollback()
         log_event("create_offer_integrity_error", error=str(e))
         return jsonify({
-            'error':   'Bad Request',
             'code':    'INTEGRITY_ERROR',
             'message': 'One or more FK references are invalid (bookingID, passengerID, origFlightID or newFlightID not found)'
         }), 400

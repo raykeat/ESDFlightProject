@@ -20,6 +20,7 @@ const newFlight = ref(null)
 const seats = ref([])
 const groupBookings = ref([])
 const selectedSeats = ref([])
+const seatsArePreAssigned = ref(false)
 
 const travelers = computed(() =>
   groupBookings.value.map((record, index) => ({
@@ -36,7 +37,41 @@ const totalPrice = computed(() =>
   groupBookings.value.reduce((sum, record) => sum + Number(record.amount || record.amountPaid || 0), 0).toFixed(2)
 )
 
-const initialAssignments = computed(() => Array.from({ length: travelers.value.length }, () => ''))
+const initialAssignments = computed(() => {
+  const base = Array.from({ length: travelers.value.length }, () => '')
+  selectedSeats.value.forEach((seat, index) => {
+    if (index < base.length && seat) {
+      base[index] = String(seat)
+    }
+  })
+  return base
+})
+
+function parseOfferAssignedSeats(value) {
+  if (Array.isArray(value)) return value
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  }
+  return []
+}
+
+function mapSeatIdsToSeatNumbers(assignedSeatIds, seatsData) {
+  const seatNumberById = new Map(
+    (Array.isArray(seatsData) ? seatsData : []).map((seat) => [
+      Number(seat.SeatID ?? seat.seatID),
+      String(seat.SeatNumber ?? seat.seatNumber ?? '').trim(),
+    ])
+  )
+
+  return assignedSeatIds
+    .map((seatId) => seatNumberById.get(Number(seatId)) || '')
+    .filter(Boolean)
+}
 
 function formatDate(dateText) {
   if (!dateText) return '--'
@@ -108,7 +143,17 @@ async function loadContext() {
 
     newFlight.value = newFlightResponse.data
     seats.value = Array.isArray(seatsResponse.data) ? seatsResponse.data : []
-    selectedSeats.value = Array.from({ length: groupBookings.value.length }, () => '')
+    
+    // Check if seats are pre-assigned by Worker A. Offer stores seat IDs; UI needs seat numbers.
+    const assignedSeatIds = parseOfferAssignedSeats(offer.value.assignedSeats)
+    const assignedSeatNumbers = mapSeatIdsToSeatNumbers(assignedSeatIds, seats.value)
+    if (assignedSeatNumbers.length > 0 && assignedSeatNumbers.length === groupBookings.value.length) {
+      selectedSeats.value = [...assignedSeatNumbers]
+      seatsArePreAssigned.value = true
+    } else {
+      selectedSeats.value = Array.from({ length: groupBookings.value.length }, () => '')
+      seatsArePreAssigned.value = false
+    }
   } catch (err) {
     console.error('Error loading rebooking seat selection:', err)
     error.value = err.response?.data?.message || err.message || 'Could not load replacement seat selection.'
@@ -283,9 +328,12 @@ onMounted(async () => {
         <section class="relative z-10 rounded-[24px] border border-white/80 bg-white/80 p-5 shadow-[0_18px_40px_rgba(0,0,0,0.07)] backdrop-blur-2xl">
           <div class="mb-3">
             <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-[#a1a1a6]">Replacement Cabin</p>
-            <h2 class="text-2xl font-semibold tracking-tight text-[#1d1d1f]">Choose New Seats</h2>
+            <h2 class="text-2xl font-semibold tracking-tight text-[#1d1d1f]">{{ seatsArePreAssigned ? 'Pre-Assigned Seats' : 'Choose New Seats' }}</h2>
             <p class="mt-2 text-sm text-[#6e6e73]">
-              Select the replacement seats you want for this rebooked flight. Once confirmed, these seats will be saved and no one else can book them.
+              {{ seatsArePreAssigned 
+                ? 'Your replacement seats have been pre-assigned based on availability. These seats are reserved for your group.'
+                : 'Select the replacement seats you want for this rebooked flight. Once confirmed, these seats will be saved and no one else can book them.'
+              }}
             </p>
           </div>
           <div class="h-[calc(100%-72px)]">
@@ -295,6 +343,7 @@ onMounted(async () => {
               :maxSeats="travelers.length"
               :travelers="travelers"
               :initialAssignments="initialAssignments"
+              :readOnly="seatsArePreAssigned"
               @seatSelected="onSeatSelected"
             />
           </div>
