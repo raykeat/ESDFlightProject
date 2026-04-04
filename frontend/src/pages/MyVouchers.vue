@@ -113,6 +113,20 @@ function getVoucherBenefits(type) {
   }
 }
 
+function getVoucherRawValue(voucher) {
+  return voucher?.voucherValue ?? voucher?.value ?? null
+}
+
+function formatVoucherValue(voucher) {
+  const type = voucher?.voucherType || voucher?.type
+  const raw = getVoucherRawValue(voucher)
+  const parsed = Number(raw)
+
+  if (!Number.isFinite(parsed)) return 'N/A'
+  if (type === 'TRAVEL_CREDIT') return `$${parsed.toFixed(2)} cash credit`
+  return String(raw)
+}
+
 function copyToClipboard(code) {
   navigator.clipboard.writeText(code)
   alert('Voucher code copied to clipboard!')
@@ -243,8 +257,8 @@ function convertMore() {
           <!-- Value and Expiry -->
           <div class="mt-4 space-y-2 text-sm">
             <div class="flex justify-between">
-              <span class="text-[#6e6e73]">Value:</span>
-              <span class="font-semibold text-[#1d1d1f]">{{ voucher.voucherValue || 'N/A' }}</span>
+              <span class="text-[#6e6e73]">{{ (voucher.voucherType || voucher.type) === 'TRAVEL_CREDIT' ? 'Cash Value:' : 'Value:' }}</span>
+              <span class="font-semibold text-[#1d1d1f]">{{ formatVoucherValue(voucher) }}</span>
             </div>
             <div class="flex justify-between">
               <span class="text-[#6e6e73]">Expires:</span>

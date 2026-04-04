@@ -25,6 +25,7 @@ const RECORD_SERVICE_URL = (process.env.RECORD_SERVICE_URL || 'http://record-ser
 const OFFER_SERVICE_URL = (process.env.OFFER_SERVICE_URL || 'http://offer-service:5000').replace(/\/$/, '');
 const MILES_EARN_SERVICE_URL = (process.env.MILES_EARN_SERVICE_URL || 'http://miles-earn-service:5009').replace(/\/$/, '');
 const RABBITMQ_URL             = process.env.RABBITMQ_URL            || 'amqp://guest:guest@rabbitmq:5672';
+const STRIPE_MIN_AMOUNT        = 0.50;
 
 // ==========================================
 // RABBITMQ HELPER
@@ -248,6 +249,72 @@ function splitAmount(totalAmount, parts) {
   return Array.from({ length: parts }, (_, index) => ((base + (index < remainder ? 1 : 0)) / 100));
 }
 
+function roundToCents(value) {
+  return Math.round(Number(value || 0) * 100) / 100;
+}
+
+function getVoucherValue(voucher) {
+  return Number(firstNonEmpty(voucher?.voucherValue, voucher?.value, voucher?.VoucherValue, voucher?.Value) || 0);
+}
+
+function calculateTravelCreditApplication(totalAmount, voucherValue) {
+  const grossAmount = roundToCents(totalAmount);
+  const rawVoucherValue = roundToCents(voucherValue);
+
+  if (!Number.isFinite(grossAmount) || grossAmount <= 0) {
+    throw new Error('Total amount must be greater than 0');
+  }
+
+  if (!Number.isFinite(rawVoucherValue) || rawVoucherValue <= 0) {
+    return {
+      appliedAmount: 0,
+      payableAmount: grossAmount,
+    };
+  }
+
+  const maxApplicable = roundToCents(grossAmount - STRIPE_MIN_AMOUNT);
+  if (maxApplicable <= 0) {
+    throw new Error(`Minimum charge amount is SGD $${STRIPE_MIN_AMOUNT.toFixed(2)}`);
+  }
+
+  if (rawVoucherValue > maxApplicable) {
+    throw new Error(`Travel Credit exceeds the amount that can be charged for this booking. Please choose a smaller credit or a higher fare.`);
+  }
+
+  const appliedAmount = roundToCents(rawVoucherValue);
+  const payableAmount = roundToCents(grossAmount - appliedAmount);
+
+  if (payableAmount < STRIPE_MIN_AMOUNT) {
+    throw new Error(`Travel Credit cannot reduce the payment below SGD $${STRIPE_MIN_AMOUNT.toFixed(2)}`);
+  }
+
+  return {
+    appliedAmount,
+    payableAmount,
+  };
+}
+
+function proportionalSplit(amount, total, parts) {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return Array.from({ length: parts }, () => 0);
+  }
+
+  if (!Number.isFinite(total) || total <= 0) {
+    return splitAmount(amount, parts);
+  }
+
+  const split = splitAmount(amount, parts);
+  const splitTotal = roundToCents(split.reduce((sum, value) => sum + Number(value || 0), 0));
+  const delta = roundToCents(amount - splitTotal);
+
+  if (Math.abs(delta) < 0.01 || !split.length) {
+    return split;
+  }
+
+  split[split.length - 1] = roundToCents(split[split.length - 1] + delta);
+  return split;
+}
+
 async function getGroupBookingsForOffer(offer) {
   const primaryBookingResponse = await axios.get(`${RECORD_SERVICE_URL}/records/${offer.bookingID}`);
   const primaryBooking = primaryBookingResponse.data;
@@ -406,6 +473,10 @@ app.post('/api/bookings', async (req, res) => {
     selectedPerksVoucherID,
     selectedPerksVoucherCode,
     selectedPerksVoucherType,
+    selectedTravelCreditVoucherID,
+    selectedTravelCreditVoucherCode,
+    selectedTravelCreditVoucherType,
+    requestedPaymentAmount,
   } = req.body;
   
   if (!passengerID || !flightID || !seatNumber) {
@@ -444,6 +515,9 @@ app.post('/api/bookings', async (req, res) => {
   let outboundSeatHeld = false;
   let returnSeatHeld = false;
   let userBookingCount = 1;
+  let travelCreditVoucher = null;
+  let travelCreditApplication = { appliedAmount: 0, payableAmount: roundToCents(outboundFare + returnFare) };
+  let travelCreditAlreadyRedeemed = false;
  
   console.log(`Starting booking flow for passenger ${passengerID}, flight ${flightID}, seat ${seatNumber}, returnFlight ${returnFlightID || 'N/A'}, amount ${amount}`);
  
@@ -470,8 +544,38 @@ app.post('/api/bookings', async (req, res) => {
       console.warn('Could not fetch existing bookings for count, defaulting to 1', err.message);
     }
 
-    const outboundFareSplits = splitAmount(outboundFare, travelerManifest.length);
-    const returnFareSplits = isRoundTrip ? splitAmount(returnFare, travelerManifest.length) : [];
+    const totalBaseAmount = roundToCents(outboundFare + returnFare);
+
+    if (selectedTravelCreditVoucherID && selectedTravelCreditVoucherCode && selectedTravelCreditVoucherType === 'TRAVEL_CREDIT') {
+      const voucherResponse = await axios.get(`${VOUCHER_SERVICE_URL}/vouchers/code/${encodeURIComponent(selectedTravelCreditVoucherCode)}`);
+      travelCreditVoucher = voucherResponse.data || {};
+
+      if (Number(travelCreditVoucher.passengerID) !== Number(passengerID)) {
+        return res.status(403).json({ error: 'This travel credit voucher does not belong to the signed-in passenger' });
+      }
+
+      if (String(travelCreditVoucher.voucherType || '') !== 'TRAVEL_CREDIT') {
+        return res.status(400).json({ error: 'Only Travel Credit vouchers can be applied to flight payments' });
+      }
+
+      if (String(travelCreditVoucher.status || '') !== 'ACTIVE') {
+        return res.status(409).json({ error: 'This Travel Credit voucher is no longer active' });
+      }
+
+      travelCreditApplication = calculateTravelCreditApplication(totalBaseAmount, getVoucherValue(travelCreditVoucher));
+    }
+
+    const outboundGrossSplits = splitAmount(outboundFare, travelerManifest.length);
+    const returnGrossSplits = isRoundTrip ? splitAmount(returnFare, travelerManifest.length) : [];
+
+    const outboundShareRatio = totalBaseAmount > 0 ? outboundFare / totalBaseAmount : 0;
+    const returnShareRatio = totalBaseAmount > 0 ? returnFare / totalBaseAmount : 0;
+    const outboundDiscount = roundToCents(travelCreditApplication.appliedAmount * outboundShareRatio);
+    const returnDiscount = roundToCents(travelCreditApplication.appliedAmount - outboundDiscount);
+    const adjustedOutboundFare = roundToCents(outboundFare - outboundDiscount);
+    const adjustedReturnFare = roundToCents(returnFare - returnDiscount);
+    const outboundNetSplits = splitAmount(adjustedOutboundFare, travelerManifest.length);
+    const returnNetSplits = isRoundTrip ? splitAmount(adjustedReturnFare, travelerManifest.length) : [];
 
     // Step 3: Hold outbound seat(s)
     console.log('Step 5: Holding outbound seat(s)...');
@@ -502,7 +606,11 @@ app.post('/api/bookings', async (req, res) => {
         passengerID: traveler.passengerID,
         bookedByPassengerID: traveler.bookedByPassengerID,
         flightID,
-        amount: outboundFareSplits[i],
+        amount: outboundNetSplits[i],
+        originalAmountPaid: outboundGrossSplits[i],
+        travelCreditVoucherID: travelCreditVoucher?.voucherID || null,
+        travelCreditVoucherCode: travelCreditVoucher?.voucherCode || null,
+        travelCreditAppliedAmount: roundToCents(outboundGrossSplits[i] - outboundNetSplits[i]),
         seatNumber: traveler.outboundSeatNumber,
         isGuest: traveler.isGuest,
         guestFirstName: traveler.guestFirstName,
@@ -527,7 +635,11 @@ app.post('/api/bookings', async (req, res) => {
           passengerID: traveler.passengerID,
           bookedByPassengerID: traveler.bookedByPassengerID,
           flightID: returnFlightID,
-          amount: returnFareSplits[i],
+          amount: returnNetSplits[i],
+          originalAmountPaid: returnGrossSplits[i],
+          travelCreditVoucherID: travelCreditVoucher?.voucherID || null,
+          travelCreditVoucherCode: travelCreditVoucher?.voucherCode || null,
+          travelCreditAppliedAmount: roundToCents(returnGrossSplits[i] - returnNetSplits[i]),
           seatNumber: traveler.returnSeatNumber,
           isGuest: traveler.isGuest,
           guestFirstName: traveler.guestFirstName,
@@ -565,7 +677,22 @@ app.post('/api/bookings', async (req, res) => {
       successUrl += `&selectedPerksVoucherType=${encodeURIComponent(String(selectedPerksVoucherType))}`;
     }
 
-    const totalAmount = outboundFare + returnFare;
+    if (travelCreditVoucher) {
+      successUrl += `&selectedTravelCreditVoucherID=${encodeURIComponent(String(travelCreditVoucher.voucherID))}`;
+      successUrl += `&selectedTravelCreditVoucherCode=${encodeURIComponent(String(travelCreditVoucher.voucherCode))}`;
+      successUrl += `&selectedTravelCreditVoucherType=${encodeURIComponent(String(travelCreditVoucher.voucherType))}`;
+      successUrl += `&selectedTravelCreditVoucherValue=${encodeURIComponent(String(getVoucherValue(travelCreditVoucher)))}`;
+    }
+
+    const totalAmount = totalBaseAmount;
+    const requestedAmount = Number(requestedPaymentAmount);
+    const calculatedDiscountedAmount = travelCreditApplication.appliedAmount > 0
+      ? travelCreditApplication.payableAmount
+      : totalAmount;
+    const discountedTotalAmount = Number.isFinite(requestedAmount) && requestedAmount > 0
+      ? roundToCents(requestedAmount)
+      : calculatedDiscountedAmount;
+    const discountAmount = roundToCents(totalAmount - discountedTotalAmount);
     const finalCancelUrl = new URL(buildCancelUrl(
       cancelUrl,
       frontendOrigin,
@@ -576,16 +703,28 @@ app.post('/api/bookings', async (req, res) => {
     if (returnBookings.length) {
       finalCancelUrl.searchParams.set('returnGroupBookingIDs', returnBookings.map((booking) => booking.bookingID).join(','));
     }
+    if (travelCreditVoucher) {
+      finalCancelUrl.searchParams.set('selectedTravelCreditVoucherID', String(travelCreditVoucher.voucherID));
+      finalCancelUrl.searchParams.set('selectedTravelCreditVoucherCode', String(travelCreditVoucher.voucherCode));
+      finalCancelUrl.searchParams.set('selectedTravelCreditVoucherType', String(travelCreditVoucher.voucherType));
+    }
 
     const paymentPayload = {
       bookingID: outboundBooking.bookingID,
       userBookingCount,
       passengerID,
-      amount: totalAmount,
+      amount: discountedTotalAmount,
       flightNumber: flightNumber || (isRoundTrip ? `SQ${flightID} & SQ${returnFlightID}` : `SQ${flightID}`),
       successUrl,
       cancelUrl: finalCancelUrl.toString(),
     };
+
+    if (travelCreditVoucher && travelCreditApplication.appliedAmount > 0) {
+      await axios.put(`${VOUCHER_SERVICE_URL}/vouchers/${travelCreditVoucher.voucherID}/redeem`, {
+        bookingID: Number(outboundBooking.bookingID),
+      });
+      travelCreditAlreadyRedeemed = true;
+    }
 
     const paymentResponse = await axios.post(`${PAYMENT_SERVICE_URL}/payment/checkout`, paymentPayload);
 
@@ -622,6 +761,9 @@ app.post('/api/bookings', async (req, res) => {
       }
       if (typeof returnSeatHeld !== 'undefined' && returnSeatHeld) {
         await axios.post(`${SEATS_SERVICE_URL}/seats/release`, { flightID: returnFlightID, seatNumber: returnSeatNumber });
+      }
+      if (travelCreditVoucher && travelCreditAlreadyRedeemed) {
+        await axios.put(`${VOUCHER_SERVICE_URL}/vouchers/${travelCreditVoucher.voucherID}/status`, { status: 'ACTIVE' }).catch(() => {});
       }
     } catch (cleanupErr) {
       console.warn('Cleanup after booking flow failure was partial:', cleanupErr.message);
@@ -992,6 +1134,50 @@ app.post('/api/bookings/:bookingID/in-flight-perks', async (req, res) => {
       success: false,
       error: 'Failed to attach in-flight perks',
       message,
+    });
+  }
+});
+
+app.post('/api/bookings/:bookingID/travel-credit/release', async (req, res) => {
+  const { bookingID } = req.params;
+  const { passengerID, voucherID, voucherCode } = req.body;
+
+  try {
+    const bookingResponse = await axios.get(`${RECORD_SERVICE_URL}/records/${bookingID}`);
+    const booking = bookingResponse.data || {};
+    const ownerID = Number(firstNonEmpty(
+      booking.bookedByPassengerID,
+      booking.BookedByPassengerID,
+      booking.passengerID,
+      booking.PassengerID
+    ));
+
+    if (passengerID && ownerID !== Number(passengerID)) {
+      return res.status(403).json({
+        error: 'This booking does not belong to the signed-in passenger',
+      });
+    }
+
+    const storedVoucherID = Number(firstNonEmpty(booking.travelCreditVoucherID, booking.TravelCreditVoucherID, voucherID));
+    const storedVoucherCode = firstNonEmpty(booking.travelCreditVoucherCode, booking.TravelCreditVoucherCode, voucherCode);
+
+    if (!storedVoucherID || !storedVoucherCode) {
+      return res.status(404).json({
+        error: 'No Travel Credit voucher is attached to this booking',
+      });
+    }
+
+    await axios.put(`${VOUCHER_SERVICE_URL}/vouchers/${storedVoucherID}/status`, { status: 'ACTIVE' });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Travel Credit voucher released successfully',
+    });
+  } catch (error) {
+    return res.status(error.response?.status || 500).json({
+      success: false,
+      error: 'Failed to release Travel Credit voucher',
+      message: error.response?.data?.message || error.response?.data?.error || error.message,
     });
   }
 });

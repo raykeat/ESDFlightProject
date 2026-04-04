@@ -34,6 +34,12 @@ const travelCreditMinMiles = computed(() => {
   return travelType?.milesRequired || 500
 })
 
+const travelCreditMilesPerDollar = computed(() => {
+  const travelType = voucherTypes.value.find(v => v.type === 'TRAVEL_CREDIT')
+  const parsed = Number(travelType?.milesValue)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 100
+})
+
 const normalizedTravelCreditMiles = computed(() => {
   const parsed = Number(travelCreditMiles.value)
   if (!Number.isFinite(parsed)) return travelCreditMinMiles.value
@@ -46,6 +52,28 @@ function getVoucherMilesNeeded(voucher) {
     return Math.max(travelCreditMinMiles.value, normalizedTravelCreditMiles.value)
   }
   return voucher.milesValue || voucher.milesRequired || 0
+}
+
+function getTravelCreditCashFromMiles(miles) {
+  const parsedMiles = Number(miles)
+  if (!Number.isFinite(parsedMiles) || parsedMiles <= 0) return 0
+  return parsedMiles / travelCreditMilesPerDollar.value
+}
+
+function formatUsd(value) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return 'N/A'
+  return `$${parsed.toFixed(2)}`
+}
+
+function normalizeVoucherForDisplay(voucher) {
+  if (!voucher || typeof voucher !== 'object') return {}
+  return {
+    ...voucher,
+    voucherCode: voucher.voucherCode || voucher.code || '',
+    voucherType: voucher.voucherType || voucher.type || '',
+    voucherValue: voucher.voucherValue ?? voucher.value ?? null,
+  }
 }
 
 const totalMilesNeeded = computed(() => {
@@ -196,7 +224,7 @@ async function executeConversion() {
           milesToConvert: getVoucherMilesNeeded(voucher)
         }
       )
-      generatedVouchers.value = [response.data.voucher]
+      generatedVouchers.value = [normalizeVoucherForDisplay(response.data.voucher)]
     } else {
       // Bundle conversion
       response = await axios.post(
@@ -214,7 +242,7 @@ async function executeConversion() {
           })
         }
       )
-      generatedVouchers.value = response.data.vouchers || []
+      generatedVouchers.value = (response.data.vouchers || []).map(normalizeVoucherForDisplay)
     }
 
     if (response.data.success) {
@@ -387,6 +415,13 @@ function viewMyVouchers() {
         <h1 class="text-4xl font-semibold tracking-[-0.03em] text-[#1d1d1f] md:text-5xl">Confirm Your Conversion</h1>
         <p class="mt-3 max-w-2xl text-sm text-[#6e6e73] md:text-base">Review your selection before converting your miles to vouchers.</p>
 
+        <div v-if="selectedVouchers.includes('TRAVEL_CREDIT')" class="mt-6 rounded-2xl border border-[#f4d6a6] bg-[#fff9ef] p-4">
+          <p class="text-xs font-semibold uppercase tracking-[0.12em] text-[#9a6200]">Travel Credit Conversion Rate</p>
+          <p class="mt-2 text-sm text-[#5f6b7d]">
+            {{ travelCreditMilesPerDollar.toLocaleString() }} miles = $1.00 cash credit (usable on a future flight booking).
+          </p>
+        </div>
+
         <div class="mt-8 space-y-6">
           <div v-for="(voucher, index) in selectedVoucherDetails" :key="voucher.type" class="rounded-2xl border border-black/8 bg-gradient-to-br from-[#e63946]/5 via-transparent to-[#ff6b6b]/5 p-6">
             <div class="flex items-start gap-4">
@@ -395,6 +430,9 @@ function viewMyVouchers() {
                 <p class="text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">Item {{ index + 1 }}: {{ voucher.type }}</p>
                 <h3 class="mt-1 text-xl font-semibold text-[#1d1d1f]">{{ voucher.name }}</h3>
                 <p class="mt-2 text-sm text-[#6e6e73]">{{ getVoucherMilesNeeded(voucher).toLocaleString() }} miles</p>
+                <p v-if="voucher.type === 'TRAVEL_CREDIT'" class="mt-1 text-sm font-semibold text-[#1d1d1f]">
+                  Estimated cash value: {{ formatUsd(getTravelCreditCashFromMiles(getVoucherMilesNeeded(voucher))) }}
+                </p>
               </div>
             </div>
           </div>
@@ -452,8 +490,17 @@ function viewMyVouchers() {
           <div v-for="(voucher, index) in generatedVouchers" :key="index" class="rounded-2xl border border-black/8 bg-[#f5f5f7] p-6">
             <p class="text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">Voucher {{ index + 1 }}: {{ voucher.voucherType || voucher.type }}</p>
             <p class="mt-3 break-all text-2xl font-mono font-semibold text-[#1d1d1f]">{{ voucher.voucherCode || voucher.code }}</p>
-            <p class="mt-3 text-sm text-[#6e6e73]">
-              <span class="font-semibold">Value:</span> {{ voucher.voucherValue || 'N/A' }} 
+            <template v-if="(voucher.voucherType || voucher.type) === 'TRAVEL_CREDIT'">
+              <p class="mt-3 text-sm text-[#6e6e73]">
+                <span class="font-semibold">Cash Credit Value:</span> {{ formatUsd(voucher.voucherValue ?? voucher.value) }}
+                <span class="ml-4"><span class="font-semibold">Expires:</span> {{ voucher.expiryDate || 'N/A' }}</span>
+              </p>
+              <p class="mt-1 text-sm text-[#6e6e73]">
+                This is a cash voucher you can use later to reduce payment for future flight bookings.
+              </p>
+            </template>
+            <p v-else class="mt-3 text-sm text-[#6e6e73]">
+              <span class="font-semibold">Value:</span> {{ voucher.voucherValue || 'N/A' }}
               <span class="ml-4"><span class="font-semibold">Expires:</span> {{ voucher.expiryDate || 'N/A' }}</span>
             </p>
             <a
