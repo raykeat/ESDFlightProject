@@ -1,15 +1,19 @@
 <script setup>
 import { onMounted, ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { usePassengerSession } from '../composables/usePassengerSession'
 import axios from 'axios'
 import { apiUrl } from '../config/api'
 
 const router = useRouter()
+const route = useRoute()
 const { currentPassenger, isSignedIn } = usePassengerSession()
 
 const currentStep = ref(1) // 1: View Balance, 2: Multi-Select Vouchers, 3: Confirm, 4: Success
 const currentBalance = ref(null)
+const previousBalance = ref(null)
+const awardedMiles = ref(0)
+const showMilesAwardedPopup = ref(false)
 const selectedVouchers = ref([]) // Array of voucher types selected
 const generatedVouchers = ref([]) // Generated voucher codes
 const travelCreditMiles = ref(500)
@@ -98,12 +102,39 @@ onMounted(async () => {
     return
   }
 
+  const storedBalance = localStorage.getItem('blazeMilesBalanceLastSeen')
+  previousBalance.value = storedBalance !== null && storedBalance !== '' ? Number(storedBalance) : null
+
+  if (route.query.awardedMiles) {
+    const awarded = Number(route.query.awardedMiles)
+    if (Number.isFinite(awarded) && awarded > 0) {
+      awardedMiles.value = awarded
+      showMilesAwardedPopup.value = true
+    }
+  }
+
   // Fetch voucher types and balance
   await Promise.all([
     fetchVoucherTypes(),
     fetchBalance()
   ])
 })
+
+function closeMilesAwardedPopup() {
+  showMilesAwardedPopup.value = false
+  awardedMiles.value = 0
+}
+
+function updateStoredBalance(newBalance) {
+  const parsedBalance = Number(newBalance) || 0
+  if (previousBalance.value !== null && parsedBalance > previousBalance.value) {
+    awardedMiles.value = parsedBalance - previousBalance.value
+    showMilesAwardedPopup.value = true
+  }
+  previousBalance.value = parsedBalance
+  localStorage.setItem('blazeMilesBalanceLastSeen', String(parsedBalance))
+  currentBalance.value = parsedBalance
+}
 
 async function fetchBalance() {
   loading.value = true
@@ -117,7 +148,7 @@ async function fetchBalance() {
       const response = await axios.get(
         `${milesBalanceUrl}/miles-balance/${passengerID}`
       )
-      currentBalance.value = response.data.currentBalance || response.data.balance || 0
+      updateStoredBalance(response.data.currentBalance || response.data.balance || 0)
     } catch (error) {
       // If 404 or no record, initialize with 2000 miles
       if (error.response?.status === 404 || error.message.includes('not found')) {
@@ -125,7 +156,7 @@ async function fetchBalance() {
           `${milesBalanceUrl}/miles-balance/${passengerID}/initialize`,
           { welcomeBonus: 2000 }
         )
-        currentBalance.value = initResponse.data.currentBalance || 2000
+        updateStoredBalance(initResponse.data.currentBalance || 2000)
       } else {
         throw error
       }
@@ -246,7 +277,7 @@ async function executeConversion() {
     }
 
     if (response.data.success) {
-      currentBalance.value = response.data.remainingMiles
+      updateStoredBalance(response.data.remainingMiles)
       currentStep.value = 4
     } else {
       errorMessage.value = response.data.error || 'Conversion failed. Please try again.'
@@ -270,6 +301,25 @@ function viewMyVouchers() {
 
 <template>
   <main class="min-h-screen px-6 py-8 md:px-10 lg:px-16">
+    <div v-if="showMilesAwardedPopup"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-6"
+    >
+      <div class="w-full max-w-xl overflow-hidden rounded-3xl bg-white shadow-[0_40px_80px_rgba(15,23,42,0.18)]">
+        <div class="space-y-4 px-8 py-10 text-center">
+          <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg>
+          </div>
+          <h2 class="text-2xl font-semibold text-slate-950">Miles Awarded!</h2>
+          <p class="mx-auto max-w-md text-sm leading-6 text-slate-600">
+            You have been awarded <span class="font-semibold text-slate-950">{{ awardedMiles.toLocaleString() }}</span> extra miles. Your updated balance is <span class="font-semibold text-slate-950">{{ currentBalance?.toLocaleString() }}</span> miles.
+          </p>
+          <button @click="closeMilesAwardedPopup"
+            class="inline-flex rounded-full bg-emerald-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-800"
+          >Got it</button>
+        </div>
+      </div>
+    </div>
+
     <section class="mx-auto max-w-[980px]">
       <!-- Step 1: View Balance -->
       <section v-if="currentStep === 1" class="animate__animated animate__fadeInUp rounded-[34px] border border-black/5 bg-white/90 p-6 shadow-[0_22px_52px_rgba(15,23,42,0.08)] backdrop-blur-2xl md:p-8">

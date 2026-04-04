@@ -392,7 +392,7 @@ function statusStyle(status) {
       <div v-else style="background:white; border:1px solid rgba(0,0,0,0.07); border-radius:16px; overflow:hidden; box-shadow:0 1px 4px rgba(0,0,0,0.04);">
 
         <!-- Table header -->
-        <div style="display:grid; grid-template-columns:70px 120px 1fr 1fr 110px 100px 120px 110px 120px; padding:12px 24px; background:#f8fafc; border-bottom:1.5px solid #e2e8f0;">
+        <div style="display:grid; grid-template-columns:70px 120px 1fr 1fr 110px 100px 120px 110px 140px; padding:12px 24px; background:#f8fafc; border-bottom:1.5px solid #e2e8f0;">
           <span style="font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#94a3b8;">ID</span>
           <span style="font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#94a3b8;">Flight</span>
           <span style="font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#94a3b8;">From</span>
@@ -407,7 +407,7 @@ function statusStyle(status) {
         <!-- Rows -->
         <div v-for="(flight, idx) in filteredFlights" :key="flight.FlightID"
           :style="{
-            display:'grid', gridTemplateColumns:'70px 120px 1fr 1fr 110px 100px 120px 110px 120px',
+            display:'grid', gridTemplateColumns:'70px 120px 1fr 1fr 110px 100px 120px 110px 140px',
             padding:'16px 24px', alignItems:'center',
             borderBottom: idx < filteredFlights.length - 1 ? '1px solid #f1f5f9' : 'none',
             background: flight.Status?.toLowerCase() === 'cancelled' ? '#fafafa' : 'white',
@@ -469,28 +469,29 @@ function statusStyle(status) {
           </div>
 
           <!-- Action -->
-          <div style="display:flex; gap:8px; align-items:center;">
+          <div style="display:flex; gap:4px; align-items:center;">
             <button
               v-if="flight.Status?.toLowerCase() !== 'cancelled' && flight.Status?.toLowerCase() !== 'landed'"
               @click="openLandModal(flight)"
               :disabled="Boolean(landingStatusByFlightId[flight.FlightID])"
-              style="display:flex; align-items:center; gap:5px; background:white; color:#0e7490; border:1.5px solid #a5f3fc; border-radius:8px; padding:6px 10px; font-size:12px; font-weight:600; cursor:pointer; transition:all 0.2s; letter-spacing:0.02em;"
-              onmouseover="this.style.background='#ecfeff'; this.style.borderColor='#22d3ee'"
-              onmouseout="this.style.background='white'; this.style.borderColor='#a5f3fc'"
+              :style="{
+                display:'flex', alignItems:'center', gap:'4px', background: landingStatusByFlightId[flight.FlightID] ? '#f8fafc' : 'white', color:'#0e7490', border:'1.5px solid', borderColor: landingStatusByFlightId[flight.FlightID] ? '#c7d2fe' : '#a5f3fc', borderRadius:'6px', padding:'4px 8px', fontSize:'11px', fontWeight:'600', cursor: landingStatusByFlightId[flight.FlightID] ? 'not-allowed' : 'pointer', opacity: landingStatusByFlightId[flight.FlightID] ? 0.6 : 1, transition:'all 0.2s', letterSpacing:'0.02em', whiteSpace:'nowrap'
+              }"
             >
-              <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                 <path d="M20 6L9 17l-5-5"/>
               </svg>
-              {{ landingStatusByFlightId[flight.FlightID] ? 'Updating...' : 'Mark Landed' }}
+              Landed
             </button>
 
             <button v-if="flight.Status?.toLowerCase() !== 'cancelled' && flight.Status?.toLowerCase() !== 'landed'"
               @click="openCancelModal(flight)"
-              style="display:flex; align-items:center; gap:5px; background:white; color:#dc2626; border:1.5px solid #fecaca; border-radius:8px; padding:6px 10px; font-size:12px; font-weight:600; cursor:pointer; transition:all 0.2s; letter-spacing:0.02em;"
-              onmouseover="this.style.background='#fef2f2'; this.style.borderColor='#ef4444'"
-              onmouseout="this.style.background='white'; this.style.borderColor='#fecaca'"
+              :disabled="Boolean(landingStatusByFlightId[flight.FlightID])"
+              :style="{
+                display:'flex', alignItems:'center', gap:'4px', background: landingStatusByFlightId[flight.FlightID] ? '#fef2f2' : 'white', color:'#dc2626', border:'1.5px solid', borderColor: landingStatusByFlightId[flight.FlightID] ? '#fecaca' : '#fecaca', borderRadius:'6px', padding:'4px 8px', fontSize:'11px', fontWeight:'600', cursor: landingStatusByFlightId[flight.FlightID] ? 'not-allowed' : 'pointer', opacity: landingStatusByFlightId[flight.FlightID] ? 0.6 : 1, transition:'all 0.2s', letterSpacing:'0.02em', whiteSpace:'nowrap'
+              }"
             >
-              <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+              <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
                 <path d="M18 6L6 18M6 6l12 12"/>
               </svg>
               Cancel
