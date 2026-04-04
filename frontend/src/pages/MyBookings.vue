@@ -16,7 +16,7 @@ const flightsById = ref({})
 
 const loading = ref(true)
 const error = ref(null)
-const activeTab = ref('All')
+const activeTab = ref('Upcoming')
 const searchQuery = ref('')
 const expandedBookingIds = ref(new Set())
 const expandedInfoBookingIds = ref(new Set())
@@ -26,7 +26,7 @@ const selectedPerksVoucher = ref(null)
 const perksFlowMessage = ref('')
 const perksFlowError = ref('')
 
-const BOOKING_TABS = ['All', 'Awaiting Payment', 'Upcoming', 'Awaiting Review']
+const BOOKING_TABS = ['Upcoming', 'Awaiting Payment', 'Completed', 'Refunded/Cancelled', 'Awaiting Review']
 
 watch(
   () => route.query,
@@ -613,7 +613,7 @@ function isAwaitingReview(booking) {
 }
 
 function isUpcoming(booking) {
-  if (hasPendingOffer(booking) || hasRefund(booking) || isCancelled(booking.status)) {
+  if (hasPendingOffer(booking) || hasRefund(booking) || isCancelled(booking.status) || isFlightCompleted(booking)) {
     return false
   }
 
@@ -624,6 +624,14 @@ function isUpcoming(booking) {
   return days === null || days >= 0
 }
 
+function isCompleted(booking) {
+  return isFlightCompleted(booking)
+}
+
+function isRefundedOrCancelled(booking) {
+  return hasRefund(booking) || isCancelled(booking.status)
+}
+
 const filteredBookings = computed(() => {
   let scopedBookings = groupedBookings.value
 
@@ -631,6 +639,10 @@ const filteredBookings = computed(() => {
     scopedBookings = scopedBookings.filter((booking) => normalizedStatus(booking.status) === 'Pending')
   } else if (activeTab.value === 'Upcoming') {
     scopedBookings = scopedBookings.filter((booking) => isUpcoming(booking))
+  } else if (activeTab.value === 'Completed') {
+    scopedBookings = scopedBookings.filter((booking) => isCompleted(booking))
+  } else if (activeTab.value === 'Refunded/Cancelled') {
+    scopedBookings = scopedBookings.filter((booking) => isRefundedOrCancelled(booking))
   } else if (activeTab.value === 'Awaiting Review') {
     scopedBookings = scopedBookings.filter((booking) => isAwaitingReview(booking))
   }
@@ -656,12 +668,17 @@ const filteredBookings = computed(() => {
 })
 
 function countByTab(tab) {
-  if (tab === 'All') return groupedBookings.value.length
   if (tab === 'Awaiting Payment') {
     return groupedBookings.value.filter((booking) => normalizedStatus(booking.status) === 'Pending').length
   }
   if (tab === 'Upcoming') {
     return groupedBookings.value.filter((booking) => isUpcoming(booking)).length
+  }
+  if (tab === 'Completed') {
+    return groupedBookings.value.filter((booking) => isCompleted(booking)).length
+  }
+  if (tab === 'Refunded/Cancelled') {
+    return groupedBookings.value.filter((booking) => isRefundedOrCancelled(booking)).length
   }
   if (tab === 'Awaiting Review') {
     return groupedBookings.value.filter((booking) => isAwaitingReview(booking)).length
@@ -1012,7 +1029,7 @@ function routeArtStyle(booking) {
         </div>
       </div>
 
-      <div class="mb-6 grid gap-2 rounded-2xl bg-white p-2 shadow-[0_16px_40px_rgba(15,23,42,0.06)] md:grid-cols-4">
+      <div class="mb-6 grid gap-2 rounded-2xl bg-white p-2 shadow-[0_16px_40px_rgba(15,23,42,0.06)] md:grid-cols-5">
         <button
           v-for="tab in BOOKING_TABS"
           :key="tab"
@@ -1075,7 +1092,7 @@ function routeArtStyle(booking) {
 
       <div v-else-if="filteredBookings.length === 0" class="rounded-[28px] bg-white p-10 text-center shadow-[0_16px_40px_rgba(15,23,42,0.05)]">
         <p class="text-lg font-semibold text-[#132238]">
-          {{ searchQuery.trim() ? 'No matching bookings found' : activeTab === 'All' ? 'No bookings yet' : `No ${activeTab.toLowerCase()} bookings` }}
+          {{ searchQuery.trim() ? 'No matching bookings found' : `No ${activeTab.toLowerCase()} bookings` }}
         </p>
         <p class="mt-2 text-sm text-[#6b7280]">
           {{ searchQuery.trim() ? 'Try a different booking ID, flight number, or route.' : 'Your future and past flight plans will appear here.' }}
