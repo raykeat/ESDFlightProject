@@ -17,6 +17,10 @@ const returnGroupBookingIDs = route.query.returnGroupBookingIDs || ''
 const selectedPerksVoucherID = route.query.selectedPerksVoucherID || null
 const selectedPerksVoucherCode = route.query.selectedPerksVoucherCode || null
 const selectedPerksVoucherType = route.query.selectedPerksVoucherType || null
+const selectedTravelCreditVoucherID = route.query.selectedTravelCreditVoucherID || null
+const selectedTravelCreditVoucherCode = route.query.selectedTravelCreditVoucherCode || null
+const selectedTravelCreditVoucherType = route.query.selectedTravelCreditVoucherType || null
+const selectedTravelCreditVoucherValue = route.query.selectedTravelCreditVoucherValue || null
 
 const booking = ref(null)
 const returnBooking = ref(null)
@@ -68,6 +72,12 @@ function formatAmount(value) {
   if (!Number.isFinite(amount)) return '0.00'
   return amount.toFixed(2)
 }
+
+const hasTravelCredit = computed(() => (
+  selectedTravelCreditVoucherID
+  && selectedTravelCreditVoucherCode
+  && selectedTravelCreditVoucherType === 'TRAVEL_CREDIT'
+))
 
 function formatDate(value) {
   if (!value) return '--'
@@ -398,6 +408,13 @@ onMounted(async () => {
               <p v-else class="mt-3 text-sm text-[#5f6b7d]">
                 Your booking is confirmed, but we could not attach the in-flight perks voucher automatically.
                 {{ perksAttachment?.message || '' }}
+              </p>
+            </div>
+
+            <div v-if="hasTravelCredit" class="rounded-[30px] border border-emerald-200 bg-emerald-50 p-6 text-left shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+              <p class="text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-700">Travel Credit</p>
+              <p class="mt-3 text-sm text-[#126a4e]">
+                Your Travel Credit voucher has reduced this payment by ${{ formatAmount(selectedTravelCreditVoucherValue) }}.
               </p>
             </div>
           </aside>

@@ -978,7 +978,7 @@ function normalizeBooleanFlag(value) {
   return ['true', '1', 'yes', 'y', 'included', 'available'].includes(normalized)
 }
 
-function getFlightAmenities(flight) {
+function getFlightAmenities(flight, booking) {
   if (!flight) return []
 
   const amenities = []
@@ -986,11 +986,12 @@ function getFlightAmenities(flight) {
   const beverages = String(flight.Beverages || flight.beverages || '').trim()
   const baggage = String(flight.Baggage || flight.baggage || '').trim()
   const wifi = normalizeBooleanFlag(flight.Wifi ?? flight.wifi)
+  const perksIncludeWifi = hasInFlightPerks(booking)
 
   if (baggage) amenities.push(`${baggage} baggage`)
   if (meals) amenities.push(meals)
   if (beverages) amenities.push(beverages)
-  if (wifi) amenities.push('Wi-Fi included')
+  if (wifi || perksIncludeWifi) amenities.push(perksIncludeWifi ? 'Wi-Fi included via in-flight perks' : 'Wi-Fi included')
 
   return amenities
 }
@@ -1007,7 +1008,8 @@ function getFlightBeverages(flight) {
   return String(flight?.Beverages || flight?.beverages || '').trim() || 'Complimentary beverages'
 }
 
-function getFlightWifiLabel(flight) {
+function getFlightWifiLabel(flight, booking) {
+  if (hasInFlightPerks(booking)) return 'Included via in-flight perks'
   return normalizeBooleanFlag(flight?.Wifi ?? flight?.wifi) ? 'Available onboard' : 'Not included'
 }
 
@@ -1559,34 +1561,42 @@ function routeArtStyle(booking) {
                   </template>
 
                   <div v-else>
-                    <div class="grid gap-3 md:grid-cols-2">
-                      <div class="rounded-xl bg-white p-4 ring-1 ring-black/5">
-                        <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8a96a8]">Baggage</p>
-                        <p class="mt-2 text-base font-semibold text-[#132238]">{{ getFlightBaggage(getFlight(booking)) }}</p>
-                        <p class="mt-1 text-sm text-[#5f6b7d]">Checked allowance from the booked fare.</p>
+                    <div v-if="hasInFlightPerks(booking)">
+                      <div class="grid gap-3 md:grid-cols-2">
+                        <div class="rounded-xl bg-white p-4 ring-1 ring-black/5">
+                          <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8a96a8]">Baggage</p>
+                          <p class="mt-2 text-base font-semibold text-[#132238]">{{ getFlightBaggage(getFlight(booking)) }}</p>
+                          <p class="mt-1 text-sm text-[#5f6b7d]">Checked allowance from the booked fare.</p>
+                        </div>
+
+                        <div class="rounded-xl bg-white p-4 ring-1 ring-black/5">
+                          <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8a96a8]">Food credits</p>
+                          <p class="mt-2 text-base font-semibold text-[#132238]">Included via in-flight perks</p>
+                          <p class="mt-1 text-sm text-[#5f6b7d]">Use your voucher for onboard food purchases.</p>
+                        </div>
                       </div>
 
-                      <div class="rounded-xl bg-white p-4 ring-1 ring-black/5">
-                        <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8a96a8]">Meals</p>
-                        <p class="mt-2 text-base font-semibold text-[#132238]">{{ getFlightMeals(getFlight(booking)) }}</p>
-                        <p class="mt-1 text-sm text-[#5f6b7d]">{{ getFlightBeverages(getFlight(booking)) }}</p>
+                      <div class="mt-3 grid gap-3 md:grid-cols-2">
+                        <div class="rounded-xl bg-white p-4 ring-1 ring-black/5">
+                          <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8a96a8]">Entertainment bundle</p>
+                          <p class="mt-2 text-base font-semibold text-[#132238]">Included via in-flight perks</p>
+                          <p class="mt-1 text-sm text-[#5f6b7d]">Access movies, music, or selected onboard entertainment.</p>
+                        </div>
+
+                        <div class="rounded-xl bg-white p-4 ring-1 ring-black/5">
+                          <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8a96a8]">Wi-Fi</p>
+                          <p class="mt-2 text-base font-semibold text-[#132238]">Included via in-flight perks</p>
+                          <p class="mt-1 text-sm text-[#5f6b7d]">
+                            Your in-flight perks voucher includes onboard Wi-Fi for this booking.
+                          </p>
+                        </div>
                       </div>
                     </div>
 
-                    <div class="mt-3 grid gap-3 md:grid-cols-2">
-                      <div class="rounded-xl bg-white p-4 ring-1 ring-black/5">
-                        <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8a96a8]">Beverages</p>
-                        <p class="mt-2 text-base font-semibold text-[#132238]">{{ getFlightBeverages(getFlight(booking)) }}</p>
-                        <p class="mt-1 text-sm text-[#5f6b7d]">Served according to the flight's onboard service.</p>
-                      </div>
-
-                      <div class="rounded-xl bg-white p-4 ring-1 ring-black/5">
-                        <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8a96a8]">Wi-Fi</p>
-                        <p class="mt-2 text-base font-semibold text-[#132238]">{{ getFlightWifiLabel(getFlight(booking)) }}</p>
-                        <p class="mt-1 text-sm text-[#5f6b7d]">
-                          {{ normalizeBooleanFlag(getFlight(booking)?.Wifi ?? getFlight(booking)?.wifi) ? 'Stay connected during your journey.' : 'This fare does not include onboard internet.' }}
-                        </p>
-                      </div>
+                    <div v-else class="rounded-xl bg-white p-4 ring-1 ring-black/5">
+                      <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8a96a8]">Baggage</p>
+                      <p class="mt-2 text-base font-semibold text-[#132238]">{{ getFlightBaggage(getFlight(booking)) }}</p>
+                      <p class="mt-1 text-sm text-[#5f6b7d]">Checked allowance from the booked fare.</p>
                     </div>
                   </div>
 

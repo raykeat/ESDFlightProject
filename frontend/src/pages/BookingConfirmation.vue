@@ -16,8 +16,12 @@ const error = ref(null)
 const sessionUrl = ref(route.query.sessionUrl || null)
 const activePerksVoucher = ref(null)
 const selectedPerksVoucher = ref(null)
+const activeTravelCreditVoucher = ref(null)
+const selectedTravelCreditVoucher = ref(null)
 const perksLoading = ref(false)
 const perksError = ref('')
+const travelCreditLoading = ref(false)
+const travelCreditError = ref('')
 
 const isRoundTrip = computed(() => route.query.tripType === 'round-trip' && Boolean(route.query.outboundFlightID))
 const draftTravelers = computed(() => bookingDraft.value?.travelers || [])
@@ -71,6 +75,24 @@ const totalAmount = computed(() => {
   return departureAmount.value
 })
 
+const maxTravelCreditAmount = computed(() => Math.max(totalAmount.value - 0.5, 0))
+
+function getVoucherAmount(voucher) {
+  const raw = Number(voucher?.voucherValue ?? voucher?.value ?? voucher?.VoucherValue ?? voucher?.Value ?? 0)
+  return Number.isFinite(raw) ? raw : 0
+}
+
+const travelCreditDiscountAmount = computed(() => {
+  if (!selectedTravelCreditVoucher.value) return 0
+  if (getVoucherAmount(selectedTravelCreditVoucher.value) > maxTravelCreditAmount.value) return 0
+  return getVoucherAmount(selectedTravelCreditVoucher.value)
+})
+
+const amountToPay = computed(() => {
+  const payable = totalAmount.value - travelCreditDiscountAmount.value
+  return Math.max(payable, 0.5)
+})
+
 const travelerSummaries = computed(() =>
   draftTravelers.value.map((traveller, index) => ({
     ...traveller,
@@ -107,6 +129,10 @@ function validateDraft() {
     }
   }
 
+  if (selectedTravelCreditVoucher.value && getVoucherAmount(selectedTravelCreditVoucher.value) > maxTravelCreditAmount.value) {
+    return 'Your Travel Credit is larger than the payable amount for this booking. Please remove it or choose a different booking.'
+  }
+
   return null
 }
 
@@ -139,7 +165,7 @@ async function confirmBooking() {
   loading.value = true
 
   try {
-    let finalSessionUrl = sessionUrl.value
+    let finalSessionUrl = selectedTravelCreditVoucher.value ? null : sessionUrl.value
 
     if (!finalSessionUrl) {
       const payload = {
@@ -147,6 +173,7 @@ async function confirmBooking() {
         flightID: isRoundTrip.value ? bookingDetails.value.outboundFlightID : bookingDetails.value.flightID,
         seatNumber: isRoundTrip.value ? bookingDetails.value.outboundSeat : bookingDetails.value.seatNumber,
         amount: Number(bookingDetails.value.amount),
+        requestedPaymentAmount: Number(amountToPay.value),
         flightNumber: isRoundTrip.value
           ? `${bookingDetails.value.outboundFlightNumber} & ${bookingDetails.value.flightNumber}`
           : bookingDetails.value.flightNumber,
@@ -158,6 +185,12 @@ async function confirmBooking() {
         payload.selectedPerksVoucherID = selectedPerksVoucher.value.voucherID
         payload.selectedPerksVoucherCode = selectedPerksVoucher.value.voucherCode || selectedPerksVoucher.value.code
         payload.selectedPerksVoucherType = selectedPerksVoucher.value.voucherType || selectedPerksVoucher.value.type
+      }
+
+      if (selectedTravelCreditVoucher.value) {
+        payload.selectedTravelCreditVoucherID = selectedTravelCreditVoucher.value.voucherID
+        payload.selectedTravelCreditVoucherCode = selectedTravelCreditVoucher.value.voucherCode || selectedTravelCreditVoucher.value.code
+        payload.selectedTravelCreditVoucherType = selectedTravelCreditVoucher.value.voucherType || selectedTravelCreditVoucher.value.type
       }
 
       if (isRoundTrip.value) {
@@ -202,6 +235,11 @@ async function confirmBooking() {
         currentUrl.searchParams.set('selectedPerksVoucherCode', String(selectedPerksVoucher.value.voucherCode || selectedPerksVoucher.value.code || ''))
         currentUrl.searchParams.set('selectedPerksVoucherType', String(selectedPerksVoucher.value.voucherType || selectedPerksVoucher.value.type || ''))
       }
+      if (selectedTravelCreditVoucher.value) {
+        currentUrl.searchParams.set('selectedTravelCreditVoucherID', String(selectedTravelCreditVoucher.value.voucherID))
+        currentUrl.searchParams.set('selectedTravelCreditVoucherCode', String(selectedTravelCreditVoucher.value.voucherCode || selectedTravelCreditVoucher.value.code || ''))
+        currentUrl.searchParams.set('selectedTravelCreditVoucherType', String(selectedTravelCreditVoucher.value.voucherType || selectedTravelCreditVoucher.value.type || ''))
+      }
       window.history.replaceState({}, '', currentUrl.toString())
     }
 
@@ -216,7 +254,12 @@ async function confirmBooking() {
 const wasCancelled = route.query.cancelled === 'true'
 
 onMounted(async () => {
+  if (wasCancelled) {
+    await releaseTravelCreditVoucherIfCancelled()
+  }
+
   await loadActivePerksVoucher()
+  await loadActiveTravelCreditVoucher()
 })
 
 async function loadActivePerksVoucher() {
@@ -239,9 +282,68 @@ async function loadActivePerksVoucher() {
   }
 }
 
+async function loadActiveTravelCreditVoucher() {
+  if (!currentPassenger.value?.passenger_id) return
+
+  travelCreditLoading.value = true
+  travelCreditError.value = ''
+
+  try {
+    const response = await axios.get(
+      apiUrl(`/api/loyalty/vouchers/${currentPassenger.value.passenger_id}?status=ACTIVE`)
+    )
+    const vouchers = Array.isArray(response.data) ? response.data : (response.data?.vouchers || [])
+    activeTravelCreditVoucher.value = vouchers.find((voucher) => (voucher.voucherType || voucher.type) === 'TRAVEL_CREDIT') || null
+    if (activeTravelCreditVoucher.value && getVoucherAmount(activeTravelCreditVoucher.value) <= maxTravelCreditAmount.value) {
+      selectedTravelCreditVoucher.value = activeTravelCreditVoucher.value
+    } else {
+      selectedTravelCreditVoucher.value = null
+      if (activeTravelCreditVoucher.value) {
+        travelCreditError.value = 'Your Travel Credit is too large for this booking. Please choose a different flight or unselect the voucher.'
+      }
+    }
+  } catch (err) {
+    travelCreditError.value = 'We could not check for an unused Travel Credit voucher right now.'
+  } finally {
+    travelCreditLoading.value = false
+  }
+}
+
 function togglePerksVoucherSelection() {
   if (!activePerksVoucher.value) return
   selectedPerksVoucher.value = selectedPerksVoucher.value ? null : activePerksVoucher.value
+}
+
+function toggleTravelCreditVoucherSelection() {
+  if (!activeTravelCreditVoucher.value) return
+  selectedTravelCreditVoucher.value = selectedTravelCreditVoucher.value ? null : activeTravelCreditVoucher.value
+}
+
+function formatCurrency(value) {
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return '$0.00'
+  return `$${amount.toFixed(2)}`
+}
+
+async function releaseTravelCreditVoucherIfCancelled() {
+  const voucherID = Number(route.query.selectedTravelCreditVoucherID)
+  const voucherCode = String(route.query.selectedTravelCreditVoucherCode || '').trim()
+  const voucherType = String(route.query.selectedTravelCreditVoucherType || '').trim()
+  const bookingID = Number(route.query.bookingID)
+
+  if (!bookingID || !voucherID || !voucherCode || voucherType !== 'TRAVEL_CREDIT') {
+    return
+  }
+
+  try {
+    await axios.post(apiUrl(`/api/bookings/${bookingID}/travel-credit/release`), {
+      passengerID: currentPassenger.value?.passenger_id,
+      voucherID,
+      voucherCode,
+    })
+  } catch {
+    // Best effort only.
+  }
 }
 </script>
 
@@ -351,6 +453,14 @@ function togglePerksVoucherSelection() {
             <span>Total</span>
             <span class="text-[#e63946]">${{ totalAmount.toFixed(2) }}</span>
           </div>
+          <div v-if="selectedTravelCreditVoucher" class="mt-3 flex justify-between rounded-xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+            <span>Travel Credit applied</span>
+            <span>-{{ formatCurrency(travelCreditDiscountAmount) }}</span>
+          </div>
+          <div class="mt-3 flex justify-between rounded-xl border border-emerald-100 bg-white px-4 py-3 text-sm font-semibold text-[#1d1d1f]">
+            <span>Amount to pay</span>
+            <span>{{ formatCurrency(amountToPay) }}</span>
+          </div>
         </div>
 
         <div class="mt-8 rounded-2xl border border-black/8 bg-[#fafafa] p-5">
@@ -411,6 +521,33 @@ function togglePerksVoucherSelection() {
           <p v-if="perksError" class="mt-3 text-sm text-[#b42318]">{{ perksError }}</p>
         </div>
 
+        <div v-if="activeTravelCreditVoucher" class="mt-8 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5">
+          <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">Payment credit</p>
+              <h3 class="mt-2 text-lg font-semibold text-[#1d1d1f]">Your Travel Credit is selected by default</h3>
+              <p class="mt-1 text-sm text-[#6e6e73]">
+                This voucher reduces the amount charged for your flight booking before payment is sent to Stripe.
+              </p>
+            </div>
+            <button
+              @click="toggleTravelCreditVoucherSelection"
+              class="rounded-xl border px-4 py-2 text-sm font-semibold transition"
+              :class="selectedTravelCreditVoucher ? 'border-emerald-700 bg-emerald-700 text-white' : 'border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50'"
+            >
+              {{ selectedTravelCreditVoucher ? 'Credit selected' : 'Apply credit' }}
+            </button>
+          </div>
+
+          <div v-if="selectedTravelCreditVoucher" class="mt-4 rounded-xl border border-emerald-200 bg-white p-4 text-sm text-[#5f6b7d]">
+            {{ selectedTravelCreditVoucher.voucherCode || selectedTravelCreditVoucher.code || 'Selected travel credit' }}
+            will reduce your payment by {{ formatCurrency(travelCreditDiscountAmount) }}.
+          </div>
+
+          <p v-if="travelCreditLoading" class="mt-3 text-sm text-[#6e6e73]">Checking your active Travel Credit voucher...</p>
+          <p v-if="travelCreditError" class="mt-3 text-sm text-[#b42318]">{{ travelCreditError }}</p>
+        </div>
+
         <div class="mt-8 rounded-2xl bg-[#f5f5f7] p-4">
           <p class="mb-3 text-xs font-semibold uppercase tracking-[0.1em] text-[#6e6e73]">What happens next</p>
           <div class="space-y-2">
@@ -442,7 +579,7 @@ function togglePerksVoucherSelection() {
             <span class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
             Redirecting to Stripe...
           </span>
-          <span v-else>Proceed to Payment · ${{ totalAmount.toFixed(2) }}</span>
+          <span v-else>Proceed to Payment · {{ formatCurrency(amountToPay) }}</span>
         </button>
 
         <p class="mt-4 text-center text-xs text-[#6e6e73]">

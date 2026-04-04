@@ -53,6 +53,11 @@ function ensureBookingSchema() {
     'ALTER TABLE booking ADD COLUMN inFlightPerksVoucherID INT NULL',
     'ALTER TABLE booking ADD COLUMN inFlightPerksVoucherCode VARCHAR(50) NULL',
     'ALTER TABLE booking ADD COLUMN inFlightPerksAppliedAt TIMESTAMP NULL',
+    'ALTER TABLE booking ADD COLUMN originalAmountPaid DECIMAL(10,2) NULL',
+    'ALTER TABLE booking ADD COLUMN travelCreditVoucherID INT NULL',
+    'ALTER TABLE booking ADD COLUMN travelCreditVoucherCode VARCHAR(50) NULL',
+    'ALTER TABLE booking ADD COLUMN travelCreditAppliedAmount DECIMAL(10,2) NULL',
+    'ALTER TABLE booking ADD COLUMN travelCreditAppliedAt TIMESTAMP NULL',
     'ALTER TABLE booking ADD COLUMN milesAwarded INT NULL',
     'ALTER TABLE booking ADD COLUMN milesTransactionID INT NULL',
     'ALTER TABLE booking ADD COLUMN milesAwardedAt TIMESTAMP NULL',
@@ -88,23 +93,31 @@ app.post('/records', (req, res) => {
     bookedByPassengerID, BookedByPassengerID,
     flightID, FlightID,
     amount, AmountPaid, amountPaid,
+    originalAmountPaid, OriginalAmountPaid,
     seatNumber,
     returnFlightID,
     returnSeatNumber,
     isGuest, IsGuest,
     guestFirstName, GuestFirstName,
     guestLastName, GuestLastName,
-    guestPassportNumber, GuestPassportNumber
+    guestPassportNumber, GuestPassportNumber,
+    travelCreditVoucherID, TravelCreditVoucherID,
+    travelCreditVoucherCode, TravelCreditVoucherCode,
+    travelCreditAppliedAmount, TravelCreditAppliedAmount,
   } = req.body;
 
   const finalPassengerID = PassengerID ?? passengerID;
   const finalBookedByPassengerID = BookedByPassengerID ?? bookedByPassengerID ?? finalPassengerID;
   const finalFlightID     = FlightID     ?? flightID;
   const finalAmountPaid   = AmountPaid   ?? amountPaid ?? amount;
+  const finalOriginalAmountPaid = OriginalAmountPaid ?? originalAmountPaid ?? finalAmountPaid;
   const finalIsGuest      = Boolean(IsGuest ?? isGuest);
   const finalGuestFirstName = GuestFirstName ?? guestFirstName ?? null;
   const finalGuestLastName = GuestLastName ?? guestLastName ?? null;
   const finalGuestPassportNumber = GuestPassportNumber ?? guestPassportNumber ?? null;
+  const finalTravelCreditVoucherID = TravelCreditVoucherID ?? travelCreditVoucherID ?? null;
+  const finalTravelCreditVoucherCode = TravelCreditVoucherCode ?? travelCreditVoucherCode ?? null;
+  const finalTravelCreditAppliedAmount = TravelCreditAppliedAmount ?? travelCreditAppliedAmount ?? null;
 
   if (!finalFlightID || finalAmountPaid == null) {
     return res.status(400).json({ error: 'FlightID and amount are required' });
@@ -125,8 +138,9 @@ app.post('/records', (req, res) => {
   pool.query(
     `INSERT INTO booking (
       PassengerID, BookedByPassengerID, FlightID, AmountPaid, bookingstatus, seatNumber,
-      returnFlightID, returnSeatNumber, IsGuest, GuestFirstName, GuestLastName, GuestPassportNumber
-    ) VALUES (?, ?, ?, ?, "Pending", ?, ?, ?, ?, ?, ?, ?)`,
+      returnFlightID, returnSeatNumber, IsGuest, GuestFirstName, GuestLastName, GuestPassportNumber,
+      originalAmountPaid, travelCreditVoucherID, travelCreditVoucherCode, travelCreditAppliedAmount
+    ) VALUES (?, ?, ?, ?, "Pending", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       finalPassengerID, 
       finalBookedByPassengerID,
@@ -139,6 +153,10 @@ app.post('/records', (req, res) => {
       finalGuestFirstName,
       finalGuestLastName,
       finalGuestPassportNumber,
+      finalOriginalAmountPaid,
+      finalTravelCreditVoucherID,
+      finalTravelCreditVoucherCode,
+      finalTravelCreditAppliedAmount,
     ],
     (err, result) => {
       if (err) {
@@ -280,6 +298,11 @@ app.get('/records', (req, res) => {
       AmountPaid AS amount,
       AmountPaid AS amountPaid,
       AmountPaid AS AmountPaid,
+      originalAmountPaid,
+      travelCreditVoucherID,
+      travelCreditVoucherCode,
+      travelCreditAppliedAmount,
+      travelCreditAppliedAt,
       bookingstatus AS status,
       bookingstatus AS BookingStatus,
       bookingstatus AS bookingstatus,
@@ -342,6 +365,11 @@ app.get('/records/passenger/:passengerID', (req, res) => {
       GuestPassportNumber AS GuestPassportNumber,
       AmountPaid AS amount,
       AmountPaid AS amountPaid,
+      originalAmountPaid,
+      travelCreditVoucherID,
+      travelCreditVoucherCode,
+      travelCreditAppliedAmount,
+      travelCreditAppliedAt,
       bookingstatus AS status,
       bookingstatus AS bookingstatus,
       inFlightPerksVoucherID,
@@ -387,6 +415,11 @@ app.get('/records/:bookingID', (req, res) => {
       GuestPassportNumber AS guestPassportNumber,
       AmountPaid AS amount,
       AmountPaid AS amountPaid,
+      originalAmountPaid,
+      travelCreditVoucherID,
+      travelCreditVoucherCode,
+      travelCreditAppliedAmount,
+      travelCreditAppliedAt,
       bookingstatus AS status,
       bookingstatus AS bookingstatus,
       inFlightPerksVoucherID,
