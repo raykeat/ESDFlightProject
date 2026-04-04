@@ -132,11 +132,16 @@ def search_available_flights():
     if not isinstance(flights, list):
         return jsonify([]), 200
 
+    active_flights = [
+        flight for flight in flights
+        if str(flight.get("Status", "")).strip().lower() not in ('cancelled', 'landed')
+    ]
+
     filtered_flights = []
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = {
             executor.submit(get_available_seat_count, flight.get("FlightID")): flight
-            for flight in flights if flight.get("FlightID") is not None
+            for flight in active_flights if flight.get("FlightID") is not None
         }
 
         for future in as_completed(futures):

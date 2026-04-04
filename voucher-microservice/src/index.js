@@ -485,13 +485,24 @@ app.put('/vouchers/:voucherID/status', (req, res) => {
   const { voucherID } = req.params;
   const { status } = req.body;
 
+  if (!status) {
+    return res.status(400).json({ error: 'Missing required field: status' });
+  }
+
+  const query = status === 'ACTIVE'
+    ? 'UPDATE vouchers SET status = ?, usedAt = NULL, usedBookingID = NULL WHERE voucherID = ?'
+    : 'UPDATE vouchers SET status = ? WHERE voucherID = ?';
+
   db.query(
-    'UPDATE vouchers SET status = ? WHERE voucherID = ?',
+    query,
     [status, voucherID],
     (err, result) => {
       if (err) {
         console.error(err);
         return res.status(500).json({ error: err.message });
+      }
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ error: 'Voucher not found' });
       }
       res.json({ success: true, message: `Voucher status updated to ${status}` });
     }
