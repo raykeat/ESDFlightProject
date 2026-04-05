@@ -14,6 +14,7 @@ import StaffFlights from '../pages/StaffFlights.vue'
 import FlightDetail from '../pages/FlightDetail.vue'
 import ConvertMiles from '../pages/ConvertMiles.vue'
 import MyVouchers from '../pages/MyVouchers.vue'
+import MilesConversionDashboard from '../pages/MilesConversionDashboard.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -99,6 +100,11 @@ const router = createRouter({
       path: '/my-vouchers',
       name: 'my-vouchers',
       component: MyVouchers
+    },
+    {
+      path: '/loyalty/history',
+      name: 'loyalty-history',
+      component: MilesConversionDashboard
     }
   ],
 })

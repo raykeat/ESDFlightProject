@@ -428,6 +428,26 @@ app.get('/api/loyalty/vouchers/:passengerID', async (req, res) => {
   }
 });
 
+// ==========================================
+// GET /api/loyalty/transactions/:passengerID
+// Get loyalty miles transaction history (earned/redeemed/rollback)
+// ==========================================
+app.get('/api/loyalty/transactions/:passengerID', async (req, res) => {
+  const { passengerID } = req.params;
+  const requestedLimit = Number(req.query.limit);
+  const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+    ? Math.min(Math.floor(requestedLimit), 500)
+    : 200;
+
+  try {
+    const response = await axios.get(`${MILES_TRANSACTION_URL}/transactions/${passengerID}?limit=${limit}`);
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error fetching loyalty transactions:', error.message);
+    res.status(500).json({ error: 'Failed to fetch transactions', message: error.message });
+  }
+});
+
 // Helper: Calculate next voucher suggestion based on remaining miles
 function calculateNextVoucherSuggestion(remainingMiles) {
   const suggestions = [];
