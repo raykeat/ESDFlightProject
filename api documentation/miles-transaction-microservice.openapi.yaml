@@ -1,0 +1,270 @@
+openapi: 3.0.3
+info:
+  title: Miles Transaction Microservice API
+  version: 1.0.0
+  description: |
+    Immutable ledger for all miles movements (earned, redeemed, reversed).
+    Supports transaction history, summaries, and reference ID updates.
+servers:
+  - url: http://localhost:5007
+    description: Docker host mapping (docker-compose)
+tags:
+  - name: Health
+  - name: Transactions
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: OK
+                  service:
+                    type: string
+                    example: miles-transaction-service
+
+  /transactions:
+    post:
+      tags: [Transactions]
+      summary: Log a new miles transaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTransactionRequest'
+      responses:
+        '201':
+          description: Transaction logged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  transactionID:
+                    type: integer
+                    example: 23
+                  message:
+                    type: string
+                    example: Transaction logged successfully
+        '400':
+          description: Missing required fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /transactions/{passengerID}:
+    get:
+      tags: [Transactions]
+      summary: Get transaction history for a passenger
+      parameters:
+        - in: path
+          name: passengerID
+          required: true
+          schema:
+            type: integer
+          example: 101
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            default: 50
+          example: 50
+      responses:
+        '200':
+          description: List of transactions (descending by date)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Transaction'
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /transactions/{passengerID}/summary:
+    get:
+      tags: [Transactions]
+      summary: Get earned vs redeemed summary for a passenger
+      parameters:
+        - in: path
+          name: passengerID
+          required: true
+          schema:
+            type: integer
+          example: 101
+      responses:
+        '200':
+          description: Summary of miles earned and redeemed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  passengerID:
+                    type: integer
+                    example: 101
+                  totalEarned:
+                    type: integer
+                    example: 5000
+                  totalRedeemed:
+                    type: integer
+                    example: 1500
+                  netBalance:
+                    type: integer
+                    example: 3500
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /transactions/{transactionID}/reference:
+    put:
+      tags: [Transactions]
+      summary: Update the reference ID on a transaction
+      description: Used to back-fill a booking reference after transaction creation.
+      parameters:
+        - in: path
+          name: transactionID
+          required: true
+          schema:
+            type: integer
+          example: 23
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [referenceID]
+              properties:
+                referenceID:
+                  type: string
+                  example: BK-00001
+      responses:
+        '200':
+          description: Reference updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Reference updated
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+components:
+  schemas:
+    Transaction:
+      type: object
+      properties:
+        transactionID:
+          type: integer
+          example: 23
+        passengerID:
+          type: integer
+          example: 101
+        milesDelta:
+          type: integer
+          description: Positive = earned; negative = redeemed/reversed
+          example: 399
+        transactionType:
+          type: string
+          enum: [EARNED, REDEEMED, REVERSED]
+          example: EARNED
+        description:
+          type: string
+          nullable: true
+          example: Earned 399 miles from flight spend 399.99 SGD
+        referenceID:
+          type: string
+          nullable: true
+          example: BK-00001
+        originalTransactionID:
+          type: integer
+          nullable: true
+          example: null
+        voucherType:
+          type: string
+          nullable: true
+          example: null
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-04-06T13:44:56'
+
+    CreateTransactionRequest:
+      type: object
+      required: [passengerID, milesDelta, transactionType]
+      properties:
+        passengerID:
+          type: integer
+          example: 101
+        milesDelta:
+          type: integer
+          description: Positive for earning; negative for redemption
+          example: 399
+        transactionType:
+          type: string
+          enum: [EARNED, REDEEMED, REVERSED]
+          example: EARNED
+        description:
+          type: string
+          nullable: true
+          example: Earned 399 miles from flight spend 399.99 SGD
+        referenceID:
+          type: string
+          nullable: true
+          example: BK-00001
+        originalTransactionID:
+          type: integer
+          nullable: true
+          description: Reference to the original transaction being reversed
+          example: null
+        voucherType:
+          type: string
+          nullable: true
+          description: Voucher type if miles are redeemed for a voucher
+          example: TRAVEL_CREDIT
+
+    SimpleError:
+      type: object
+      properties:
+        error:
+          type: string
+          example: Missing required fields

@@ -1,0 +1,440 @@
+openapi: 3.0.3
+info:
+  title: Seats Microservice API
+  version: 1.0.0
+  description: |
+    Manages seat availability, holds, confirmations, and cancellations for flights.
+    Hold expiry is automatically released (5-minute TTL) on every read/write operation.
+servers:
+  - url: http://localhost:5003
+    description: Docker host mapping (docker-compose) — same port internally and externally
+tags:
+  - name: Health
+  - name: Seats
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: OK
+                  service:
+                    type: string
+                    example: seats-service
+        '503':
+          description: Database unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceError'
+
+  /seats:
+    get:
+      tags: [Seats]
+      summary: Get seats for a flight (with optional status filter)
+      parameters:
+        - in: query
+          name: flightID
+          required: true
+          schema:
+            type: integer
+          example: 1
+        - in: query
+          name: status
+          required: false
+          schema:
+            type: string
+            enum: [available, hold, unavailable, cancelled]
+          example: available
+      responses:
+        '200':
+          description: List of seat records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Seat'
+        '400':
+          description: FlightID is required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+        '503':
+          description: Database unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceError'
+
+  /seats/{flightID}:
+    get:
+      tags: [Seats]
+      summary: Get all seats for a specific flight (path param variant)
+      parameters:
+        - in: path
+          name: flightID
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '200':
+          description: All seat records for the flight
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Seat'
+        '503':
+          description: Database unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceError'
+
+  /seats/hold:
+    post:
+      tags: [Seats]
+      summary: Place one or more seats on hold (5-minute TTL)
+      description: Accepts comma-separated seat numbers. All requested seats must be available.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SeatActionRequest'
+      responses:
+        '200':
+          description: Seats placed on hold
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          description: One or more seats not available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+        '503':
+          description: Database unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceError'
+
+  /seats/refresh-hold:
+    post:
+      tags: [Seats]
+      summary: Extend hold expiry by 5 minutes
+      description: Extends `HoldExpiresAt` for seats currently in `hold` status.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [flightID, seatNumber]
+              properties:
+                flightID:
+                  type: integer
+                  example: 1
+                seatNumber:
+                  type: string
+                  description: Single seat number or comma-separated list
+                  example: '12A,12B'
+      responses:
+        '200':
+          description: Hold extended
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          description: Missing required fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+        '409':
+          description: One or more held seats are no longer reserved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+        '503':
+          description: Database unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceError'
+
+  /seats/confirm:
+    post:
+      tags: [Seats]
+      summary: Confirm seat booking (mark as unavailable)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [flightID, seatNumber]
+              properties:
+                flightID:
+                  type: integer
+                  example: 1
+                seatNumber:
+                  type: string
+                  description: Single seat number or comma-separated list
+                  example: '12A'
+      responses:
+        '200':
+          description: Seat booking confirmed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '503':
+          description: Database unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceError'
+
+  /seats/release:
+    post:
+      tags: [Seats]
+      summary: Release seats back to available (individual)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [flightID, seatNumber]
+              properties:
+                flightID:
+                  type: integer
+                  example: 1
+                seatNumber:
+                  type: string
+                  description: Single seat number or comma-separated list
+                  example: '12A'
+      responses:
+        '200':
+          description: Seats released
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '503':
+          description: Database unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceError'
+
+  /seats/release/{flightID}:
+    put:
+      tags: [Seats]
+      summary: Bulk release ALL seats for a cancelled flight
+      description: Called by the Flight Cancellation Composite. Sets every seat for the given flight to `available` and clears PassengerID.
+      parameters:
+        - in: path
+          name: flightID
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '200':
+          description: All seats released
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: All seats released for flight 1
+                  seatsReleased:
+                    type: integer
+                    example: 180
+        '404':
+          description: No seats found for this flight
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+        '503':
+          description: Database unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceError'
+
+  /seats/{seatID}/hold:
+    put:
+      tags: [Seats]
+      summary: Place a single seat on hold by SeatID
+      parameters:
+        - in: path
+          name: seatID
+          required: true
+          schema:
+            type: integer
+          example: 42
+      responses:
+        '200':
+          description: Seat placed on hold
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  SeatID:
+                    type: integer
+                    example: 42
+                  SeatNumber:
+                    type: string
+                    example: 12A
+                  Status:
+                    type: string
+                    example: Hold
+        '404':
+          description: Seat not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+        '409':
+          description: Seat is not available for hold
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+        '503':
+          description: Database unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceError'
+
+  /seats/cancel:
+    put:
+      tags: [Seats]
+      summary: Cancel all seats for a flight (sets status to `cancelled`)
+      parameters:
+        - in: query
+          name: flightID
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '200':
+          description: Seats cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  FlightID:
+                    type: integer
+                    example: 1
+                  SeatsCancelled:
+                    type: integer
+                    example: 180
+        '400':
+          description: FlightID is required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+        '503':
+          description: Database unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceError'
+
+components:
+  schemas:
+    Seat:
+      type: object
+      properties:
+        SeatID:
+          type: integer
+          example: 42
+        FlightID:
+          type: integer
+          example: 1
+        SeatNumber:
+          type: string
+          example: 12A
+        Status:
+          type: string
+          enum: [available, hold, unavailable, cancelled]
+          example: available
+        PassengerID:
+          type: integer
+          nullable: true
+          example: null
+        HoldExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: null
+
+    SeatActionRequest:
+      type: object
+      required: [flightID, seatNumber, passengerID]
+      properties:
+        flightID:
+          type: integer
+          example: 1
+        seatNumber:
+          type: string
+          description: Single seat or comma-separated list
+          example: '12A,12B'
+        passengerID:
+          type: integer
+          example: 101
+
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Seats placed on hold for 5 minutes
+
+    MessageError:
+      type: object
+      properties:
+        message:
+          type: string
+          example: One or more seats not available
+
+    ServiceError:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Seats database unavailable
+        error:
+          type: string
+          example: ECONNREFUSED

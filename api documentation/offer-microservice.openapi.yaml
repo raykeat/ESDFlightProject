@@ -1,0 +1,416 @@
+openapi: 3.0.3
+info:
+  title: Offer Microservice API
+  version: 1.0.0
+  description: |
+    Manages rebooking offers created for disrupted passengers (Path A — alternative flight offered).
+    Supports auto-expiry (24-hour TTL), soft delete, and concurrent-update protection via row locking.
+    Routes respond on both `/offer` and `/offers` aliases.
+servers:
+  - url: http://localhost:5002
+    description: Docker host mapping (docker-compose)
+  - url: http://localhost:5000
+    description: Direct service port (non-docker local run)
+tags:
+  - name: Health
+  - name: Offers
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: OK
+                  service:
+                    type: string
+                    example: offer-service
+
+  /offers:
+    get:
+      tags: [Offers]
+      summary: Get all offers (with optional filters)
+      description: |
+        Excludes soft-deleted offers. Auto-expires any `Pending Response` offers that have passed
+        their `expiryTime` before returning results.
+      parameters:
+        - in: query
+          name: passengerID
+          schema:
+            type: integer
+          example: 101
+        - in: query
+          name: bookingID
+          schema:
+            type: integer
+          example: 12
+        - in: query
+          name: origFlightID
+          schema:
+            type: integer
+          example: 5
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [Pending Response, Accepted, Rejected, Expired]
+          example: Pending Response
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+          example: 50
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            default: 0
+          example: 0
+      responses:
+        '200':
+          description: List of offers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Offer'
+        '400':
+          description: Invalid status or pagination parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Database connection error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+    post:
+      tags: [Offers]
+      summary: Create a new rebooking offer
+      description: |
+        Called by the Rebooking Composite or Worker A. 
+        - `status` of `Pending Response` requires `newFlightID`.
+        - `expiryTime` is auto-calculated to now+24h if not provided.
+        - Duplicate offers for the same `bookingID` + `origFlightID` are rejected with 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOfferRequest'
+      responses:
+        '201':
+          description: Offer created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Offer'
+                  - type: object
+                    properties:
+                      OfferID:
+                        type: integer
+                        example: 7
+                      Status:
+                        type: string
+                        example: Pending Response
+                      message:
+                        type: string
+                        example: Offer created successfully
+        '400':
+          description: Validation error (missing fields, wrong types, invalid status, missing newFlightID for Pending Response)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Duplicate offer already exists for bookingID + origFlightID
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorEnvelope'
+                  - type: object
+                    properties:
+                      offerID:
+                        type: integer
+                        example: 3
+                      status:
+                        type: string
+                        example: Pending Response
+        '503':
+          description: Database connection error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /offers/{offerID}:
+    get:
+      tags: [Offers]
+      summary: Get a specific offer by ID
+      description: Auto-expires the offer if `expiryTime` has passed before returning.
+      parameters:
+        - in: path
+          name: offerID
+          required: true
+          schema:
+            type: integer
+          example: 7
+      responses:
+        '200':
+          description: Offer found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Offer'
+        '404':
+          description: Offer not found or soft-deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Database connection error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+    put:
+      tags: [Offers]
+      summary: Update offer status (Accepted / Rejected)
+      description: |
+        Called by the Rebooking Composite when passenger responds.
+        - Cannot update offers in a final status (`Accepted`, `Rejected`, `Expired`).
+        - Uses row locking to prevent concurrent accept/reject race conditions.
+        - Setting status to `Accepted` or `Rejected` populates `respondedAt`.
+      parameters:
+        - in: path
+          name: offerID
+          required: true
+          schema:
+            type: integer
+          example: 7
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [Pending Response, Accepted, Rejected, Expired]
+                  example: Accepted
+      responses:
+        '200':
+          description: Offer updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Offer'
+                  - type: object
+                    properties:
+                      message:
+                        type: string
+                        example: Offer updated successfully
+        '400':
+          description: Missing or invalid status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Offer not found or soft-deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Offer already finalised and cannot be updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Database connection error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+    delete:
+      tags: [Offers]
+      summary: Soft-delete an offer (audit trail preserved)
+      description: Sets `isDeleted=true`. The offer record is never physically removed.
+      parameters:
+        - in: path
+          name: offerID
+          required: true
+          schema:
+            type: integer
+          example: 7
+      responses:
+        '200':
+          description: Offer soft-deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Offer 7 deleted successfully
+        '404':
+          description: Offer not found or already deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Database connection error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+components:
+  schemas:
+    Offer:
+      type: object
+      properties:
+        offerID:
+          type: integer
+          example: 7
+        bookingID:
+          type: integer
+          example: 12
+        passengerID:
+          type: integer
+          example: 101
+        origFlightID:
+          type: integer
+          example: 5
+        newFlightID:
+          type: integer
+          nullable: true
+          example: 9
+        assignedSeats:
+          type: array
+          items:
+            type: string
+          nullable: true
+          example: ['12A', '12B']
+        status:
+          type: string
+          enum: [Pending Response, Accepted, Rejected, Expired]
+          example: Pending Response
+        expiryTime:
+          type: string
+          nullable: true
+          example: '2026-04-07 13:44:56 SGT'
+        respondedAt:
+          type: string
+          nullable: true
+          example: null
+        createdTime:
+          type: string
+          example: '2026-04-06 13:44:56 SGT'
+        updatedTime:
+          type: string
+          nullable: true
+          example: null
+
+    CreateOfferRequest:
+      type: object
+      required: [bookingID, passengerID, origFlightID, status]
+      properties:
+        bookingID:
+          type: integer
+          example: 12
+        passengerID:
+          type: integer
+          example: 101
+        origFlightID:
+          type: integer
+          example: 5
+        newFlightID:
+          type: integer
+          description: Required when status is `Pending Response`
+          example: 9
+        assignedSeats:
+          type: array
+          items:
+            type: string
+          description: Pre-assigned seat numbers for group bookings
+          example: ['12A', '12B']
+        status:
+          type: string
+          enum: [Pending Response, Accepted, Rejected, Expired]
+          example: Pending Response
+        expiryTime:
+          type: string
+          description: ISO 8601 datetime. Auto-calculated to now+24h if omitted.
+          example: '2026-04-07T13:44:56'
+
+    ErrorEnvelope:
+      type: object
+      properties:
+        error:
+          type: string
+          example: Not Found
+        code:
+          type: string
+          example: OFFER_NOT_FOUND
+        message:
+          type: string
+          example: Offer 7 not found

@@ -1,0 +1,225 @@
+openapi: 3.0.3
+info:
+  title: Miles Balance Microservice API
+  version: 1.0.0
+  description: Manages the current miles balance for each passenger.
+servers:
+  - url: http://localhost:5006
+    description: Docker host mapping (docker-compose)
+tags:
+  - name: Health
+  - name: Miles Balance
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: OK
+                  service:
+                    type: string
+                    example: miles-balance-service
+
+  /miles-balance/{passengerID}:
+    get:
+      tags: [Miles Balance]
+      summary: Get current miles balance for a passenger
+      parameters:
+        - in: path
+          name: passengerID
+          required: true
+          schema:
+            type: integer
+          example: 101
+      responses:
+        '200':
+          description: Balance returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  passengerID:
+                    type: integer
+                    example: 101
+                  currentBalance:
+                    type: integer
+                    example: 3500
+        '404':
+          description: Passenger not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /miles-balance/{passengerID}/deduct:
+    put:
+      tags: [Miles Balance]
+      summary: Deduct miles from passenger balance
+      description: Fails atomically if balance is insufficient.
+      parameters:
+        - in: path
+          name: passengerID
+          required: true
+          schema:
+            type: integer
+          example: 101
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount:
+                  type: integer
+                  example: 500
+      responses:
+        '200':
+          description: Miles deducted; new balance returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BalanceUpdateResponse'
+        '400':
+          description: Invalid amount or insufficient miles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /miles-balance/{passengerID}/add:
+    put:
+      tags: [Miles Balance]
+      summary: Add miles to passenger balance
+      description: Used for earning miles and rollback/restoration flows.
+      parameters:
+        - in: path
+          name: passengerID
+          required: true
+          schema:
+            type: integer
+          example: 101
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount:
+                  type: integer
+                  example: 1000
+      responses:
+        '200':
+          description: Miles added; new balance returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BalanceUpdateResponse'
+        '400':
+          description: Invalid amount
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /miles-balance/{passengerID}/initialize:
+    post:
+      tags: [Miles Balance]
+      summary: Initialize a new passenger's miles balance
+      description: |
+        Creates the row if it doesn't exist. If it already exists, welcomeBonus is **added** (upsert).
+        Pass `welcomeBonus: 0` to initialize without adding miles (used by Miles Earn service).
+      parameters:
+        - in: path
+          name: passengerID
+          required: true
+          schema:
+            type: integer
+          example: 101
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                welcomeBonus:
+                  type: integer
+                  default: 5000
+                  example: 5000
+      responses:
+        '200':
+          description: Passenger initialized
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  passengerID:
+                    type: integer
+                    example: 101
+                  currentBalance:
+                    type: integer
+                    example: 5000
+                  message:
+                    type: string
+                    example: Passenger initialized
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+components:
+  schemas:
+    BalanceUpdateResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        newBalance:
+          type: integer
+          example: 3000
+    SimpleError:
+      type: object
+      properties:
+        error:
+          type: string
+          example: Insufficient miles
