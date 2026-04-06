@@ -24,6 +24,41 @@ delete_service_if_exists() {
   curl -fsS -X DELETE "$ADMIN_URL/services/$name" >/dev/null 2>&1 || true
 }
 
+delete_plugin_if_exists_by_name() {
+  plugin_name="$1"
+  plugin_ids="$(curl -fsS "$ADMIN_URL/plugins" | tr ',' '\n' | grep "\"name\":\"$plugin_name\"" | sed -n 's/.*"id":"\([^\"]*\)".*/\1/p' || true)"
+  if [ -n "$plugin_ids" ]; then
+    for plugin_id in $plugin_ids; do
+      curl -fsS -X DELETE "$ADMIN_URL/plugins/$plugin_id" >/dev/null 2>&1 || true
+    done
+  fi
+}
+
+reset_managed_state() {
+  # Make repo config the source of truth. Re-running bootstrap will converge
+  # every local Kong DB to the same known services/routes/plugins.
+  delete_service_if_exists "booking-api"
+  delete_service_if_exists "record-api"
+  delete_service_if_exists "flight-api"
+  delete_service_if_exists "seats-api"
+  delete_service_if_exists "payment-api"
+  delete_service_if_exists "offer-api"
+  delete_service_if_exists "loyalty-api"
+  delete_service_if_exists "flight-search-api"
+  delete_service_if_exists "flight-cancel-api"
+
+  # Remove old legacy aliases if they exist.
+  delete_service_if_exists "flight-api-flight"
+  delete_service_if_exists "flight-api-flights"
+  delete_service_if_exists "payments-api"
+  delete_service_if_exists "offer-api-offer"
+  delete_service_if_exists "offer-api-offers"
+
+  # Recreate the global plugins from scratch so settings stay in sync too.
+  delete_plugin_if_exists_by_name "cors"
+  delete_plugin_if_exists_by_name "file-log"
+}
+
 upsert_route() {
   service_name="$1"
   route_name="$2"
@@ -137,9 +172,11 @@ ensure_global_cors() {
 }
 
 wait_for_kong
+reset_managed_state
 
 upsert_service "booking-api" "http://booking-composite-service:3001"
 upsert_route "booking-api" "booking-api-bookings" "/api/bookings" "false"
+upsert_route "booking-api" "booking-api-flights" "/api/flights" "false"
 upsert_route "booking-api" "booking-api-rebooking" "/api/rebooking" "false"
 upsert_route "booking-api" "booking-api-rebooking-accept" "/api/rebooking/accept" "false"
 upsert_route "booking-api" "booking-api-rebooking-reject" "/api/rebooking/reject" "false"
@@ -147,20 +184,15 @@ upsert_route "booking-api" "booking-api-rebooking-reject" "/api/rebooking/reject
 upsert_service "record-api" "http://record-service:3000/records"
 upsert_route "record-api" "record-api-route" "/api/records" "true"
 
-delete_service_if_exists "flight-api-flight"
-delete_service_if_exists "flight-api-flights"
 upsert_service "flight-api" "http://flight-service:3000/flight"
 upsert_route "flight-api" "flight-api-flight-route" "/api/flight" "true"
 
 upsert_service "seats-api" "http://seats-service:5003/seats"
 upsert_route "seats-api" "seats-api-route" "/api/seats" "true"
 
-delete_service_if_exists "payments-api"
 upsert_service "payment-api" "http://payment-service:5000/payment"
 upsert_route "payment-api" "payment-api-route" "/api/payment" "true"
 
-delete_service_if_exists "offer-api-offer"
-delete_service_if_exists "offer-api-offers"
 upsert_service "offer-api" "http://offer-service:5000/offer"
 upsert_route "offer-api" "offer-api-offer-route" "/api/offer" "true"
 
