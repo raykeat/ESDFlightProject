@@ -327,7 +327,7 @@ services:
 
   kong-db:
     image: postgres:17.4
-    container_name:  -db
+    container_name: kong-db
     restart: unless-stopped
     environment:
       - POSTGRES_USER=kong
