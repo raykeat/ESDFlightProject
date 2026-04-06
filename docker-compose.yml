@@ -327,7 +327,7 @@ services:
 
   kong-db:
     image: postgres:17.4
-    container_name: kong-db
+    container_name:  -db
     restart: unless-stopped
     environment:
       - POSTGRES_USER=kong
@@ -419,7 +419,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 25s
-    mem_limit: 512m
+    mem_limit: 1g
     networks:
       - app-network
 
