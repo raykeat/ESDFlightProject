@@ -1,0 +1,399 @@
+openapi: 3.0.3
+info:
+  title: Flight Microservice API
+  version: 1.0.0
+  description: |
+    API for managing flights — status, availability, and automatic landing.
+    Routes respond on both `/flight` and `/flights` aliases.
+servers:
+  - url: http://localhost:3003
+    description: Docker host mapping (docker-compose)
+  - url: http://localhost:3000
+    description: Direct service port (non-docker local run)
+tags:
+  - name: Health
+  - name: Flights
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: OK
+                  service:
+                    type: string
+                    example: flight-service
+
+  /flights:
+    get:
+      tags: [Flights]
+      summary: Get all flights (with optional filters)
+      description: Also accessible via `/flight`. Supports filtering by origin, destination, date, and status.
+      parameters:
+        - in: query
+          name: origin
+          schema:
+            type: string
+          example: Singapore
+        - in: query
+          name: dest
+          schema:
+            type: string
+          example: Tokyo
+        - in: query
+          name: date
+          schema:
+            type: string
+            format: date
+          example: '2026-04-10'
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [available, unavailable, cancelled, landed]
+          example: available
+      responses:
+        '200':
+          description: List of matching flights
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Flight'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+
+  /flight/available:
+    get:
+      tags: [Flights]
+      summary: Get available (non-cancelled, non-landed) flights
+      parameters:
+        - in: query
+          name: origin
+          schema:
+            type: string
+          example: Singapore
+        - in: query
+          name: dest
+          schema:
+            type: string
+          example: Tokyo
+        - in: query
+          name: dateFrom
+          schema:
+            type: string
+            format: date
+          example: '2026-04-10'
+        - in: query
+          name: dateTo
+          schema:
+            type: string
+            format: date
+          example: '2026-04-20'
+      responses:
+        '200':
+          description: List of available flights
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Flight'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+
+  /flights/{flightID}:
+    get:
+      tags: [Flights]
+      summary: Get flight by ID
+      description: Also accessible via `/flight/{flightID}`.
+      parameters:
+        - in: path
+          name: flightID
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '200':
+          description: Flight found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Flight'
+        '404':
+          description: Flight not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+    put:
+      tags: [Flights]
+      summary: Update flight status (full update)
+      description: Also accessible via `/flight/{flightID}`. Accepts `Status` or `status` field. Setting status to `landed` automatically triggers miles award via booking-composite.
+      parameters:
+        - in: path
+          name: flightID
+          required: true
+          schema:
+            type: integer
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateFlightRequest'
+      responses:
+        '200':
+          description: Flight updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateFlightResponse'
+        '400':
+          description: Missing or invalid status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+        '404':
+          description: Flight not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+
+  /flight/{flightID}/status:
+    put:
+      tags: [Flights]
+      summary: Update flight status (dedicated endpoint)
+      parameters:
+        - in: path
+          name: flightID
+          required: true
+          schema:
+            type: integer
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [available, unavailable, cancelled, landed]
+                  example: cancelled
+                CancellationReason:
+                  type: string
+                  example: Severe weather
+      responses:
+        '200':
+          description: Status updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+        '400':
+          description: Missing or invalid status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+        '404':
+          description: Flight not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+
+  /flight/{flightID}/landed:
+    put:
+      tags: [Flights]
+      summary: Mark a flight as landed
+      description: Convenience endpoint to set status to `landed` without requiring a request body. Automatically triggers miles award.
+      parameters:
+        - in: path
+          name: flightID
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '200':
+          description: Flight marked as landed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Flight marked as landed
+                  flightID:
+                    type: integer
+                    example: 1
+                  status:
+                    type: string
+                    example: Landed
+        '404':
+          description: Flight not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageError'
+
+components:
+  schemas:
+    Flight:
+      type: object
+      properties:
+        FlightID:
+          type: integer
+          example: 1
+        FlightNumber:
+          type: string
+          example: SQ318
+        Origin:
+          type: string
+          example: Singapore
+        Destination:
+          type: string
+          example: Tokyo
+        Date:
+          type: string
+          description: Formatted as DD/MM/YYYY
+          example: '10/04/2026'
+        FlightDate:
+          type: string
+          format: date
+          example: '2026-04-10'
+        DepartureTime:
+          type: string
+          example: '08:30'
+        FlightDuration:
+          type: string
+          example: '7:00'
+        ArrivalTime:
+          type: string
+          example: '15:30'
+        Price:
+          type: number
+          format: double
+          example: 499.99
+        Status:
+          type: string
+          enum: [Available, Unavailable, Cancelled, Landed]
+          example: Available
+        CancellationReason:
+          type: string
+          nullable: true
+          example: null
+        Meals:
+          type: string
+          example: Standard
+        Beverages:
+          type: string
+          example: Complimentary
+        Wifi:
+          type: boolean
+          example: true
+        Baggage:
+          type: string
+          example: 30kg
+
+    UpdateFlightRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [available, unavailable, cancelled, landed]
+          example: cancelled
+        Status:
+          type: string
+          description: Alias for `status` (case-insensitive)
+          example: Cancelled
+        CancellationReason:
+          type: string
+          nullable: true
+          example: Severe weather
+
+    UpdateFlightResponse:
+      type: object
+      properties:
+        FlightID:
+          type: integer
+          example: 1
+        Status:
+          type: string
+          example: Cancelled
+        Origin:
+          type: string
+          example: Singapore
+        Destination:
+          type: string
+          example: Tokyo
+        Date:
+          type: string
+          example: '2026-04-10'
+        DepartureTime:
+          type: string
+          example: '08:30'
+        CancellationReason:
+          type: string
+          nullable: true
+          example: Severe weather
+
+    MessageError:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Flight not found

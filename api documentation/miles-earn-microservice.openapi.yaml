@@ -1,0 +1,148 @@
+openapi: 3.0.3
+info:
+  title: Miles Earn Microservice API
+  version: 1.0.0
+  description: |
+    Calculates and awards flight miles to passengers based on flight spend.
+    Orchestrates calls to Miles Balance and Miles Transaction services internally.
+    Rate: 1 mile per SGD spent (configurable via `MILES_PER_DOLLAR` env var).
+servers:
+  - url: http://localhost:5009
+    description: Docker host mapping (docker-compose)
+tags:
+  - name: Health
+  - name: Miles Earn
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: OK
+                  service:
+                    type: string
+                    example: miles-earn-service
+
+  /miles/earn:
+    post:
+      tags: [Miles Earn]
+      summary: Award miles to a passenger based on flight spend
+      description: |
+        Computes `earnedMiles = floor(flightCost * milesPerDollar)`, then:
+        1. Initializes passenger balance row if missing (with `welcomeBonus: 0`).
+        2. Adds earned miles to balance via Miles Balance service.
+        3. Logs a `EARNED` transaction via Miles Transaction service.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EarnMilesRequest'
+      responses:
+        '201':
+          description: Miles awarded successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EarnMilesResponse'
+        '400':
+          description: Invalid or missing fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '500':
+          description: Failed to award miles (downstream service error)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: Failed to award miles
+                  details:
+                    type: string
+                    example: Network error reaching miles-balance-service
+
+components:
+  schemas:
+    EarnMilesRequest:
+      type: object
+      required: [passengerID, flightCost]
+      properties:
+        passengerID:
+          type: integer
+          example: 101
+        flightCost:
+          type: number
+          format: double
+          description: Amount paid for the flight in SGD
+          example: 399.99
+        bookingReference:
+          type: string
+          nullable: true
+          description: Optional booking reference linked to the transaction log
+          example: BK-00001
+        currency:
+          type: string
+          default: USD
+          example: SGD
+        milesPerDollar:
+          type: number
+          format: double
+          default: 1
+          description: Override earn rate. Defaults to service-level MILES_PER_DOLLAR env var.
+          example: 1
+
+    EarnMilesResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        passengerID:
+          type: integer
+          example: 101
+        flightCost:
+          type: number
+          example: 399.99
+        currency:
+          type: string
+          example: SGD
+        milesPerDollar:
+          type: number
+          example: 1
+        earnedMiles:
+          type: integer
+          example: 399
+        bookingReference:
+          type: string
+          nullable: true
+          example: BK-00001
+        transactionID:
+          type: integer
+          example: 23
+        newBalance:
+          type: integer
+          example: 3899
+
+    SimpleError:
+      type: object
+      properties:
+        error:
+          type: string
+          example: passengerID must be a positive integer

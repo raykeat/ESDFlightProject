@@ -1,0 +1,225 @@
+openapi: 3.0.3
+info:
+  title: Notification Service API
+  version: 1.0.0
+  description: |
+    Atomic microservice for sending booking confirmation, flight cancellation, and voucher notification emails.
+
+    **Email delivery:** SendGrid REST API (direct, bypasses latin-1 encoding issues).
+    **Async consumers:** Also subscribes to RabbitMQ (exchange: `airline_events`) for:
+    - `booking.confirmed` — sends booking confirmation email with PDF attachment
+    - `flight.cancelled.alt` — sends rebooking offer email (Scenario 2 Path A)
+    - `flight.cancelled.noalt` — sends full refund notification email (Scenario 2 Path B)
+    - `voucher.conversion` — sends voucher confirmation email (via RabbitMQ)
+    - `voucher.bundle.conversion` — sends voucher bundle confirmation email (via RabbitMQ)
+
+    The HTTP endpoints below are for **synchronous** calls (used by the Loyalty Composite for Scenario 3 voucher emails).
+servers:
+  - url: http://localhost:3004
+    description: Docker host mapping (docker-compose) — same port internally and externally
+tags:
+  - name: Health
+  - name: Notifications
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: UP
+                  service:
+                    type: string
+                    example: notification-service
+
+  /notifications/voucher:
+    post:
+      tags: [Notifications]
+      summary: Send voucher confirmation email (single voucher)
+      description: |
+        Sends a styled HTML email with PDF attachment for a single voucher conversion.
+        Called by the Loyalty Composite after a successful miles-to-voucher conversion.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VoucherNotificationRequest'
+      responses:
+        '200':
+          description: Email sent successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Voucher confirmation email sent
+        '400':
+          description: Missing passengerEmail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Email sending failed (SendGrid error)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /notifications/voucher-bundle:
+    post:
+      tags: [Notifications]
+      summary: Send voucher bundle confirmation email (multiple vouchers)
+      description: |
+        Sends a styled HTML email with PDF attachment for a bundle voucher conversion.
+        Called by the Loyalty Composite after a successful multi-voucher conversion.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VoucherBundleNotificationRequest'
+      responses:
+        '200':
+          description: Email sent successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Voucher bundle confirmation email sent
+        '400':
+          description: Missing passengerEmail or vouchers list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Email sending failed (SendGrid error)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    VoucherNotificationRequest:
+      type: object
+      required: [passengerEmail]
+      properties:
+        passengerEmail:
+          type: string
+          example: passenger@example.com
+        passengerName:
+          type: string
+          example: John Doe
+        firstName:
+          type: string
+          example: John
+        lastName:
+          type: string
+          example: Doe
+        voucherType:
+          type: string
+          enum: [TRAVEL_CREDIT, IN_FLIGHT_PERKS, PARTNER_GIFT]
+          example: TRAVEL_CREDIT
+        voucherCode:
+          type: string
+          example: VCH-A1B2-C3D4-E5F6
+        voucherValue:
+          type: string
+          example: '$10.00'
+        milesRedeemed:
+          type: integer
+          example: 1000
+        remainingMiles:
+          type: integer
+          example: 4000
+        expiryDate:
+          type: string
+          example: '06/04/2027'
+        providerName:
+          type: string
+          nullable: true
+          example: null
+        redemptionUrl:
+          type: string
+          nullable: true
+          example: null
+        externalOrderId:
+          type: string
+          nullable: true
+          example: null
+
+    VoucherBundleNotificationRequest:
+      type: object
+      required: [passengerEmail, vouchers]
+      properties:
+        passengerEmail:
+          type: string
+          example: passenger@example.com
+        passengerName:
+          type: string
+          example: John Doe
+        totalMilesRedeemed:
+          type: integer
+          example: 2500
+        remainingMiles:
+          type: integer
+          example: 2500
+        vouchers:
+          type: array
+          items:
+            type: object
+            properties:
+              voucherType:
+                type: string
+                example: TRAVEL_CREDIT
+              voucherCode:
+                type: string
+                example: VCH-A1B2-C3D4-E5F6
+              voucherValue:
+                type: string
+                example: '$10.00'
+              milesRedeemed:
+                type: integer
+                example: 1000
+              expiryDate:
+                type: string
+                example: '06/04/2027'
+              providerName:
+                type: string
+                nullable: true
+              redemptionUrl:
+                type: string
+                nullable: true
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: string
+          example: Missing passengerEmail

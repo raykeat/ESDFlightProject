@@ -1,16 +1,19 @@
 openapi: 3.0.3
 info:
   title: Record Microservice API
-  version: 1.0.0
-  description: API documentation for the record microservice.
+  version: 2.0.0
+  description: |
+    Manages booking records for the ESDFlightProject. Supports guest bookings, group bookings,
+    travel credit voucher metadata, in-flight perks attachment, and miles award tracking.
 servers:
   - url: http://localhost:3002
-    description: Docker host mapping from docker-compose
+    description: Docker host mapping (docker-compose)
   - url: http://localhost:3000
     description: Direct service port (non-docker local run)
 tags:
   - name: Health
-  - name: Bookings
+  - name: Records
+
 paths:
   /health:
     get:
@@ -31,43 +34,106 @@ paths:
                     type: string
                     example: record-service
 
-  /bookings:
+  /records:
     post:
-      tags: [Bookings]
-      summary: Create a booking
+      tags: [Records]
+      summary: Create a booking record (status Pending)
+      description: |
+        Supports both registered passengers and guests (`isGuest: true`).
+        Accepts both camelCase and PascalCase field names.
+        Required: `FlightID`, `amount`, `BookedByPassengerID`.
+        Guest bookings also require `GuestFirstName`, `GuestLastName`, `GuestPassportNumber`.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateBookingRequest'
+              $ref: '#/components/schemas/CreateRecordRequest'
       responses:
         '201':
           description: Booking created
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CreateBookingResponse'
+                type: object
+                properties:
+                  bookingID:
+                    type: integer
+                    example: 12
+                  status:
+                    type: string
+                    example: Pending
+                  message:
+                    type: string
+                    example: Booking Record created successfully
+        '400':
+          description: Missing required fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
         '500':
-          description: Database or server error
+          description: Database error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/SimpleError'
 
     get:
-      tags: [Bookings]
-      summary: Get bookings by flight ID
+      tags: [Records]
+      summary: Get booking records by flight ID
+      description: Requires `flightID` query param. Optionally filter by booking status.
       parameters:
         - in: query
           name: flightID
           required: true
           schema:
             type: integer
-          description: Flight ID used to filter booking records.
+          example: 201
+        - in: query
+          name: status
+          required: false
+          schema:
+            type: string
+            enum: [Pending, Confirmed, Cancelled]
+          example: Confirmed
       responses:
         '200':
-          description: Booking list for the given flight
+          description: List of booking records for the flight
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Booking'
+        '400':
+          description: FlightID is required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /records/passenger/{passengerID}:
+    get:
+      tags: [Records]
+      summary: Get all booking records for a passenger
+      description: Returns bookings where passenger is the traveller OR the booker (group bookings).
+      parameters:
+        - in: path
+          name: passengerID
+          required: true
+          schema:
+            type: integer
+          example: 101
+      responses:
+        '200':
+          description: List of bookings
           content:
             application/json:
               schema:
@@ -75,22 +141,23 @@ paths:
                 items:
                   $ref: '#/components/schemas/Booking'
         '500':
-          description: Database or server error
+          description: Database error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/SimpleError'
 
-  /bookings/{bookingID}:
+  /records/{bookingID}:
     get:
-      tags: [Bookings]
-      summary: Get booking by booking ID
+      tags: [Records]
+      summary: Get booking record by booking ID
       parameters:
         - in: path
           name: bookingID
           required: true
           schema:
             type: integer
+          example: 12
       responses:
         '200':
           description: Booking found
@@ -105,59 +172,57 @@ paths:
               schema:
                 $ref: '#/components/schemas/SimpleError'
         '500':
-          description: Database or server error
+          description: Database error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/SimpleError'
 
-  /bookings/{bookingID}/status:
     put:
-      tags: [Bookings]
-      summary: Update booking status
+      tags: [Records]
+      summary: Update booking status (general update)
+      description: Accepts `BookingStatus`, `bookingstatus`, or `status` field.
       parameters:
         - in: path
           name: bookingID
           required: true
           schema:
             type: integer
+          example: 12
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UpdateBookingStatusRequest'
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  example: Confirmed
+                BookingStatus:
+                  type: string
+                  example: Confirmed
       responses:
         '200':
           description: Status updated
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
-        '500':
-          description: Database or server error
+                type: object
+                properties:
+                  BookingID:
+                    type: integer
+                    example: 12
+                  BookingStatus:
+                    type: string
+                    example: Confirmed
+        '400':
+          description: BookingStatus is required
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/SimpleError'
-
-  /booking/{bookingID}:
-    delete:
-      tags: [Bookings]
-      summary: Delete booking by booking ID
-      parameters:
-        - in: path
-          name: bookingID
-          required: true
-          schema:
-            type: integer
-      responses:
-        '200':
-          description: Booking deleted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MessageResponse'
         '404':
           description: Booking not found
           content:
@@ -165,7 +230,326 @@ paths:
               schema:
                 $ref: '#/components/schemas/SimpleError'
         '500':
-          description: Database or server error
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /records/{bookingID}/status:
+    put:
+      tags: [Records]
+      summary: Update booking status (dedicated endpoint)
+      parameters:
+        - in: path
+          name: bookingID
+          required: true
+          schema:
+            type: integer
+          example: 12
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  example: Confirmed
+      responses:
+        '200':
+          description: Status updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Booking status updated successfully
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /records/{bookingID}/rebook:
+    put:
+      tags: [Records]
+      summary: Rebook a booking to a new flight and seat
+      description: |
+        Updates FlightID, seatNumber, and status in one call.
+        Optionally carries over travel credit and in-flight perks voucher metadata.
+      parameters:
+        - in: path
+          name: bookingID
+          required: true
+          schema:
+            type: integer
+          example: 12
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RebookRequest'
+      responses:
+        '200':
+          description: Booking rebooked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  BookingID:
+                    type: integer
+                    example: 12
+                  FlightID:
+                    type: integer
+                    example: 9
+                  seatNumber:
+                    type: string
+                    example: 14C
+                  BookingStatus:
+                    type: string
+                    example: Confirmed
+        '400':
+          description: FlightID and seatNumber are required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '404':
+          description: Booking not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /records/{bookingID}/perks:
+    put:
+      tags: [Records]
+      summary: Attach in-flight perks voucher to a confirmed booking
+      description: |
+        Booking must be `Confirmed`. Only one perks voucher per booking.
+        Validates that the passengerID matches the booking owner.
+      parameters:
+        - in: path
+          name: bookingID
+          required: true
+          schema:
+            type: integer
+          example: 12
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [passengerID, voucherID, voucherCode]
+              properties:
+                passengerID:
+                  type: integer
+                  example: 101
+                voucherID:
+                  type: integer
+                  example: 5
+                voucherCode:
+                  type: string
+                  example: VCH-A1B2-C3D4-E5F6
+      responses:
+        '200':
+          description: Perks attached
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: In-flight perks attached successfully
+        '400':
+          description: Missing required fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '403':
+          description: Booking does not belong to this passenger
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '404':
+          description: Booking not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '409':
+          description: Booking not confirmed or perks already attached
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+    delete:
+      tags: [Records]
+      summary: Remove in-flight perks metadata from a booking
+      parameters:
+        - in: path
+          name: bookingID
+          required: true
+          schema:
+            type: integer
+          example: 12
+      responses:
+        '200':
+          description: Perks removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: In-flight perks removed successfully
+        '404':
+          description: Booking not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /records/{bookingID}/miles-awarded:
+    put:
+      tags: [Records]
+      summary: Mark miles as awarded for a booking (idempotent)
+      description: |
+        Sets `milesAwarded`, `milesTransactionID`, and `milesAwardedAt`.
+        Only updates if `milesAwardedAt IS NULL` — safe to call multiple times.
+      parameters:
+        - in: path
+          name: bookingID
+          required: true
+          schema:
+            type: integer
+          example: 12
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [milesAwarded]
+              properties:
+                milesAwarded:
+                  type: integer
+                  example: 399
+                transactionID:
+                  type: integer
+                  nullable: true
+                  example: 23
+      responses:
+        '200':
+          description: Miles award recorded (or already recorded — idempotent)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  bookingID:
+                    type: integer
+                    example: 12
+                  milesAwarded:
+                    type: integer
+                    example: 399
+                  transactionID:
+                    type: integer
+                    nullable: true
+                    example: 23
+                  alreadyAwarded:
+                    type: boolean
+                    example: false
+        '400':
+          description: Invalid milesAwarded value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '404':
+          description: Booking not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /record/{bookingID}:
+    delete:
+      tags: [Records]
+      summary: Delete a booking record
+      parameters:
+        - in: path
+          name: bookingID
+          required: true
+          schema:
+            type: integer
+          example: 12
+      responses:
+        '200':
+          description: Booking deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Booking deleted successfully
+        '404':
+          description: Booking not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '500':
+          description: Database error
           content:
             application/json:
               schema:
@@ -178,38 +562,113 @@ components:
       properties:
         bookingID:
           type: integer
-          example: 1
-        passengerID:
-          type: integer
-          example: 101
+          example: 12
         flightID:
           type: integer
           example: 201
-        status:
+        seatID:
           type: string
-          example: Confirmed
-        amount:
-          type: number
-          format: double
-          example: 299.99
+          nullable: true
+          example: 12A
         seatNumber:
           type: string
           nullable: true
           example: 12A
-        refundID:
+        passengerID:
+          type: integer
+          nullable: true
+          example: 101
+        bookedByPassengerID:
+          type: integer
+          example: 101
+        isGuest:
+          type: boolean
+          example: false
+        guestFirstName:
           type: string
           nullable: true
-          example: re_123456789
+          example: null
+        guestLastName:
+          type: string
+          nullable: true
+          example: null
+        guestPassportNumber:
+          type: string
+          nullable: true
+          example: null
+        amount:
+          type: number
+          format: double
+          example: 299.99
+        amountPaid:
+          type: number
+          format: double
+          example: 299.99
+        originalAmountPaid:
+          type: number
+          format: double
+          nullable: true
+          example: 299.99
+        status:
+          type: string
+          enum: [Pending, Confirmed, Cancelled]
+          example: Confirmed
+        travelCreditVoucherID:
+          type: integer
+          nullable: true
+          example: null
+        travelCreditVoucherCode:
+          type: string
+          nullable: true
+          example: null
+        travelCreditAppliedAmount:
+          type: number
+          nullable: true
+          example: null
+        travelCreditAppliedAt:
+          type: string
+          nullable: true
+          example: null
+        inFlightPerksVoucherID:
+          type: integer
+          nullable: true
+          example: null
+        inFlightPerksVoucherCode:
+          type: string
+          nullable: true
+          example: null
+        inFlightPerksAppliedAt:
+          type: string
+          nullable: true
+          example: null
+        milesAwarded:
+          type: integer
+          nullable: true
+          example: null
+        milesTransactionID:
+          type: integer
+          nullable: true
+          example: null
+        milesAwardedAt:
+          type: string
+          nullable: true
+          example: null
         createdAt:
           type: string
           example: '2026-03-11 16:25:01'
 
-    CreateBookingRequest:
+    CreateRecordRequest:
       type: object
-      required: [passengerID, flightID, amount]
+      required: [flightID, amount, bookedByPassengerID]
       properties:
         passengerID:
           type: integer
+          nullable: true
+          description: Required for non-guest bookings
+          example: 101
+        bookedByPassengerID:
+          type: integer
+          description: The passenger who made the booking (group booking support)
           example: 101
         flightID:
           type: integer
@@ -218,37 +677,87 @@ components:
           type: number
           format: double
           example: 299.99
+        originalAmountPaid:
+          type: number
+          format: double
+          nullable: true
+          description: Full price before travel credit. Defaults to amount if omitted.
+          example: 299.99
         seatNumber:
           type: string
+          nullable: true
           example: 12A
-
-    CreateBookingResponse:
-      type: object
-      properties:
-        bookingID:
+        returnFlightID:
           type: integer
-          example: 12
-        status:
+          nullable: true
+          example: null
+        returnSeatNumber:
           type: string
-          example: Pending
-        message:
+          nullable: true
+          example: null
+        isGuest:
+          type: boolean
+          default: false
+          example: false
+        guestFirstName:
           type: string
-          example: Booking created successfully
+          nullable: true
+          example: null
+        guestLastName:
+          type: string
+          nullable: true
+          example: null
+        guestPassportNumber:
+          type: string
+          nullable: true
+          example: null
+        travelCreditVoucherID:
+          type: integer
+          nullable: true
+          example: null
+        travelCreditVoucherCode:
+          type: string
+          nullable: true
+          example: null
+        travelCreditAppliedAmount:
+          type: number
+          nullable: true
+          example: null
 
-    UpdateBookingStatusRequest:
+    RebookRequest:
       type: object
-      required: [status]
+      required: [flightID, seatNumber]
       properties:
+        flightID:
+          type: integer
+          example: 9
+        seatNumber:
+          type: string
+          example: 14C
         status:
           type: string
+          default: Confirmed
           example: Confirmed
-
-    MessageResponse:
-      type: object
-      properties:
-        message:
+        travelCreditVoucherID:
+          type: integer
+          nullable: true
+          example: null
+        travelCreditVoucherCode:
           type: string
-          example: Booking status updated successfully
+          nullable: true
+          example: null
+        travelCreditAppliedAmount:
+          type: number
+          nullable: true
+          example: null
+        inFlightPerksVoucherID:
+          type: integer
+          nullable: true
+          example: null
+        inFlightPerksVoucherCode:
+          type: string
+          nullable: true
+          example: null
 
     SimpleError:
       type: object

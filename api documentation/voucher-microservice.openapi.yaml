@@ -1,0 +1,547 @@
+openapi: 3.0.3
+info:
+  title: Voucher Microservice API
+  version: 1.0.0
+  description: |
+    Manages the creation, retrieval, and redemption of loyalty vouchers.
+    Supports three voucher types: **TRAVEL_CREDIT**, **IN_FLIGHT_PERKS**, and **PARTNER_GIFT**.
+    Partner Gift vouchers integrate with Tremendous (sandbox or live) for external reward delivery.
+servers:
+  - url: http://localhost:5005
+    description: Docker host mapping (docker-compose) — same port internally and externally
+tags:
+  - name: Health
+  - name: Voucher Types
+  - name: Vouchers
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: OK
+                  service:
+                    type: string
+                    example: voucher-service
+
+  /vouchers/types:
+    get:
+      tags: [Voucher Types]
+      summary: Get all available voucher types
+      responses:
+        '200':
+          description: List of voucher type definitions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  voucherTypes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/VoucherTypeInfo'
+
+  /vouchers/types/{type}:
+    get:
+      tags: [Voucher Types]
+      summary: Get details for a specific voucher type
+      parameters:
+        - in: path
+          name: type
+          required: true
+          schema:
+            type: string
+            enum: [TRAVEL_CREDIT, IN_FLIGHT_PERKS, PARTNER_GIFT]
+          example: TRAVEL_CREDIT
+      responses:
+        '200':
+          description: Voucher type details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoucherTypeInfo'
+        '404':
+          description: Voucher type not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /vouchers:
+    post:
+      tags: [Vouchers]
+      summary: Generate a new voucher
+      description: |
+        Creates a voucher for a passenger by redeeming miles.
+
+        **Type rules:**
+        - `TRAVEL_CREDIT`: minimum 500 miles. Value = miles / 100 (SGD).
+        - `IN_FLIGHT_PERKS`: minimum 500 miles. Value = 1 pass.
+        - `PARTNER_GIFT`: minimum 1500 miles. Creates an external Tremendous reward. Value = SGD $15.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVoucherRequest'
+      responses:
+        '201':
+          description: Voucher created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateVoucherResponse'
+        '400':
+          description: Missing fields, invalid type, or insufficient miles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '502':
+          description: External provider (Tremendous) error for PARTNER_GIFT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /vouchers/bundle:
+    post:
+      tags: [Vouchers]
+      summary: Generate multiple vouchers in one call
+      description: |
+        Processes each item in the `items` array sequentially.
+        Failed items are added to `errors`; successful ones to `vouchers`.
+        Returns 201 with `partialSuccess: true` if at least one succeeded.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVoucherBundleRequest'
+      responses:
+        '201':
+          description: Vouchers created (may include partial success)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateVoucherBundleResponse'
+        '400':
+          description: Missing required fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '500':
+          description: All voucher creations failed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: Failed to create any vouchers
+                  errors:
+                    type: array
+                    items:
+                      type: object
+
+  /vouchers/{passengerID}:
+    get:
+      tags: [Vouchers]
+      summary: Get all vouchers for a passenger
+      parameters:
+        - in: path
+          name: passengerID
+          required: true
+          schema:
+            type: integer
+          example: 101
+        - in: query
+          name: status
+          required: false
+          schema:
+            type: string
+            enum: [ACTIVE, USED, EXPIRED]
+          example: ACTIVE
+      responses:
+        '200':
+          description: List of vouchers for the passenger
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Voucher'
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /vouchers/code/{voucherCode}:
+    get:
+      tags: [Vouchers]
+      summary: Get voucher by code
+      parameters:
+        - in: path
+          name: voucherCode
+          required: true
+          schema:
+            type: string
+          example: VCH-A1B2-C3D4-E5F6
+      responses:
+        '200':
+          description: Voucher found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Voucher'
+        '404':
+          description: Voucher not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /vouchers/{voucherID}/redeem:
+    put:
+      tags: [Vouchers]
+      summary: Mark voucher as used (redeem)
+      description: Only `ACTIVE` vouchers can be redeemed. Links the voucher to a booking.
+      parameters:
+        - in: path
+          name: voucherID
+          required: true
+          schema:
+            type: integer
+          example: 5
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bookingID:
+                  type: integer
+                  example: 12
+      responses:
+        '200':
+          description: Voucher redeemed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Voucher redeemed successfully
+        '404':
+          description: Voucher not found or already used/expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+  /vouchers/{voucherID}/status:
+    put:
+      tags: [Vouchers]
+      summary: Update voucher status
+      description: |
+        Used for restoration flows (e.g. setting a USED voucher back to ACTIVE after booking cancellation).
+        Setting status to `ACTIVE` also clears `usedAt` and `usedBookingID`.
+      parameters:
+        - in: path
+          name: voucherID
+          required: true
+          schema:
+            type: integer
+          example: 5
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [ACTIVE, USED, EXPIRED]
+                  example: ACTIVE
+      responses:
+        '200':
+          description: Voucher status updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Voucher status updated to ACTIVE
+        '400':
+          description: Missing status field
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '404':
+          description: Voucher not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
+components:
+  schemas:
+    VoucherTypeInfo:
+      type: object
+      properties:
+        type:
+          type: string
+          example: TRAVEL_CREDIT
+        name:
+          type: string
+          example: Travel Credit
+        rate:
+          type: integer
+          description: Miles per unit (100 miles = $1 for TRAVEL_CREDIT; 500 miles = 1 pass for IN_FLIGHT_PERKS)
+          example: 100
+        minMiles:
+          type: integer
+          example: 500
+        expiryDays:
+          type: integer
+          example: 365
+        description:
+          type: string
+          example: Convert miles into cash-style credit to reduce the amount paid on flight bookings.
+
+    Voucher:
+      type: object
+      properties:
+        voucherID:
+          type: integer
+          example: 5
+        passengerID:
+          type: integer
+          example: 101
+        voucherCode:
+          type: string
+          example: VCH-A1B2-C3D4-E5F6
+        voucherType:
+          type: string
+          enum: [TRAVEL_CREDIT, IN_FLIGHT_PERKS, PARTNER_GIFT]
+          example: TRAVEL_CREDIT
+        voucherValue:
+          type: number
+          example: 10.00
+        milesRedeemed:
+          type: integer
+          example: 1000
+        expiryDate:
+          type: string
+          format: date
+          example: '2027-04-06'
+        status:
+          type: string
+          enum: [ACTIVE, USED, EXPIRED]
+          example: ACTIVE
+        providerName:
+          type: string
+          nullable: true
+          example: null
+        providerProductId:
+          type: string
+          nullable: true
+          example: null
+        externalOrderId:
+          type: string
+          nullable: true
+          example: null
+        redemptionUrl:
+          type: string
+          nullable: true
+          example: null
+        usedAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: null
+        usedBookingID:
+          type: integer
+          nullable: true
+          example: null
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-04-06T13:44:56'
+
+    CreateVoucherRequest:
+      type: object
+      required: [passengerID, voucherType, milesRedeemed]
+      properties:
+        passengerID:
+          type: integer
+          example: 101
+        voucherType:
+          type: string
+          enum: [TRAVEL_CREDIT, IN_FLIGHT_PERKS, PARTNER_GIFT]
+          example: TRAVEL_CREDIT
+        milesRedeemed:
+          type: integer
+          example: 1000
+        voucherValue:
+          type: number
+          description: Optional override. Auto-calculated from milesRedeemed if omitted.
+          example: 10.00
+        passengerEmail:
+          type: string
+          description: Required for PARTNER_GIFT (Tremendous delivery)
+          example: passenger@example.com
+        passengerName:
+          type: string
+          description: Required for PARTNER_GIFT (Tremendous delivery)
+          example: John Doe
+
+    CreateVoucherResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        voucherID:
+          type: integer
+          example: 5
+        voucherCode:
+          type: string
+          example: VCH-A1B2-C3D4-E5F6
+        voucherType:
+          type: string
+          example: TRAVEL_CREDIT
+        voucherValue:
+          type: number
+          example: 10.00
+        milesRedeemed:
+          type: integer
+          example: 1000
+        expiryDate:
+          type: string
+          format: date
+          example: '2027-04-06'
+        status:
+          type: string
+          example: ACTIVE
+        providerName:
+          type: string
+          nullable: true
+          example: null
+        providerProductId:
+          type: string
+          nullable: true
+          example: null
+        externalOrderId:
+          type: string
+          nullable: true
+          example: null
+        redemptionUrl:
+          type: string
+          nullable: true
+          example: null
+
+    CreateVoucherBundleRequest:
+      type: object
+      required: [passengerID, items]
+      properties:
+        passengerID:
+          type: integer
+          example: 101
+        items:
+          type: array
+          items:
+            type: object
+            required: [voucherType, milesRedeemed]
+            properties:
+              voucherType:
+                type: string
+                enum: [TRAVEL_CREDIT, IN_FLIGHT_PERKS, PARTNER_GIFT]
+              milesRedeemed:
+                type: integer
+        passengerEmail:
+          type: string
+          example: passenger@example.com
+        passengerName:
+          type: string
+          example: John Doe
+
+    CreateVoucherBundleResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        vouchers:
+          type: array
+          items:
+            $ref: '#/components/schemas/CreateVoucherResponse'
+        errors:
+          type: array
+          items:
+            type: object
+          nullable: true
+        partialSuccess:
+          type: boolean
+          example: false
+
+    SimpleError:
+      type: object
+      properties:
+        error:
+          type: string
+          example: Invalid voucher type

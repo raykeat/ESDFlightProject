@@ -1,25 +1,55 @@
 openapi: 3.0.3
 info:
   title: Payment Microservice API
-  version: 1.0.0
-  description: API documentation for payment and refund operations.
+  version: 2.0.0
+  description: |
+    API documentation for payment and refund operations using Stripe Checkout Sessions.
+
+    **Flow for new payments (Scenario 1):**
+    1. Booking Composite calls `POST /payment/checkout` → receives a `sessionUrl`.
+    2. UI redirects passenger to Stripe's hosted payment page.
+    3. After payment, Stripe redirects to success URL.
+    4. BookingSuccess page calls `GET /payment/verify-session/{sessionID}` to confirm.
+
+    **Circuit breaker:** Stripe calls are protected by a circuit breaker (opens after 3 failures; resets after 30 s).
+    **Rate limiting:** 200 req/hour globally; 60/min on GETs; 30/min on verify-session; 10/min on checkout and refund.
 servers:
   - url: http://localhost:5001
-    description: Docker host mapping from docker-compose
+    description: Docker host mapping (docker-compose)
   - url: http://localhost:5000
     description: Direct service port (non-docker local run)
 tags:
+  - name: Health
   - name: Payments
   - name: Refunds
 
 paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: OK
+                  service:
+                    type: string
+                    example: payment-service
+
   /payment:
     get:
       tags: [Payments]
       summary: Get all payments
       responses:
         '200':
-          description: Payments returned
+          description: List of all payment records
           content:
             application/json:
               schema:
@@ -27,24 +57,54 @@ paths:
                 items:
                   $ref: '#/components/schemas/PaymentRecord'
 
+  /payment/{paymentID}:
+    get:
+      tags: [Payments]
+      summary: Get payment by payment ID
+      parameters:
+        - in: path
+          name: paymentID
+          required: true
+          schema:
+            type: integer
+          example: 25
+      responses:
+        '200':
+          description: Payment found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentRecord'
+        '404':
+          description: Payment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /payment/checkout:
     post:
       tags: [Payments]
-      summary: Process a new payment
+      summary: Create a Stripe Checkout Session
+      description: |
+        Creates a Stripe Checkout Session and a local `Pending` payment record.
+        Returns `sessionUrl` for the UI to redirect the passenger.
+        Idempotent: returns the existing completed payment if the same booking has already been paid.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreatePaymentRequest'
+              $ref: '#/components/schemas/CreateCheckoutRequest'
       responses:
         '201':
-          description: Payment completed
+          description: Checkout session created
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CreatePaymentResponse'
+                $ref: '#/components/schemas/CreateCheckoutResponse'
         '200':
-          description: Idempotent retry returned existing completed payment
+          description: Idempotent retry — payment already completed
           content:
             application/json:
               schema:
@@ -61,12 +121,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
-        '402':
-          description: Stripe/card declined
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
         '409':
           description: Duplicate payment for booking
           content:
@@ -79,32 +133,94 @@ paths:
                       paymentID:
                         type: integer
                         example: 18
+        '502':
+          description: Stripe API error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '503':
           description: Circuit breaker open for Stripe
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
-
-  /payment/{paymentID}:
-    get:
-      tags: [Payments]
-      summary: Get payment by payment ID
-      parameters:
-        - in: path
-          name: paymentID
-          required: true
-          schema:
-            type: integer
-      responses:
-        '200':
-          description: Payment found
+        '500':
+          description: Internal server error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaymentRecord'
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /payment/verify-session/{sessionID}:
+    get:
+      tags: [Payments]
+      summary: Verify a Stripe Checkout Session and mark payment as Completed
+      description: |
+        Called by the BookingSuccess page with the `session_id` from Stripe's success redirect.
+        Checks our DB first, then queries Stripe. Updates status to `Completed` if `payment_status == paid`.
+      parameters:
+        - in: path
+          name: sessionID
+          required: true
+          schema:
+            type: string
+          example: cs_test_a1B2C3d4E5F6
+      responses:
+        '200':
+          description: Payment verified and confirmed (or already verified)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaymentRecord'
+                  - type: object
+                    properties:
+                      message:
+                        type: string
+                        example: Payment verified and confirmed
+        '202':
+          description: Payment not yet completed (still pending on Stripe)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paymentID:
+                    type: integer
+                    example: 25
+                  bookingID:
+                    type: integer
+                    example: 12
+                  status:
+                    type: string
+                    example: Pending
+                  stripeStatus:
+                    type: string
+                    example: unpaid
+                  message:
+                    type: string
+                    example: Payment not yet completed
         '404':
-          description: Payment not found
+          description: No payment found for this session ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '502':
+          description: Stripe API error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Circuit breaker open for Stripe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Internal server error
           content:
             application/json:
               schema:
@@ -113,7 +229,11 @@ paths:
   /payment/refund:
     post:
       tags: [Refunds]
-      summary: Process full or partial refund
+      summary: Process a full or partial refund
+      description: |
+        Also accessible via `/payments/refund`.
+        Idempotent — returns existing refund if already refunded.
+        Validates passenger ownership, 180-day refund window, and refund amount limits.
       requestBody:
         required: true
         content:
@@ -122,23 +242,11 @@ paths:
               $ref: '#/components/schemas/CreateRefundRequest'
       responses:
         '200':
-          description: Refund completed or idempotent retry returned existing refund
+          description: Refund completed (or idempotent retry returned existing refund)
           content:
             application/json:
               schema:
-                oneOf:
-                  - $ref: '#/components/schemas/CreateRefundResponse'
-                  - type: object
-                    properties:
-                      refundID:
-                        type: string
-                        example: re_3QhABxKXe2tR
-                      status:
-                        type: string
-                        example: Refunded
-                      message:
-                        type: string
-                        example: Refund already completed. No duplicate refund was made.
+                $ref: '#/components/schemas/CreateRefundResponse'
         '400':
           description: Invalid request payload or refund business rule failed
           content:
@@ -181,17 +289,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /payment/refund/{refundID}:
     get:
       tags: [Refunds]
-      summary: Get refund record by refund ID
+      summary: Get refund record by Stripe refund ID
       parameters:
         - in: path
           name: refundID
           required: true
           schema:
             type: string
+          example: re_3QhABxKXe2tR
       responses:
         '200':
           description: Refund found
@@ -208,9 +323,9 @@ paths:
 
 components:
   schemas:
-    CreatePaymentRequest:
+    CreateCheckoutRequest:
       type: object
-      required: [bookingID, passengerID, amount]
+      required: [bookingID, passengerID, amount, flightNumber]
       properties:
         bookingID:
           type: integer
@@ -221,31 +336,44 @@ components:
         amount:
           type: number
           format: double
+          description: Amount in SGD. Min 0.50, max 10000.
           example: 299.99
-        stripeToken:
-          type: string
-          description: Stripe source token. Defaults to tok_visa if omitted.
-          example: tok_visa
         flightNumber:
           type: string
           example: SQ318
+        userBookingCount:
+          type: integer
+          description: Display booking number shown to user (defaults to bookingID)
+          example: 3
+        successUrl:
+          type: string
+          description: Redirect URL after successful payment (Stripe appends ?session_id=)
+          example: http://localhost:5173/booking-success/12?session_id={CHECKOUT_SESSION_ID}
+        cancelUrl:
+          type: string
+          description: Redirect URL if passenger cancels
+          example: http://localhost:5173/booking-confirmation
 
-    CreatePaymentResponse:
+    CreateCheckoutResponse:
       type: object
       properties:
         paymentID:
           type: integer
           example: 25
-        stripeChargeID:
+        stripeSessionID:
           type: string
-          example: ch_3Qh9v0KXe2tR
+          example: cs_test_a1B2C3d4E5F6
+        sessionUrl:
+          type: string
+          description: Stripe-hosted checkout page URL — redirect passenger here
+          example: https://checkout.stripe.com/pay/cs_test_a1B2C3d4E5F6
         status:
           type: string
-          example: Completed
+          example: Pending
 
     CreateRefundRequest:
       type: object
-      required: [bookingID, passengerID, amount]
+      required: [bookingID, passengerID]
       properties:
         bookingID:
           type: integer
@@ -256,20 +384,21 @@ components:
         amount:
           type: number
           format: double
-          description: Original payment amount used by service-side validations.
+          description: Original payment amount for validation. Fetched from DB if omitted.
           example: 299.99
         reason:
           type: string
-          description: Cancellation reason.
+          default: FlightCancelled
           example: FlightCancelled
         refundType:
           type: string
           enum: [full, partial]
           default: full
+          example: full
         refundAmount:
           type: number
           format: double
-          description: Required if refundType is partial.
+          description: Required when refundType is partial.
           example: 120.00
 
     CreateRefundResponse:
@@ -322,7 +451,12 @@ components:
           example: 299.99
         status:
           type: string
+          enum: [Pending, Completed, Refunded, Failed]
           example: Completed
+        stripeSessionID:
+          type: string
+          nullable: true
+          example: cs_test_a1B2C3d4E5F6
         stripeChargeID:
           type: string
           nullable: true
