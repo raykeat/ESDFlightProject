@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { usePassengerSession } from '../composables/usePassengerSession'
@@ -19,10 +19,27 @@ const error = ref(null)
 const submitting = ref(false)
 const decision = ref(null)
 const showConfirm = ref(null)
+const requestedAction = ref(null)
+
+function normalizeAction(value) {
+  const normalized = String(value || '').toLowerCase()
+  return normalized === 'accept' || normalized === 'reject' ? normalized : null
+}
+
+function openRequestedAction() {
+  if (!offer.value || loading.value || decision.value || error.value) return
+  showConfirm.value = requestedAction.value
+}
 
 onMounted(async () => {
   if (!currentPassenger.value) {
-    router.push('/auth')
+    router.push({
+      path: '/auth',
+      query: {
+        redirect: '/rebooking-offer',
+        ...route.query,
+      },
+    })
     return
   }
 
@@ -32,8 +49,22 @@ onMounted(async () => {
     return
   }
 
+  requestedAction.value = normalizeAction(route.query.action)
   await loadOffer()
+  openRequestedAction()
 })
+
+watch(
+  () => route.query.action,
+  (nextAction) => {
+    requestedAction.value = normalizeAction(nextAction)
+    if (!requestedAction.value && showConfirm.value) {
+      showConfirm.value = null
+      return
+    }
+    openRequestedAction()
+  }
+)
 
 async function loadOffer() {
   loading.value = true

@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from urllib.parse import urlencode
 
 import pika
 import requests
@@ -22,6 +23,8 @@ OFFER_SERVICE_URL = os.getenv("OFFER_SERVICE_URL", "http://offer-service:5000")
 RECORD_SERVICE_URL = os.getenv("RECORD_SERVICE_URL", "http://record-service:3000")
 FLIGHT_SERVICE_URL = os.getenv("FLIGHT_SERVICE_URL", "http://flight-service:3000")
 RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672")
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173").rstrip("/")
+REBOOKING_HOLD_MINUTES = int(os.getenv("REBOOKING_HOLD_MINUTES", "1440"))
 
 
 def get_json_or_none(response):
@@ -80,11 +83,19 @@ def hold_assigned_seats(new_flight_id, passenger_id, seat_numbers):
             "flightID": int(new_flight_id),
             "seatNumber": ",".join(seat_numbers),
             "passengerID": int(passenger_id),
+            "holdMinutes": REBOOKING_HOLD_MINUTES,
         },
         timeout=10,
     )
     if hold_response.status_code >= 400:
         raise RuntimeError(f"Seat hold failed: {hold_response.status_code} {hold_response.text}")
+
+
+def build_rebooking_link(offer_id, action=None):
+    query = {"offerID": int(offer_id)}
+    if action:
+        query["action"] = action
+    return f"{FRONTEND_BASE_URL}/rebooking-offer?{urlencode(query)}"
 
 
 def process_path_a_message(msg):
@@ -149,11 +160,20 @@ def process_path_a_message(msg):
             "BookingID": booking_id,
             "OfferID": offer_id,
             "OriginalFlight": original_flight_number,
+            "OriginalOrigin": orig_flight_data.get("Origin", ""),
+            "OriginalDestination": orig_flight_data.get("Destination", ""),
+            "OriginalDate": orig_flight_data.get("FlightDate", ""),
+            "OriginalDepartureTime": orig_flight_data.get("DepartureTime", ""),
             "NewFlight": new_flight_number,
+            "NewOrigin": new_flight_data.get("Origin", ""),
+            "NewDestination": new_flight_data.get("Destination", ""),
             "NewDate": new_flight_date,
             "NewDepartureTime": new_departure_time,
+            "AssignedSeatNumbers": assigned_seat_numbers,
             "GroupSize": group_size,
-            "AcceptRejectLink": f"http://localhost:5173/rebooking-offer?offerID={offer_id}",
+            "AcceptRejectLink": build_rebooking_link(offer_id),
+            "AcceptLink": build_rebooking_link(offer_id, "accept"),
+            "RejectLink": build_rebooking_link(offer_id, "reject"),
         },
     }
 
@@ -161,6 +181,12 @@ def process_path_a_message(msg):
     connection = pika.BlockingConnection(params)
     channel = connection.channel()
     channel.exchange_declare(exchange="airline_events", exchange_type="topic", durable=True)
+    channel.queue_declare(queue="notification_booking_queue", durable=True)
+    channel.queue_bind(
+        queue="notification_booking_queue",
+        exchange="airline_events",
+        routing_key="flight.cancelled.alt",
+    )
     channel.basic_publish(
         exchange="airline_events",
         routing_key="flight.cancelled.alt",

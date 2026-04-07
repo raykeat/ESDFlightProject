@@ -22,6 +22,8 @@ const DB_CONFIG = {
 };
 
 let db = createPool();
+const DEFAULT_SEAT_ROWS = Array.from({ length: 10 }, (_, index) => index + 1);
+const DEFAULT_SEAT_COLS = ["A", "B", "C", "D", "E", "F"];
 
 function createPool() {
     return mysql.createPool(DB_CONFIG);
@@ -73,11 +75,55 @@ async function ensureHoldExpiryColumn() {
     }
 }
 
+async function ensureFlightSeatsExist(flightID) {
+    const normalizedFlightID = Number(flightID);
+    if (!Number.isInteger(normalizedFlightID) || normalizedFlightID <= 0) {
+        return;
+    }
+
+    try {
+        const existing = await runQuery(
+            "SELECT SeatID FROM seats WHERE FlightID = ? LIMIT 1",
+            [normalizedFlightID]
+        );
+
+        if (Array.isArray(existing) && existing.length > 0) {
+            return;
+        }
+
+        const seatValues = [];
+        const placeholders = [];
+
+        for (const row of DEFAULT_SEAT_ROWS) {
+            for (const col of DEFAULT_SEAT_COLS) {
+                placeholders.push("(?, ?, 'available')");
+                seatValues.push(normalizedFlightID, `${row}${col}`);
+            }
+        }
+
+        await runQuery(
+            `INSERT INTO seats (FlightID, SeatNumber, Status) VALUES ${placeholders.join(",")}`,
+            seatValues
+        );
+        console.log(`Generated default seat map for flight ${normalizedFlightID}`);
+    } catch (err) {
+        console.warn(`Could not ensure seats for flight ${normalizedFlightID}:`, err.message);
+    }
+}
+
 function toSeatArray(value) {
     return String(value || "")
         .split(",")
         .map(s => s.trim())
         .filter(Boolean);
+}
+
+function parseHoldMinutes(value, fallbackMinutes = 5) {
+    const minutes = Number.parseInt(value, 10);
+    if (!Number.isFinite(minutes) || minutes < 1) {
+        return fallbackMinutes;
+    }
+    return Math.min(minutes, 24 * 60);
 }
 
 function groupSeatsByFlight(rows) {
@@ -173,6 +219,7 @@ app.get("/seats/:flightID", async (req, res) => {
 
     try {
         await releaseExpiredHolds();
+        await ensureFlightSeatsExist(flightID);
         const result = await runQuery(query, [flightID]);
         res.json(result);
     } catch (err) {
@@ -182,15 +229,17 @@ app.get("/seats/:flightID", async (req, res) => {
 
 app.post("/seats/hold", async (req, res) => {
 
-    const { flightID, seatNumber, passengerID } = req.body;
+    const { flightID, seatNumber, passengerID, holdMinutes } = req.body;
     const seatArray = toSeatArray(seatNumber);
     const placeholders = seatArray.map(() => '?').join(',');
+    const holdDurationMinutes = parseHoldMinutes(holdMinutes, 5);
 
     const checkQuery =
         `SELECT * FROM seats WHERE FlightID=? AND SeatNumber IN (${placeholders}) AND Status='available'`;
 
     try {
         await releaseExpiredHolds();
+        await ensureFlightSeatsExist(flightID);
         const result = await runQuery(checkQuery, [flightID, ...seatArray]);
 
         if (result.length < seatArray.length) {
@@ -198,7 +247,7 @@ app.post("/seats/hold", async (req, res) => {
         }
 
         const holdQuery =
-            `UPDATE seats SET Status='hold', PassengerID=?, HoldExpiresAt=DATE_ADD(UTC_TIMESTAMP(), INTERVAL 5 MINUTE) WHERE FlightID=? AND SeatNumber IN (${placeholders})`;
+            `UPDATE seats SET Status='hold', PassengerID=?, HoldExpiresAt=DATE_ADD(UTC_TIMESTAMP(), INTERVAL ${holdDurationMinutes} MINUTE) WHERE FlightID=? AND SeatNumber IN (${placeholders})`;
 
         await runQuery(holdQuery, [passengerID, flightID, ...seatArray]);
         await publishSeatUpdate({
@@ -206,10 +255,10 @@ app.post("/seats/hold", async (req, res) => {
             flightID: Number(flightID),
             seats: seatArray,
             status: "hold",
-            holdMinutes: 5,
+            holdMinutes: holdDurationMinutes,
             changedAt: new Date().toISOString(),
         });
-        res.json({ message: "Seats placed on hold for 5 minutes" });
+        res.json({ message: `Seats placed on hold for ${holdDurationMinutes} minute(s)` });
     } catch (err) {
         res.status(503).json({ message: "Seats database unavailable", error: err.code || err.message });
     }
@@ -232,6 +281,7 @@ app.post("/seats/refresh-hold", async (req, res) => {
 
     try {
         await releaseExpiredHolds();
+        await ensureFlightSeatsExist(flightID);
         const result = await runQuery(refreshQuery, [flightID, ...seatArray]);
 
         if (result.affectedRows < seatArray.length) {
@@ -254,6 +304,7 @@ app.post("/seats/confirm", async (req, res) => {
         `UPDATE seats SET Status='unavailable', HoldExpiresAt=NULL WHERE FlightID=? AND SeatNumber IN (${placeholders})`;
 
     try {
+        await ensureFlightSeatsExist(flightID);
         await runQuery(query, [flightID, ...seatArray]);
         await publishSeatUpdate({
             eventType: "seat.confirmed",
@@ -279,6 +330,7 @@ app.post("/seats/release", async (req, res) => {
         `UPDATE seats SET Status='available', PassengerID=NULL, HoldExpiresAt=NULL WHERE FlightID=? AND SeatNumber IN (${placeholders})`;
 
     try {
+        await ensureFlightSeatsExist(flightID);
         await runQuery(query, [flightID, ...seatArray]);
         await publishSeatUpdate({
             eventType: "seat.released",
@@ -309,6 +361,7 @@ app.put('/seats/release/:flightID', async (req, res) => {
         `UPDATE seats SET Status="available", PassengerID=NULL, HoldExpiresAt=NULL WHERE FlightID=?`;
 
     try {
+        await ensureFlightSeatsExist(flightID);
         const existingSeats = await runQuery("SELECT SeatNumber FROM seats WHERE FlightID=?", [flightID]);
         const seatNumbers = existingSeats.map(row => String(row.SeatNumber));
         const result = await runQuery(query, [flightID]);
@@ -357,6 +410,7 @@ app.get('/seats', async (req, res) => {
 
     try {
         await releaseExpiredHolds();
+        await ensureFlightSeatsExist(flightID);
         const result = await runQuery(query, params);
         res.json(result);
     } catch (err) {
@@ -411,6 +465,7 @@ app.put('/seats/cancel', async (req, res) => {
     const query = 'UPDATE seats SET Status="cancelled", PassengerID=NULL, HoldExpiresAt=NULL WHERE FlightID=?';
 
     try {
+        await ensureFlightSeatsExist(flightID);
         const result = await runQuery(query, [flightID]);
         const cancelledSeats = await runQuery('SELECT SeatNumber FROM seats WHERE FlightID=?', [flightID]);
         const seatNumbers = cancelledSeats.map(row => String(row.SeatNumber));

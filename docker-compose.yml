@@ -62,17 +62,17 @@ services:
       - PASSENGER_SERVICE_URL=https://personal-4whagfbm.outsystemscloud.com/Passenger_Srv/rest/PassengerAPI/  # OutSystems
     depends_on:
       record-service:
-        condition: service_healthy
+        condition: service_started
       flight-service:
-        condition: service_healthy
+        condition: service_started
       payment-service:
-        condition: service_healthy
+        condition: service_started
       notification-service:
-        condition: service_healthy
+        condition: service_started
       miles-earn-service:
         condition: service_started
       rabbitmq:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 10s
@@ -150,7 +150,7 @@ services:
       seats-db:
         condition: service_healthy
       rabbitmq:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:5003/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 10s
@@ -288,11 +288,11 @@ services:
       - FLASK_ENV=development
     depends_on:
       flight-service:
-        condition: service_healthy
+        condition: service_started
       seats-service:
-        condition: service_healthy
+        condition: service_started
       kafka:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5010/health', timeout=5)"]
       interval: 10s
@@ -317,9 +317,9 @@ services:
       - FLASK_ENV=development
     depends_on:
       flight-service:
-        condition: service_healthy
+        condition: service_started
       seats-service:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5011/health', timeout=5)"]
       interval: 10s
@@ -344,7 +344,7 @@ services:
       - SEAT_EVENTS_KEY=seat.updated
     depends_on:
       rabbitmq:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:5012/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 10s
@@ -427,22 +427,6 @@ services:
         condition: service_healthy
       kong-migration:
         condition: service_completed_successfully
-      booking-composite-service:
-        condition: service_healthy
-      record-service:
-        condition: service_healthy
-      flight-service:
-        condition: service_healthy
-      seats-service:
-        condition: service_healthy
-      payment-service:
-        condition: service_healthy
-      offer-service:
-        condition: service_healthy
-      flight-search-composite:
-        condition: service_healthy
-      flight-cancellation-composite:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "kong", "health"]
       interval: 10s
@@ -493,9 +477,9 @@ services:
       - SENDGRID_FROM_NAME=${SENDGRID_FROM_NAME}
     depends_on:
       rabbitmq:
-        condition: service_healthy
+        condition: service_started
       kafka:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3004/health', timeout=5)"]
       interval: 10s
@@ -524,8 +508,8 @@ services:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 10s
       timeout: 10s
-      retries: 10
-      start_period: 60s
+      retries: 15
+      start_period: 150s
 
   # ========== ZOOKEEPER (required by Kafka) ==========
   zookeeper:
@@ -624,6 +608,7 @@ services:
       - RECORD_SERVICE_URL=http://record-service:3000
       - FLIGHT_SERVICE_URL=http://flight-service:3000
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - FRONTEND_BASE_URL=http://localhost:5173
     depends_on:
       kafka:
         condition: service_healthy

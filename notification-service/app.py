@@ -484,8 +484,7 @@ def booking_confirmation_template_v2(data: dict) -> dict:
         <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;max-width:760px;margin:20px auto;border:1px solid #e8edf4;border-radius:24px;overflow:hidden;background:#ffffff;">
             <div style="background:radial-gradient(circle at top right,rgba(230,57,70,0.12),transparent 30%),linear-gradient(135deg,#fff8f8 0%,#ffffff 100%);padding:28px 30px;border-bottom:1px solid #f1f5f9;">
                 <div style="font-size:12px;font-weight:800;letter-spacing:0.16em;text-transform:uppercase;color:#e63946;">Blaze Air Booking Confirmation</div>
-                <div style="display:inline-flex;align-items:center;gap:8px;background:#ecfdf3;color:#15803d;border:1px solid #bbf7d0;border-radius:999px;padding:8px 14px;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin-top:14px;">
-                    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;"></span>
+                <div style="display:inline-flex;align-items:center;background:#ecfdf3;color:#15803d;border:1px solid #bbf7d0;border-radius:999px;padding:8px 14px;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin-top:14px;">
                     Confirmed
                 </div>
                 <h2 style="margin:16px 0 0;font-size:34px;line-height:1.15;color:#1d1d1f;">{heading}</h2>
@@ -567,7 +566,9 @@ def flight_cancelled_alt_template(data: dict) -> dict:
     seat_number    = inner.get("SeatNumber", "N/A")
     coupon_code    = inner.get("CouponCode", "N/A")
     discount       = inner.get("DiscountAmount", 0)
-    accept_link    = inner.get("AcceptRejectLink", "#")
+    review_link    = inner.get("AcceptRejectLink", "#")
+    accept_link    = inner.get("AcceptLink", review_link)
+    reject_link    = inner.get("RejectLink", review_link)
     booking_id     = inner.get("BookingID", "N/A")
     passenger_name = inner.get("PassengerName", "Valued Passenger")
     group_size     = int(inner.get("GroupSize") or 1)
@@ -600,9 +601,13 @@ def flight_cancelled_alt_template(data: dict) -> dict:
         "subject": "Your Flight Has Been Cancelled - Rebooking Offer Inside",
         "html": f"""
         <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;max-width:700px;margin:20px auto;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;background:#ffffff;">
-            <div style="background:#b45309;padding:24px 28px;color:#ffffff;">
-                <h2 style="margin:0;font-size:28px;line-height:1.2;">Your Flight Has Been Cancelled</h2>
-                <p style="margin:10px 0 0;font-size:14px;opacity:0.95;">{group_intro}</p>
+            <div style="background:linear-gradient(135deg,#fff7ed,#fff1f2);padding:24px 28px;border-bottom:1px solid #f1f5f9;">
+                <div style="display:inline-flex;align-items:center;gap:8px;background:#fff7e8;color:#b45309;border:1px solid #f4d6a6;border-radius:999px;padding:8px 14px;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">
+                    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#d97706;"></span>
+                    Action Needed
+                </div>
+                <h2 style="margin:16px 0 0;font-size:30px;line-height:1.2;color:#1d1d1f;">Your Flight Has Been Cancelled</h2>
+                <p style="margin:10px 0 0;font-size:14px;color:#4b5563;">{group_intro}</p>
             </div>
             <div style="padding:24px 28px;">
                 <h3 style="color:#dc2626;margin-top:0;">Cancelled Flight</h3>
@@ -621,10 +626,11 @@ def flight_cancelled_alt_template(data: dict) -> dict:
                 </table>
                 <p style="margin-bottom:16px;color:#374151;">Please respond to this offer within 24 hours:</p>
                 <div style="text-align:center;margin:20px 0;">
-                    <a href="{accept_link}&decision=accept" style="display:inline-block;background:#1d4ed8;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;margin-right:12px;">Accept Rebooking</a>
-                    <a href="{accept_link}&decision=reject" style="display:inline-block;background:#dc2626;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;">Reject and Refund</a>
+                    <a href="{accept_link}" style="display:inline-block;background:linear-gradient(135deg,#d48710 0%,#b76b00 100%);color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:999px;font-weight:700;margin-right:12px;">Accept Rebooking</a>
+                    <a href="{reject_link}" style="display:inline-block;background:linear-gradient(135deg,#ef4444 0%,#f43f5e 100%);color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:999px;font-weight:700;">Reject and Refund</a>
                 </div>
-                <p style="margin-top:16px;color:#6b7280;font-size:12px;">{group_refund_note}</p>
+                <p style="margin:0;color:#6b7280;font-size:12px;line-height:1.6;">{group_refund_note}</p>
+                <p style="margin:16px 0 0;color:#6b7280;font-size:12px;line-height:1.6;">If the buttons do not open correctly, use this review link: <a href="{review_link}" style="color:#b45309;">View your rebooking offer</a></p>
             </div>
         </div>
         """,
@@ -633,7 +639,8 @@ def flight_cancelled_alt_template(data: dict) -> dict:
             + (f"Group booking: {group_size} passengers. " if is_group else "")
             + f"Alternative: {new_flight} on {new_date} at {new_dep_time} at no extra charge. "
             + (f"Seats will be kept together. " if is_group else f"Seat: {seat_number}. ")
-            + f"Accept or reject: {accept_link}"
+            + f"Review your offer: {review_link}. "
+            + f"Accept: {accept_link}. Reject: {reject_link}"
         ),
     }
 
@@ -709,6 +716,211 @@ def flight_cancelled_noalt_template(data: dict) -> dict:
             "We apologise for the inconvenience."
         ),
     }
+
+
+def flight_cancelled_alt_template_v2(data: dict) -> dict:
+    inner          = data.get("data", data)
+    orig_flight    = inner.get("OriginalFlight", "N/A")
+    orig_origin    = inner.get("OriginalOrigin", "Origin")
+    orig_dest      = inner.get("OriginalDestination", "Destination")
+    orig_date      = inner.get("OriginalDate", "N/A")
+    orig_dep_time  = inner.get("OriginalDepartureTime", "N/A")
+    new_flight     = inner.get("NewFlight", "N/A")
+    new_origin     = inner.get("NewOrigin", "Origin")
+    new_dest       = inner.get("NewDestination", "Destination")
+    new_date       = inner.get("NewDate", "N/A")
+    new_dep_time   = inner.get("NewDepartureTime", "N/A")
+    assigned_seats = inner.get("AssignedSeatNumbers") or []
+    seat_number    = inner.get("SeatNumber", "N/A")
+    review_link    = inner.get("AcceptRejectLink", "#")
+    accept_link    = inner.get("AcceptLink", review_link)
+    reject_link    = inner.get("RejectLink", review_link)
+    booking_id     = inner.get("BookingID", "N/A")
+    passenger_name = inner.get("PassengerName", "Valued Passenger")
+    group_size     = int(inner.get("GroupSize") or 1)
+    seat_summary   = ", ".join(str(seat).strip() for seat in assigned_seats if str(seat).strip()) or seat_number
+    is_group       = group_size > 1
+
+    group_intro = (
+        f"Dear {passenger_name}, your group booking of {group_size} passengers has been affected. "
+        "We have found an alternative flight that accommodates your entire group at no extra charge."
+    ) if is_group else (
+        f"Dear {passenger_name}, we have found an alternative flight for you at no extra charge."
+    )
+
+    return {
+        "subject": "Your Flight Has Been Cancelled - Rebooking Offer Inside",
+        "html": f"""
+        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#f8fafc;padding:24px 12px;">
+            <div style="max-width:760px;margin:0 auto;border:1px solid #e8edf4;border-radius:24px;overflow:hidden;background:#ffffff;box-shadow:0 18px 45px rgba(15,23,42,0.08);">
+                <div style="background:radial-gradient(circle at top right,rgba(230,57,70,0.10),transparent 28%),linear-gradient(135deg,#fffdfb 0%,#ffffff 58%,#fff7f5 100%);padding:30px 32px 26px;border-bottom:1px solid #edf2f7;">
+                    <div style="font-size:12px;font-weight:800;letter-spacing:0.18em;text-transform:uppercase;color:#ef4444;">Blaze Air Flight Change Notice</div>
+                    <div style="display:inline-flex;align-items:center;background:#fff7e8;color:#b45309;border:1px solid #f4d6a6;border-radius:999px;padding:8px 14px;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin-top:14px;">Action Needed</div>
+                    <h2 style="margin:16px 0 0;font-size:42px;line-height:1.08;color:#202124;">Your Flight Has Been Cancelled</h2>
+                    <p style="margin:14px 0 0;font-size:15px;line-height:1.75;color:#4b5563;max-width:640px;">{group_intro} We have found a replacement flight at no extra charge and included the full summary below so the traveller can review the change quickly.</p>
+                </div>
+
+                <div style="padding:28px 32px 32px;">
+                    <div style="margin-bottom:24px;padding:18px 20px;border:1px solid #e9eef5;border-radius:18px;background:#ffffff;">
+                        <table style="width:100%;border-collapse:collapse;">
+                            <tr><td style="padding:0 0 10px;color:#6b7280;font-size:13px;">Lead passenger</td><td style="padding:0 0 10px;text-align:right;color:#111827;font-size:13px;font-weight:700;">{passenger_name}</td></tr>
+                            <tr><td style="padding:10px 0;color:#6b7280;font-size:13px;border-top:1px solid #eef2f7;">Booking ID</td><td style="padding:10px 0;text-align:right;color:#111827;font-size:13px;font-weight:700;border-top:1px solid #eef2f7;">#{booking_id}</td></tr>
+                            <tr><td style="padding:10px 0;color:#6b7280;font-size:13px;border-top:1px solid #eef2f7;">Passengers</td><td style="padding:10px 0;text-align:right;color:#111827;font-size:13px;font-weight:700;border-top:1px solid #eef2f7;">{group_size}</td></tr>
+                            <tr><td style="padding:10px 0 0;color:#6b7280;font-size:13px;border-top:1px solid #eef2f7;">Fare difference</td><td style="padding:10px 0 0;text-align:right;color:#059669;font-size:28px;font-weight:800;border-top:1px solid #eef2f7;">Covered by airline</td></tr>
+                        </table>
+                    </div>
+
+                    <h3 style="color:#ef4444;margin:0 0 12px;font-size:20px;line-height:1.2;">Itinerary Change</h3>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+                        <div style="border:1px solid #f6cfd3;border-radius:18px;overflow:hidden;background:#ffffff;">
+                            <div style="padding:14px 18px 0;">
+                                <div style="font-size:11px;font-weight:800;letter-spacing:0.15em;text-transform:uppercase;color:#ef4444;">Cancelled Flight</div>
+                            </div>
+                            <div style="padding:12px 18px 16px;">
+                                <div style="font-size:17px;font-weight:700;color:#202124;">{orig_origin} &rarr; {orig_dest}</div>
+                                <div style="margin-top:6px;font-size:13px;color:#6b7280;">Flight {orig_flight} &nbsp;&middot;&nbsp; {orig_date}</div>
+                            </div>
+                            <table style="width:100%;border-collapse:collapse;border-top:1px solid #eef2f7;">
+                                <tr><td style="padding:12px 18px;color:#6b7280;font-size:13px;">Departure</td><td style="padding:12px 18px;text-align:right;color:#111827;font-size:13px;font-weight:700;">{orig_dep_time}</td></tr>
+                            </table>
+                        </div>
+
+                        <div style="border:1px solid #f6d59a;border-radius:18px;overflow:hidden;background:#ffffff;">
+                            <div style="padding:14px 18px 0;">
+                                <div style="font-size:11px;font-weight:800;letter-spacing:0.15em;text-transform:uppercase;color:#b76b00;">Replacement Flight</div>
+                            </div>
+                            <div style="padding:12px 18px 16px;">
+                                <div style="font-size:17px;font-weight:700;color:#202124;">{new_origin} &rarr; {new_dest}</div>
+                                <div style="margin-top:6px;font-size:13px;color:#6b7280;">Flight {new_flight} &nbsp;&middot;&nbsp; {new_date}</div>
+                            </div>
+                            <table style="width:100%;border-collapse:collapse;border-top:1px solid #eef2f7;">
+                                <tr><td style="padding:12px 18px;color:#6b7280;font-size:13px;">Departure</td><td style="padding:12px 18px;text-align:right;color:#111827;font-size:13px;font-weight:700;">{new_dep_time}</td></tr>
+                                <tr><td style="padding:12px 18px;color:#6b7280;font-size:13px;border-top:1px solid #eef2f7;">Held seat(s)</td><td style="padding:12px 18px;text-align:right;color:#111827;font-size:13px;font-weight:700;border-top:1px solid #eef2f7;">{seat_summary}</td></tr>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom:18px;padding:18px 20px;border:1px solid #e9eef5;border-radius:18px;background:#ffffff;">
+                        <table style="width:100%;border-collapse:collapse;">
+                            <tr><td style="padding:0 0 10px;color:#6b7280;font-size:13px;">Response window</td><td style="padding:0 0 10px;text-align:right;color:#111827;font-size:13px;font-weight:700;">Within 24 hours</td></tr>
+                            <tr><td style="padding:10px 0;color:#6b7280;font-size:13px;border-top:1px solid #eef2f7;">If you accept</td><td style="padding:10px 0;text-align:right;color:#111827;font-size:13px;font-weight:700;border-top:1px solid #eef2f7;">We confirm the new flight and keep your trip active</td></tr>
+                            <tr><td style="padding:10px 0 0;color:#6b7280;font-size:13px;border-top:1px solid #eef2f7;">If you reject</td><td style="padding:10px 0 0;text-align:right;color:#111827;font-size:13px;font-weight:700;border-top:1px solid #eef2f7;">Full refund to your original payment method</td></tr>
+                        </table>
+                    </div>
+
+                    <div style="text-align:center;margin:22px 0 18px;">
+                        <a href="{accept_link}" style="display:inline-block;background:linear-gradient(135deg,#d48710 0%,#b76b00 100%);color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:999px;font-weight:700;margin-right:12px;">Accept Rebooking</a>
+                        <a href="{reject_link}" style="display:inline-block;background:linear-gradient(135deg,#ef4444 0%,#f43f5e 100%);color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:999px;font-weight:700;">Reject and Refund</a>
+                    </div>
+
+                    <div style="margin-top:16px;padding:16px 18px;border:1px solid #f7d7dc;border-radius:16px;background:#fffdfd;color:#6b7280;font-size:13px;line-height:1.7;">
+                        If the buttons do not open correctly, review the offer here:
+                        <a href="{review_link}" style="color:#b45309;text-decoration:none;font-weight:700;">View your rebooking offer</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        """,
+        "text": (
+            f"Your flight {orig_flight} from {orig_origin} to {orig_dest} on {orig_date} at {orig_dep_time} has been cancelled. "
+            + (f"Group booking: {group_size} passengers. " if is_group else "")
+            + f"Replacement: {new_flight} from {new_origin} to {new_dest} on {new_date} at {new_dep_time} at no extra charge. "
+            + f"Held seats: {seat_summary}. Review your offer: {review_link}. "
+            + f"Accept: {accept_link}. Reject: {reject_link}"
+        ),
+    }
+
+
+def flight_cancelled_noalt_template_v2(data: dict) -> dict:
+    inner           = data.get("data", data)
+    orig_flight     = inner.get("OriginalFlight", "N/A")
+    orig_origin     = inner.get("OriginalOrigin", "Origin")
+    orig_dest       = inner.get("OriginalDestination", "Destination")
+    orig_dep_time   = inner.get("OriginalDepartureTime", "N/A")
+    cancelled_dt    = inner.get("CancelledDate", "N/A")
+    refund_amt      = inner.get("RefundAmount", 0)
+    refund_id       = inner.get("RefundID", "Pending")
+    refund_status   = inner.get("RefundStatus", "Refunded")
+    booking_id      = inner.get("BookingID", "N/A")
+    passenger_name  = inner.get("PassengerName", "Valued Passenger")
+    passenger_names = inner.get("PassengerNames") or [passenger_name]
+    group_size      = int(inner.get("GroupSize") or len(passenger_names) or 1)
+
+    intro_text = (
+        f"Dear {passenger_name}, your group booking of {group_size} passengers has been affected. "
+        "No alternative flight is available and a full refund has been issued for the booking."
+    ) if group_size > 1 else (
+        f"Dear {passenger_name}, no alternative flight is available and a full refund has been issued."
+    )
+    refund_note = "Allow 5 to 7 business days."
+
+    return {
+        "subject": "Your Flight Has Been Cancelled - Full Refund Issued",
+        "html": f"""
+        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#f8fafc;padding:24px 12px;">
+            <div style="max-width:760px;margin:0 auto;border:1px solid #e8edf4;border-radius:24px;overflow:hidden;background:#ffffff;box-shadow:0 18px 45px rgba(15,23,42,0.08);">
+                <div style="background:radial-gradient(circle at top right,rgba(230,57,70,0.10),transparent 28%),linear-gradient(135deg,#fffdfb 0%,#ffffff 58%,#fff7f5 100%);padding:30px 32px 26px;border-bottom:1px solid #edf2f7;">
+                    <div style="font-size:12px;font-weight:800;letter-spacing:0.18em;text-transform:uppercase;color:#ef4444;">Blaze Air Flight Change Notice</div>
+                    <div style="display:inline-flex;align-items:center;background:#fff1f2;color:#dc2626;border:1px solid #fecdd3;border-radius:999px;padding:8px 14px;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin-top:14px;">Refund Issued</div>
+                    <h2 style="margin:16px 0 0;font-size:42px;line-height:1.08;color:#202124;">Your Flight Has Been Cancelled</h2>
+                    <p style="margin:14px 0 0;font-size:15px;line-height:1.75;color:#4b5563;max-width:640px;">{intro_text} We have included the affected itinerary and refund breakdown below so the traveller has everything in one place.</p>
+                </div>
+
+                <div style="padding:28px 32px 32px;">
+                    <div style="margin-bottom:24px;padding:18px 20px;border:1px solid #e9eef5;border-radius:18px;background:#ffffff;">
+                        <table style="width:100%;border-collapse:collapse;">
+                            <tr><td style="padding:0 0 10px;color:#6b7280;font-size:13px;">Lead passenger</td><td style="padding:0 0 10px;text-align:right;color:#111827;font-size:13px;font-weight:700;">{passenger_name}</td></tr>
+                            <tr><td style="padding:10px 0;color:#6b7280;font-size:13px;border-top:1px solid #eef2f7;">Passengers</td><td style="padding:10px 0;text-align:right;color:#111827;font-size:13px;font-weight:700;border-top:1px solid #eef2f7;">{group_size}</td></tr>
+                            <tr><td style="padding:10px 0;color:#6b7280;font-size:13px;border-top:1px solid #eef2f7;">Booking ID</td><td style="padding:10px 0;text-align:right;color:#111827;font-size:13px;font-weight:700;border-top:1px solid #eef2f7;">#{booking_id}</td></tr>
+                            <tr><td style="padding:10px 0 0;color:#6b7280;font-size:13px;border-top:1px solid #eef2f7;">Refund amount</td><td style="padding:10px 0 0;text-align:right;color:#ef4444;font-size:28px;font-weight:800;border-top:1px solid #eef2f7;">${_format_money(refund_amt)}</td></tr>
+                        </table>
+                    </div>
+
+                    <h3 style="color:#ef4444;margin:0 0 12px;font-size:20px;line-height:1.2;">Cancelled Itinerary</h3>
+                    <div style="border:1px solid #f6cfd3;border-radius:18px;overflow:hidden;background:#ffffff;margin-bottom:20px;">
+                        <div style="padding:14px 18px 0;">
+                            <div style="font-size:11px;font-weight:800;letter-spacing:0.15em;text-transform:uppercase;color:#ef4444;">Cancelled Flight</div>
+                        </div>
+                        <div style="padding:12px 18px 16px;">
+                            <div style="font-size:17px;font-weight:700;color:#202124;">{orig_origin} &rarr; {orig_dest}</div>
+                            <div style="margin-top:6px;font-size:13px;color:#6b7280;">Flight {orig_flight} &nbsp;&middot;&nbsp; {cancelled_dt}</div>
+                        </div>
+                        <table style="width:100%;border-collapse:collapse;border-top:1px solid #eef2f7;">
+                            <tr><td style="padding:12px 18px;color:#6b7280;font-size:13px;">Departure</td><td style="padding:12px 18px;text-align:right;color:#111827;font-size:13px;font-weight:700;">{orig_dep_time}</td></tr>
+                        </table>
+                    </div>
+
+                    <h3 style="color:#ef4444;margin:0 0 12px;font-size:20px;line-height:1.2;">Passenger Details</h3>
+                    <div style="margin-bottom:20px;padding:18px 20px;border:1px solid #e9eef5;border-radius:18px;background:#ffffff;color:#111827;font-size:13px;font-weight:700;">
+                        {", ".join(passenger_names)}
+                    </div>
+
+                    <h3 style="color:#059669;margin:0 0 12px;font-size:20px;line-height:1.2;">Refund Summary</h3>
+                    <div style="margin-bottom:18px;padding:18px 20px;border:1px solid #e9eef5;border-radius:18px;background:#ffffff;">
+                        <table style="width:100%;border-collapse:collapse;">
+                            <tr><td style="padding:0 0 10px;color:#6b7280;font-size:13px;">Refund status</td><td style="padding:0 0 10px;text-align:right;color:#059669;font-size:13px;font-weight:700;">{refund_status}</td></tr>
+                            <tr><td style="padding:10px 0;color:#6b7280;font-size:13px;border-top:1px solid #eef2f7;">Refund reference</td><td style="padding:10px 0;text-align:right;color:#111827;font-size:13px;font-weight:700;border-top:1px solid #eef2f7;">{refund_id}</td></tr>
+                            <tr><td style="padding:10px 0 0;color:#6b7280;font-size:13px;border-top:1px solid #eef2f7;">Processing note</td><td style="padding:10px 0 0;text-align:right;color:#111827;font-size:13px;font-weight:700;border-top:1px solid #eef2f7;">{refund_note}</td></tr>
+                        </table>
+                    </div>
+
+                    <div style="margin-top:16px;padding:16px 18px;border:1px solid #f7d7dc;border-radius:16px;background:#fffdfd;color:#6b7280;font-size:13px;line-height:1.7;">
+                        We apologise for the inconvenience. The refund has been sent back to the original payment method and the booking has now been closed.
+                    </div>
+                </div>
+            </div>
+        </div>
+        """,
+        "text": (
+            f"Your flight {orig_flight} from {orig_origin} to {orig_dest} on {cancelled_dt} at {orig_dep_time} has been cancelled. "
+            f"No alternative flight is available. Full refund of ${_format_money(refund_amt)} issued. "
+            f"Refund reference: {refund_id}. {refund_note}"
+        ),
+    }
+
+
+flight_cancelled_alt_template = flight_cancelled_alt_template_v2
+flight_cancelled_noalt_template = flight_cancelled_noalt_template_v2
 
 # =============================================================================
 # EMAIL TEMPLATE — Scenario 3 (Voucher Conversion)

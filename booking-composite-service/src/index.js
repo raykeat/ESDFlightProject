@@ -37,7 +37,10 @@ async function publishBookingConfirmed(bookingData) {
     const channel = await connection.createChannel();
  
     const exchange = 'airline_events';
+    const notificationQueue = 'notification_booking_queue';
     await channel.assertExchange(exchange, 'topic', { durable: true });
+    await channel.assertQueue(notificationQueue, { durable: true });
+    await channel.bindQueue(notificationQueue, exchange, 'booking.confirmed');
  
     channel.publish(
       exchange,
@@ -104,6 +107,63 @@ function parseIdList(value) {
     .split(',')
     .map((id) => Number(id.trim()))
     .filter((id) => Number.isFinite(id) && id > 0);
+}
+
+function normalizeSeatServiceStatus(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+async function ensureRebookingSeatsReservable(newFlightID, seatAssignments, passengerID) {
+  const seatsResponse = await axios.get(`${SEATS_SERVICE_URL}/seats/${newFlightID}`);
+  const seats = Array.isArray(seatsResponse.data) ? seatsResponse.data : [];
+  const seatMap = new Map(
+    seats.map((seat) => [
+      String(firstNonEmpty(seat.SeatNumber, seat.seatNumber)).trim(),
+      seat,
+    ])
+  );
+
+  const holdRequired = [];
+
+  for (const requestedSeat of seatAssignments) {
+    const seat = seatMap.get(String(requestedSeat).trim());
+    if (!seat) {
+      throw {
+        response: {
+          status: 404,
+          data: { message: `Seat ${requestedSeat} was not found on the replacement flight.` },
+        },
+      };
+    }
+
+    const status = normalizeSeatServiceStatus(firstNonEmpty(seat.Status, seat.status));
+    const heldByPassenger = Number(firstNonEmpty(seat.PassengerID, seat.passengerID)) === Number(passengerID);
+
+    if (status === 'available') {
+      holdRequired.push(requestedSeat);
+      continue;
+    }
+
+    if (status === 'hold' && heldByPassenger) {
+      continue;
+    }
+
+    throw {
+      response: {
+        status: 400,
+        data: { message: `Seat ${requestedSeat} is no longer reserved for this rebooking offer.` },
+      },
+    };
+  }
+
+  if (holdRequired.length) {
+    await axios.post(`${SEATS_SERVICE_URL}/seats/hold`, {
+      flightID: newFlightID,
+      seatNumber: holdRequired.join(','),
+      passengerID: Number(passengerID),
+      holdMinutes: 24 * 60,
+    });
+  }
 }
 
 async function restoreVoucherStatusesForBookingIDs(bookingIDs = []) {
@@ -1269,11 +1329,11 @@ app.post('/api/rebooking/accept', async (req, res) => {
     const origFlightID = Number(offer.origFlightID);
     const seatNumberCsv = normalizedSeatAssignments.join(',');
 
-    await axios.post(`${SEATS_SERVICE_URL}/seats/hold`, {
-      flightID: newFlightID,
-      seatNumber: seatNumberCsv,
-      passengerID: Number(offer.passengerID),
-    });
+    await ensureRebookingSeatsReservable(
+      newFlightID,
+      normalizedSeatAssignments,
+      Number(offer.passengerID)
+    );
 
     try {
       await axios.post(`${SEATS_SERVICE_URL}/seats/confirm`, {
