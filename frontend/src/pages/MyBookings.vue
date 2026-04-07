@@ -686,6 +686,10 @@ function isFailedBooking(booking) {
   return normalizedStatus(booking.status) === 'Failed'
 }
 
+function isAwaitingPaymentBooking(booking) {
+  return normalizedStatus(booking.status) === 'Pending' && !hasPendingOffer(booking)
+}
+
 function isUpcoming(booking) {
   if (
     hasPendingOffer(booking)
@@ -716,7 +720,7 @@ const filteredBookings = computed(() => {
   let scopedBookings = groupedBookings.value
 
   if (activeTab.value === 'Awaiting Payment') {
-    scopedBookings = scopedBookings.filter((booking) => normalizedStatus(booking.status) === 'Pending')
+    scopedBookings = scopedBookings.filter((booking) => isAwaitingPaymentBooking(booking))
   } else if (activeTab.value === 'Upcoming') {
     scopedBookings = scopedBookings.filter((booking) => isUpcoming(booking))
   } else if (activeTab.value === 'Completed') {
@@ -749,7 +753,7 @@ const filteredBookings = computed(() => {
 
 function countByTab(tab) {
   if (tab === 'Awaiting Payment') {
-    return groupedBookings.value.filter((booking) => normalizedStatus(booking.status) === 'Pending').length
+    return groupedBookings.value.filter((booking) => isAwaitingPaymentBooking(booking)).length
   }
   if (tab === 'Upcoming') {
     return groupedBookings.value.filter((booking) => isUpcoming(booking)).length
@@ -1220,6 +1224,11 @@ function routeArtStyle(booking) {
 
       <div v-if="loading" class="space-y-4">
         <div v-for="i in 3" :key="i" class="h-72 animate-pulse rounded-[28px] bg-white shadow-[0_16px_40px_rgba(15,23,42,0.05)]"></div>
+      </div>
+
+      <div v-else-if="groupedBookings.length === 0 && !searchQuery.trim()" class="rounded-[28px] bg-white p-10 text-center shadow-[0_16px_40px_rgba(15,23,42,0.05)]">
+        <p class="text-lg font-semibold text-[#132238]">You haven't booked any flights yet.</p>
+        <p class="mt-2 text-sm text-[#6b7280]">Once you make your first booking, your upcoming and past trips will appear here.</p>
       </div>
 
       <div v-else-if="error" class="rounded-[28px] border border-rose-200 bg-white p-10 text-center shadow-[0_16px_40px_rgba(15,23,42,0.05)]">

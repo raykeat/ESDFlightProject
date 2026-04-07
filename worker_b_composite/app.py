@@ -137,6 +137,7 @@ def process_path_b_message(msg):
             restore_vouchers_for_booking(group_booking_id)
 
     refund_amount = refund_payload.get("RefundAmount", amount_paid)
+    refund_id = refund_payload.get("RefundID") or refund_payload.get("refundID")
 
     orig_flight_response = requests.get(f"{FLIGHT_SERVICE_URL}/flights/{orig_flight_id}", timeout=10)
     orig_flight_data = get_json_or_none(orig_flight_response) or {}
@@ -175,8 +176,14 @@ def process_path_b_message(msg):
             "PassengerNames": passenger_names,
             "BookingID":      booking_id,
             "OriginalFlight": original_flight_number,
+            "OriginalOrigin": orig_flight_data.get("Origin", ""),
+            "OriginalDestination": orig_flight_data.get("Destination", ""),
+            "OriginalDepartureTime": orig_flight_data.get("DepartureTime", ""),
             "CancelledDate":  cancelled_date,
             "RefundAmount":   refund_amount,
+            "RefundID":       refund_id,
+            "RefundStatus":   refund_status,
+            "GroupSize":      len(passenger_names),
         },
     }
 
@@ -184,6 +191,12 @@ def process_path_b_message(msg):
     connection = pika.BlockingConnection(params)
     channel = connection.channel()
     channel.exchange_declare(exchange="airline_events", exchange_type="topic", durable=True)
+    channel.queue_declare(queue="notification_booking_queue", durable=True)
+    channel.queue_bind(
+        queue="notification_booking_queue",
+        exchange="airline_events",
+        routing_key="flight.cancelled.noalt",
+    )
     channel.basic_publish(
         exchange="airline_events",
         routing_key="flight.cancelled.noalt",

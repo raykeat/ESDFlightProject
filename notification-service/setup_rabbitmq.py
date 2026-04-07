@@ -18,11 +18,11 @@ queues = [
         "routing_key": "booking.confirmed",
     },
     {
-        "name": "notification_service_queue",      # same queue
+        "name": "notification_booking_queue",      # same queue
         "routing_key": "flight.cancelled.alt",     # new binding
     },
     {
-        "name": "notification_service_queue",      # same queue
+        "name": "notification_booking_queue",      # same queue
         "routing_key": "flight.cancelled.noalt",   # new binding
     },
 ]
