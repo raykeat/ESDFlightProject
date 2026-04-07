@@ -141,19 +141,18 @@ async function fetchBalance() {
   errorMessage.value = ''
   try {
     const passengerID = currentPassenger.value?.passenger_id
-    const milesBalanceUrl = import.meta.env.VITE_MILES_BALANCE_SERVICE_URL || 'http://localhost:5006'
     
     try {
-      // Try to fetch existing balance from miles-balance service
+      // Try to fetch existing balance through Kong
       const response = await axios.get(
-        `${milesBalanceUrl}/miles-balance/${passengerID}`
+        apiUrl(`/api/miles-balance/${passengerID}`)
       )
       updateStoredBalance(response.data.currentBalance || response.data.balance || 0)
     } catch (error) {
       // If 404 or no record, initialize with 2000 miles
       if (error.response?.status === 404 || error.message.includes('not found')) {
         const initResponse = await axios.post(
-          `${milesBalanceUrl}/miles-balance/${passengerID}/initialize`,
+          apiUrl(`/api/miles-balance/${passengerID}/initialize`),
           { welcomeBonus: 2000 }
         )
         updateStoredBalance(initResponse.data.currentBalance || 2000)
@@ -171,9 +170,8 @@ async function fetchBalance() {
 
 async function fetchVoucherTypes() {
   try {
-    const voucherUrl = import.meta.env.VITE_VOUCHER_SERVICE_URL || 'http://localhost:5005'
     const response = await axios.get(
-      `${voucherUrl}/vouchers/types`
+      apiUrl('/api/vouchers/types')
     )
     
     // Map API response and add default UI properties if missing

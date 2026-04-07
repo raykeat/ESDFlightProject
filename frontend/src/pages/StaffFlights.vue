@@ -213,7 +213,7 @@ async function markFlightAsLanded(flight) {
   }
 
   try {
-    await axios.put(`http://localhost:3003/flight/${flightID}/landed`)
+    await axios.put(apiUrl(`/api/flight/${flightID}/landed`))
     const idx = flights.value.findIndex(f => f.FlightID === flightID)
     if (idx !== -1) flights.value[idx].Status = 'landed'
   } catch (err) {

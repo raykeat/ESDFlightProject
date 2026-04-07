@@ -1,4 +1,4 @@
-const baseUrl = import.meta.env.VITE_PASSENGER_API_BASE || '/api/passenger'
+import { apiUrl } from '../config/api'
 
 function extractApiError(result, fallbackMessage) {
   if (!result || typeof result !== 'object') {
@@ -24,7 +24,7 @@ function extractApiError(result, fallbackMessage) {
 }
 
 export async function createPassengerAccount(payload) {
-  const response = await fetch(`${baseUrl}/create/`, {
+  const response = await fetch(apiUrl('/api/passenger/create/'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -48,7 +48,7 @@ export async function createPassengerAccount(payload) {
 }
 
 export async function getAllPassengers() {
-  const response = await fetch(`${baseUrl}/getall/`)
+  const response = await fetch(apiUrl('/api/passenger/getall/'))
 
   let result = null
   try {
@@ -66,10 +66,10 @@ export async function getAllPassengers() {
 }
 
 export async function getPassengerById(passengerId) {
-  let response = await fetch(`${baseUrl}/getpassenger/${passengerId}/`)
+  let response = await fetch(apiUrl(`/api/passenger/getpassenger/${passengerId}/`))
 
   if (!response.ok && response.status === 404) {
-    response = await fetch(`${baseUrl}/getpassenger/${passengerId}`)
+    response = await fetch(apiUrl(`/api/passenger/getpassenger/${passengerId}`))
   }
 
   let result = null
@@ -88,7 +88,7 @@ export async function getPassengerById(passengerId) {
 }
 
 export async function updatePassengerAccount(passengerId, payload) {
-  const response = await fetch(`${baseUrl}/update/${passengerId}/`, {
+  const response = await fetch(apiUrl(`/api/passenger/update/${passengerId}/`), {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
@@ -112,7 +112,7 @@ export async function updatePassengerAccount(passengerId, payload) {
 }
 
 export async function loginPassenger(email, password) {
-  const response = await fetch(`${baseUrl}/login/`, {
+  const response = await fetch(apiUrl('/api/passenger/login/'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

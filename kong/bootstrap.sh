@@ -46,6 +46,10 @@ reset_managed_state() {
   delete_service_if_exists "loyalty-api"
   delete_service_if_exists "flight-search-api"
   delete_service_if_exists "flight-cancel-api"
+  delete_service_if_exists "passenger-api"
+  delete_service_if_exists "miles-balance-api"
+  delete_service_if_exists "voucher-api"
+  delete_service_if_exists "realtime-api"
 
   # Remove old legacy aliases if they exist.
   delete_service_if_exists "flight-api-flight"
@@ -204,6 +208,18 @@ upsert_route "flight-search-api" "flight-search-api-route" "/api/flight-search" 
 
 upsert_service "flight-cancel-api" "http://flight-cancellation-composite:5010/cancel"
 upsert_route "flight-cancel-api" "flight-cancel-api-route" "/api/cancel" "true"
+
+upsert_service "passenger-api" "https://personal-4whagfbm.outsystemscloud.com/Passenger_Srv/rest/PassengerAPI"
+upsert_route "passenger-api" "passenger-api-route" "/api/passenger" "true"
+
+upsert_service "miles-balance-api" "http://miles-balance-service:5006"
+upsert_route "miles-balance-api" "miles-balance-api-route" "/api/miles-balance" "true"
+
+upsert_service "voucher-api" "http://voucher-service:5005"
+upsert_route "voucher-api" "voucher-api-route" "/api/vouchers" "true"
+
+upsert_service "realtime-api" "http://realtime-gateway:5012"
+upsert_route "realtime-api" "realtime-api-route" "/ws" "false"
 
 ensure_global_cors
 ensure_service_rate_limit "flight-search-api" "30"

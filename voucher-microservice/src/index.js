@@ -23,6 +23,7 @@ const TREMENDOUS_API_URL = process.env.TREMENDOUS_API_URL || 'https://testflight
 const TREMENDOUS_API_KEY = process.env.TREMENDOUS_API_KEY || '';
 const TREMENDOUS_CAMPAIGN_ID = process.env.TREMENDOUS_CAMPAIGN_ID || '';
 const TREMENDOUS_FUNDING_SOURCE_ID = process.env.TREMENDOUS_FUNDING_SOURCE_ID || '';
+const DERIVED_STATUS_SQL = `CASE WHEN usedAt IS NOT NULL THEN 'USED' WHEN expiryDate < CURDATE() THEN 'EXPIRED' ELSE 'ACTIVE' END`;
 
 // Helper function to generate unique voucher code
 function generateVoucherCode() {
@@ -249,9 +250,9 @@ app.post('/vouchers', async (req, res) => {
 
   db.query(
     `INSERT INTO vouchers (
-      passengerID, voucherCode, voucherType, voucherValue, milesRedeemed, expiryDate, status,
+      passengerID, voucherCode, voucherType, voucherValue, milesRedeemed, expiryDate,
       providerName, providerProductId, externalOrderId, redemptionUrl
-    ) VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       passengerID,
       voucherCode,
@@ -360,9 +361,9 @@ app.post('/vouchers/bundle', async (req, res) => {
 
     db.query(
       `INSERT INTO vouchers (
-        passengerID, voucherCode, voucherType, voucherValue, milesRedeemed, expiryDate, status,
+          passengerID, voucherCode, voucherType, voucherValue, milesRedeemed, expiryDate,
         providerName, providerProductId, externalOrderId, redemptionUrl
-      ) VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         passengerID,
         voucherCode,
@@ -420,12 +421,20 @@ app.get('/vouchers/:passengerID', (req, res) => {
   const { passengerID } = req.params;
   const { status } = req.query;
 
-  let query = 'SELECT * FROM vouchers WHERE passengerID = ?';
+  let query = `SELECT *, ${DERIVED_STATUS_SQL} AS derivedStatus FROM vouchers WHERE passengerID = ?`;
   const params = [passengerID];
 
   if (status) {
-    query += ' AND status = ?';
-    params.push(status);
+    const normalizedStatus = String(status).trim().toUpperCase();
+    if (normalizedStatus === 'ACTIVE') {
+      query += ' AND usedAt IS NULL AND expiryDate >= CURDATE()';
+    } else if (normalizedStatus === 'USED') {
+      query += ' AND usedAt IS NOT NULL';
+    } else if (normalizedStatus === 'EXPIRED') {
+      query += ' AND usedAt IS NULL AND expiryDate < CURDATE()';
+    } else {
+      return res.status(400).json({ error: 'Invalid status filter. Use ACTIVE, USED, or EXPIRED.' });
+    }
   }
 
   query += ' ORDER BY createdAt DESC';
@@ -435,7 +444,11 @@ app.get('/vouchers/:passengerID', (req, res) => {
       console.error(err);
       return res.status(500).json({ error: err.message });
     }
-    res.json(results);
+    const normalizedResults = results.map((row) => ({
+      ...row,
+      status: row.derivedStatus
+    }));
+    res.json(normalizedResults);
   });
 });
 
@@ -444,7 +457,7 @@ app.get('/vouchers/code/:voucherCode', (req, res) => {
   const { voucherCode } = req.params;
 
   db.query(
-    'SELECT * FROM vouchers WHERE voucherCode = ?',
+    `SELECT *, ${DERIVED_STATUS_SQL} AS derivedStatus FROM vouchers WHERE voucherCode = ?`,
     [voucherCode],
     (err, results) => {
       if (err) {
@@ -454,7 +467,10 @@ app.get('/vouchers/code/:voucherCode', (req, res) => {
       if (results.length === 0) {
         return res.status(404).json({ error: 'Voucher not found' });
       }
-      res.json(results[0]);
+      res.json({
+        ...results[0],
+        status: results[0].derivedStatus
+      });
     }
   );
 });
@@ -465,7 +481,7 @@ app.put('/vouchers/:voucherID/redeem', (req, res) => {
   const { bookingID } = req.body;
 
   db.query(
-    'UPDATE vouchers SET status = "USED", usedAt = NOW(), usedBookingID = ? WHERE voucherID = ? AND status = "ACTIVE"',
+    'UPDATE vouchers SET usedAt = NOW(), usedBookingID = ? WHERE voucherID = ? AND usedAt IS NULL AND expiryDate >= CURDATE()',
     [bookingID, voucherID],
     (err, result) => {
       if (err) {
@@ -489,22 +505,22 @@ app.put('/vouchers/:voucherID/status', (req, res) => {
     return res.status(400).json({ error: 'Missing required field: status' });
   }
 
-  const query = status === 'ACTIVE'
-    ? 'UPDATE vouchers SET status = ?, usedAt = NULL, usedBookingID = NULL WHERE voucherID = ?'
-    : 'UPDATE vouchers SET status = ? WHERE voucherID = ?';
+  if (String(status).trim().toUpperCase() !== 'ACTIVE') {
+    return res.status(400).json({ error: 'Only ACTIVE restore is supported' });
+  }
 
   db.query(
-    query,
-    [status, voucherID],
+    'UPDATE vouchers SET usedAt = NULL, usedBookingID = NULL WHERE voucherID = ? AND expiryDate >= CURDATE()',
+    [voucherID],
     (err, result) => {
       if (err) {
         console.error(err);
         return res.status(500).json({ error: err.message });
       }
       if (result.affectedRows === 0) {
-        return res.status(404).json({ error: 'Voucher not found' });
+        return res.status(409).json({ error: 'Voucher cannot be restored (not found or expired)' });
       }
-      res.json({ success: true, message: `Voucher status updated to ${status}` });
+      res.json({ success: true, message: 'Voucher restored to ACTIVE state' });
     }
   );
 });
