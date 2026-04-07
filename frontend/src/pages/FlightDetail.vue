@@ -1,11 +1,11 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import SeatSelector from './SeatSelector.vue'
 import { usePassengerSession } from '../composables/usePassengerSession'
 import { useBookingDraft } from '../composables/useBookingDraft'
-import { apiUrl } from '../config/api'
+import { apiUrl, REALTIME_WS_URL } from '../config/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -28,6 +28,7 @@ const seats = ref([])
 const loading = ref(true)
 const error = ref(null)
 const selectedSeats = ref([])
+const seatUpdatesSocket = ref(null)
 
 const travelers = computed(() => {
   const draftTravelers = bookingDraft.value?.travelers || []
@@ -105,6 +106,75 @@ const arrivalDate = computed(() => {
 
 function onSeatSelected(assignments) {
   selectedSeats.value = assignments
+}
+
+function applySeatUpdate(updatePayload) {
+  if (!updatePayload || Number(updatePayload.flightID) !== Number(flightID.value)) {
+    return
+  }
+
+  const changedSeats = new Set((updatePayload.seats || []).map((seat) => String(seat)))
+  if (!changedSeats.size) {
+    return
+  }
+
+  seats.value = seats.value.map((seat) => {
+    const seatCode = String(seat.SeatNumber || seat.seatNumber || '')
+    if (!changedSeats.has(seatCode)) {
+      return seat
+    }
+
+    const normalizedStatus = String(updatePayload.status || seat.Status || seat.status || '').toLowerCase()
+    return {
+      ...seat,
+      Status: normalizedStatus,
+      status: normalizedStatus,
+    }
+  })
+
+  selectedSeats.value = selectedSeats.value.map((assignment) => {
+    if (!assignment || !changedSeats.has(String(assignment))) {
+      return assignment
+    }
+    return updatePayload.status === 'available' ? assignment : ''
+  })
+}
+
+function disconnectRealtimeSeatUpdates() {
+  if (seatUpdatesSocket.value) {
+    seatUpdatesSocket.value.close()
+    seatUpdatesSocket.value = null
+  }
+}
+
+function connectRealtimeSeatUpdates() {
+  disconnectRealtimeSeatUpdates()
+
+  if (!flightID.value) {
+    return
+  }
+
+  const socket = new WebSocket(REALTIME_WS_URL)
+  seatUpdatesSocket.value = socket
+
+  socket.onopen = () => {
+    socket.send(JSON.stringify({ type: 'join', flightID: Number(flightID.value) }))
+  }
+
+  socket.onmessage = (event) => {
+    try {
+      const message = JSON.parse(event.data)
+      if (message.type === 'seat.update') {
+        applySeatUpdate(message.payload)
+      }
+    } catch (err) {
+      console.error('Invalid realtime seat payload:', err)
+    }
+  }
+
+  socket.onerror = (event) => {
+    console.error('Realtime seat websocket error:', event)
+  }
 }
 
 function goBack() {
@@ -241,12 +311,18 @@ async function loadFlightDetail() {
 }
 
 onMounted(async () => {
+  connectRealtimeSeatUpdates()
   await loadFlightDetail()
 })
 
+onBeforeUnmount(() => {
+  disconnectRealtimeSeatUpdates()
+})
+
 watch(
-  () => route.query,
+  () => flightID.value,
   async () => {
+    connectRealtimeSeatUpdates()
     await loadFlightDetail()
   }
 )

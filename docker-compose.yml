@@ -143,8 +143,13 @@ services:
       - DB_USER=root
       - DB_PASSWORD=rootpassword
       - DB_NAME=seats
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - RABBITMQ_EXCHANGE=airline_events
+      - SEAT_EVENTS_KEY=seat.updated
     depends_on:
       seats-db:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:5003/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
@@ -317,6 +322,31 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5011/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    mem_limit: 256m
+    networks:
+      - app-network
+
+  # ========== REALTIME GATEWAY (WebSocket) ==========
+  realtime-gateway:
+    build: ./realtime-gateway
+    container_name: realtime-gateway
+    restart: unless-stopped
+    ports:
+      - "5012:5012"
+    environment:
+      - PORT=5012
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - RABBITMQ_EXCHANGE=airline_events
+      - SEAT_EVENTS_KEY=seat.updated
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5012/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5

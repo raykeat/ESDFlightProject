@@ -27,7 +27,7 @@ const selectedPerksVoucher = ref(null)
 const perksFlowMessage = ref('')
 const perksFlowError = ref('')
 
-const BOOKING_TABS = ['Upcoming', 'Awaiting Payment', 'Completed', 'Refunded/Cancelled', 'Awaiting Review']
+const BOOKING_TABS = ['Upcoming', 'Awaiting Payment', 'Completed', 'Refunded/Cancelled', 'Failed']
 
 watch(
   () => route.query,
@@ -682,8 +682,8 @@ function bookingNumberLabel(booking) {
   return `Booking No. ${ids[0]} - ${ids[ids.length - 1]}`
 }
 
-function isAwaitingReview(booking) {
-  return hasPendingOffer(booking) || normalizedStatus(booking.status) === 'Refund Failed'
+function isFailedBooking(booking) {
+  return normalizedStatus(booking.status) === 'Failed'
 }
 
 function isUpcoming(booking) {
@@ -723,8 +723,8 @@ const filteredBookings = computed(() => {
     scopedBookings = scopedBookings.filter((booking) => isCompleted(booking))
   } else if (activeTab.value === 'Refunded/Cancelled') {
     scopedBookings = scopedBookings.filter((booking) => isRefundedOrCancelled(booking))
-  } else if (activeTab.value === 'Awaiting Review') {
-    scopedBookings = scopedBookings.filter((booking) => isAwaitingReview(booking))
+  } else if (activeTab.value === 'Failed') {
+    scopedBookings = scopedBookings.filter((booking) => isFailedBooking(booking))
   }
 
   const query = searchQuery.value.trim().toLowerCase()
@@ -760,8 +760,8 @@ function countByTab(tab) {
   if (tab === 'Refunded/Cancelled') {
     return groupedBookings.value.filter((booking) => isRefundedOrCancelled(booking)).length
   }
-  if (tab === 'Awaiting Review') {
-    return groupedBookings.value.filter((booking) => isAwaitingReview(booking)).length
+  if (tab === 'Failed') {
+    return groupedBookings.value.filter((booking) => isFailedBooking(booking)).length
   }
   return 0
 }
@@ -808,6 +808,7 @@ function statusLabel(booking) {
   if (isFlightCancelled(booking)) return 'Cancelled'
 
   const status = normalizedStatus(booking.status)
+  if (status === 'Failed') return 'Payment Hold Expired'
   if (status === 'Refund Failed') return 'Refund Failed'
   if (status === 'Confirmed') return 'Ticket(s) issued'
   if (status === 'Pending') return 'Awaiting Payment'
@@ -853,6 +854,7 @@ function statusBadgeClass(booking) {
   const status = normalizedStatus(booking.status)
   if (status === 'Confirmed') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
   if (status === 'Pending') return 'border-[#e63946]/20 bg-[#fff1f2] text-[#b42318]'
+  if (status === 'Failed') return 'border-slate-300 bg-slate-100 text-slate-700'
   if (status === 'Refund Failed') return 'border-amber-200 bg-amber-50 text-amber-700'
   if (isCancelled(status)) return 'border-rose-200 bg-rose-50 text-rose-700'
   return 'border-slate-200 bg-slate-50 text-slate-700'
@@ -868,6 +870,7 @@ function cardAccentClass(booking) {
   const status = normalizedStatus(booking.status)
   if (status === 'Confirmed') return 'bg-[#12c48b]'
   if (status === 'Pending') return 'bg-[#e63946]'
+  if (status === 'Failed') return 'bg-slate-400'
   if (status === 'Refund Failed') return 'bg-amber-400'
   if (isCancelled(status)) return 'bg-[#e63946]'
   return 'bg-slate-300'
@@ -994,6 +997,16 @@ function getOutcomeSummary(booking) {
     }
   }
 
+  if (normalizedStatus(booking.status) === 'Failed') {
+    return {
+      title: 'Payment hold expired',
+      detail: 'This booking was not paid within 5 minutes, so the held seats were automatically released.',
+      actionLabel: 'Book Again',
+      action: () => router.push('/'),
+      disabled: false,
+    }
+  }
+
   return {
     title: 'Everything looks good',
     detail: 'Your itinerary is ready and your flight details are confirmed.',
@@ -1014,6 +1027,7 @@ function paymentStatusLabel(booking) {
 
   const status = normalizedStatus(booking.status)
   if (status === 'Pending') return 'Awaiting payment'
+  if (status === 'Failed') return 'Payment hold expired'
   if (status === 'Confirmed') return 'Payment completed'
   if (status === 'Refund Failed') return 'Refund issue'
   if (isCancelled(status)) return 'Cancelled'

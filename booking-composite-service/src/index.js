@@ -464,11 +464,33 @@ async function cleanupPendingRecords(records) {
 
     if (bookingID) {
       try {
-        await axios.delete(`${RECORD_SERVICE_URL}/record/${bookingID}`);
+        await axios.put(`${RECORD_SERVICE_URL}/records/${bookingID}/status`, { status: 'Failed' });
       } catch (err) {
-        console.warn(`Could not delete expired pending booking ${bookingID}:`, err.response?.data?.message || err.message);
+        console.warn(`Could not mark expired pending booking ${bookingID} as Failed:`, err.response?.data?.message || err.message);
       }
     }
+  }
+}
+
+async function cleanupExpiredPendingBookings() {
+  try {
+    const response = await axios.get(`${RECORD_SERVICE_URL}/records/pending/expired`, {
+      params: { minutes: 5 },
+    });
+    const expiredRecords = Array.isArray(response.data) ? response.data : [];
+
+    if (!expiredRecords.length) {
+      return;
+    }
+
+    await cleanupPendingRecords(expiredRecords);
+    const bookingIDs = expiredRecords
+      .map((record) => Number(firstNonEmpty(record.bookingID, record.BookingID)))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    await restoreVoucherStatusesForBookingIDs(bookingIDs);
+    console.log(`Auto-cleanup: marked ${bookingIDs.length} expired pending booking(s) as Failed`);
+  } catch (err) {
+    console.warn('Auto-cleanup for expired pending bookings failed:', err.response?.data?.message || err.message);
   }
 }
 
@@ -1653,6 +1675,10 @@ app.listen(PORT, () => {
   console.log(`Booking Composite Service running on port ${PORT}`);
 });
 
+setInterval(() => {
+  cleanupExpiredPendingBookings();
+}, 60000);
+
 // ==========================================
 // CANCEL PENDING BOOKING(S) AFTER STRIPE CANCEL
 // ==========================================
@@ -1687,7 +1713,7 @@ app.post('/api/bookings/cancel-pending', async (req, res) => {
         seatNumber: record.seatNumber,
       });
 
-      await axios.delete(`${RECORD_SERVICE_URL}/record/${id}`);
+      await axios.put(`${RECORD_SERVICE_URL}/records/${id}/status`, { status: 'Cancelled' });
       cancelled.push(id);
     } catch (err) {
       if (err.response?.status === 404) {

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { usePassengerSession } from '../composables/usePassengerSession'
@@ -8,6 +8,12 @@ import { apiUrl } from '../config/api'
 
 const route = useRoute()
 const router = useRouter()
+
+let seatsToReleaseOnExit = {
+  outbound: { flightID: null, seats: [] },
+  return: { flightID: null, seats: [] }
+}
+let hasCompletedPayment = false
 const { currentPassenger } = usePassengerSession()
 const { bookingDraft } = useBookingDraft()
 
@@ -256,6 +262,7 @@ async function confirmBooking() {
       window.history.replaceState({}, '', currentUrl.toString())
     }
 
+    hasCompletedPayment = true
     window.location.href = finalSessionUrl
   } catch (bookingError) {
     console.error('Booking failed:', bookingError)
@@ -270,6 +277,46 @@ onMounted(async () => {
   if (wasCancelled) {
     await releaseTravelCreditVoucherIfCancelled()
   }
+
+  // Store seats to release if user exits without completing payment
+  const outboundFlightID = route.query.outboundFlightID ? Number.parseInt(route.query.outboundFlightID, 10) : null
+  const returnFlightID = Number.parseInt(route.query.flightID, 10)
+  const outboundSeatsStr = route.query.outboundSeat || ''
+  const returnSeatsStr = route.query.seatNumber || ''
+
+  if (outboundFlightID && outboundSeatsStr) {
+    seatsToReleaseOnExit.outbound = {
+      flightID: outboundFlightID,
+      seats: outboundSeatsStr.split(',').map(s => s.trim()).filter(Boolean),
+    }
+  }
+
+  if (returnFlightID && returnSeatsStr) {
+    seatsToReleaseOnExit.return = {
+      flightID: returnFlightID,
+      seats: returnSeatsStr.split(',').map(s => s.trim()).filter(Boolean),
+    }
+  }
+
+  console.log('Stored seats to release on exit:', seatsToReleaseOnExit)
+
+  // Release seats if user leaves the page without completing payment
+  window.addEventListener('beforeunload', releaseSeatOnExit)
+  window.addEventListener('pagehide', releaseSeatOnExit)
+
+  const unsubscribeRouter = router.beforeEach((to, from, next) => {
+    if (from.path === '/booking-confirmation') {
+      // User is navigating away from booking-confirmation
+      releaseSeatOnExit()
+    }
+    next()
+  })
+
+  onBeforeUnmount(() => {
+    window.removeEventListener('beforeunload', releaseSeatOnExit)
+    window.removeEventListener('pagehide', releaseSeatOnExit)
+    unsubscribeRouter()
+  })
 
   await loadAvailableVouchers()
 })
@@ -366,6 +413,48 @@ async function releaseTravelCreditVoucherIfCancelled() {
     })
   } catch {
     // Best effort only.
+  }
+}
+
+async function releaseSeatOnExit() {
+  if (hasCompletedPayment) {
+    console.log('Seats payment completed, not releasing')
+    return
+  }
+
+  const releasePromises = []
+
+  // Release outbound seats if any
+  if (seatsToReleaseOnExit.outbound.flightID && seatsToReleaseOnExit.outbound.seats.length) {
+    releasePromises.push(
+      axios.post(apiUrl('/seats/release'), {
+        flightID: seatsToReleaseOnExit.outbound.flightID,
+        seatNumber: seatsToReleaseOnExit.outbound.seats.join(','),
+      }).catch(err => {
+        console.warn('Failed to release outbound seats:', err)
+      })
+    )
+  }
+
+  // Release return seats if any
+  if (seatsToReleaseOnExit.return.flightID && seatsToReleaseOnExit.return.seats.length) {
+    releasePromises.push(
+      axios.post(apiUrl('/seats/release'), {
+        flightID: seatsToReleaseOnExit.return.flightID,
+        seatNumber: seatsToReleaseOnExit.return.seats.join(','),
+      }).catch(err => {
+        console.warn('Failed to release return seats:', err)
+      })
+    )
+  }
+
+  if (releasePromises.length) {
+    try {
+      await Promise.all(releasePromises)
+      console.log('Seats released on exit')
+    } catch (err) {
+      console.error('Error releasing seats:', err)
+    }
   }
 }
 </script>

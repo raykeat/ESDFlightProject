@@ -395,6 +395,48 @@ app.get('/records/passenger/:passengerID', (req, res) => {
 });
 
 // ==========================================
+// GET /records/pending/expired?minutes=5
+// Get pending booking records older than threshold
+// ==========================================
+app.get('/records/pending/expired', (req, res) => {
+  const minutes = Number(req.query.minutes || 5);
+
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    return res.status(400).json({ error: 'minutes must be a positive number' });
+  }
+
+  pool.query(
+    `SELECT
+      BookingID AS bookingID,
+      BookingID AS BookingID,
+      FlightID AS flightID,
+      FlightID AS FlightID,
+      seatNumber AS seatNumber,
+      seatNumber AS SeatNumber,
+      PassengerID AS passengerID,
+      PassengerID AS PassengerID,
+      BookedByPassengerID AS bookedByPassengerID,
+      BookedByPassengerID AS BookedByPassengerID,
+      bookingstatus AS status,
+      bookingstatus AS bookingstatus,
+      CreatedTime AS createdAt,
+      CreatedTime AS CreatedTime
+    FROM booking
+    WHERE bookingstatus = 'Pending'
+      AND CreatedTime <= DATE_SUB(NOW(), INTERVAL ? MINUTE)
+    ORDER BY CreatedTime ASC`,
+    [minutes],
+    (err, results) => {
+      if (err) {
+        console.error(err);
+        return res.status(500).json({ error: err.message });
+      }
+      return res.json(results || []);
+    }
+  );
+});
+
+// ==========================================
 // GET /records/:bookingID
 // Get booking records by ID
 // ==========================================

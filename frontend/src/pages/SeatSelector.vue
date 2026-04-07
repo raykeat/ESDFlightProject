@@ -170,7 +170,7 @@ function selectSeat(seat) {
       </div>
       <div class="flex items-center gap-2">
         <div class="h-3 w-3 rounded bg-[#111827]"></div>
-        <span class="text-[11px] font-bold uppercase tracking-[0.1em] text-[#4b5563]">Awaiting Payment</span>
+        <span class="text-[11px] font-bold uppercase tracking-[0.1em] text-[#4b5563]">On Hold</span>
       </div>
     </div>
 

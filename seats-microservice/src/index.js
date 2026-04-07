@@ -1,12 +1,16 @@
 const express = require("express");
 const mysql = require("mysql2");
 const cors = require("cors");
+const amqp = require("amqplib");
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 
 const PORT = 5003;
+const RABBITMQ_URL = process.env.RABBITMQ_URL || "amqp://guest:guest@rabbitmq:5672";
+const RABBITMQ_EXCHANGE = process.env.RABBITMQ_EXCHANGE || "airline_events";
+const SEAT_EVENTS_KEY = process.env.SEAT_EVENTS_KEY || "seat.updated";
 const DB_CONFIG = {
     host: process.env.DB_HOST || "seats-db",
     user: process.env.DB_USER || "root",
@@ -69,10 +73,79 @@ async function ensureHoldExpiryColumn() {
     }
 }
 
+function toSeatArray(value) {
+    return String(value || "")
+        .split(",")
+        .map(s => s.trim())
+        .filter(Boolean);
+}
+
+function groupSeatsByFlight(rows) {
+    const grouped = new Map();
+    for (const row of rows) {
+        const flightID = Number(row.FlightID);
+        if (!grouped.has(flightID)) {
+            grouped.set(flightID, []);
+        }
+        grouped.get(flightID).push(String(row.SeatNumber));
+    }
+    return grouped;
+}
+
+async function publishSeatUpdate(eventPayload) {
+    let connection;
+    let channel;
+
+    try {
+        connection = await amqp.connect(RABBITMQ_URL);
+        channel = await connection.createChannel();
+        await channel.assertExchange(RABBITMQ_EXCHANGE, "topic", { durable: true });
+
+        channel.publish(
+            RABBITMQ_EXCHANGE,
+            SEAT_EVENTS_KEY,
+            Buffer.from(JSON.stringify(eventPayload)),
+            { persistent: true }
+        );
+    } catch (err) {
+        console.error("Failed to publish seat update:", err.message);
+    } finally {
+        try {
+            if (channel) await channel.close();
+        } catch (_) {
+            // Ignore close errors while cleaning up publisher resources.
+        }
+        try {
+            if (connection) await connection.close();
+        } catch (_) {
+            // Ignore close errors while cleaning up publisher resources.
+        }
+    }
+}
+
 async function releaseExpiredHolds() {
+    const expiredHolds = await runQuery(
+        "SELECT FlightID, SeatNumber FROM seats WHERE Status='hold' AND HoldExpiresAt IS NOT NULL AND HoldExpiresAt <= UTC_TIMESTAMP()"
+    );
+
+    if (!Array.isArray(expiredHolds) || expiredHolds.length === 0) {
+        return;
+    }
+
     await runQuery(
         "UPDATE seats SET Status='available', PassengerID=NULL, HoldExpiresAt=NULL WHERE Status='hold' AND HoldExpiresAt IS NOT NULL AND HoldExpiresAt <= UTC_TIMESTAMP()"
     );
+
+    const grouped = groupSeatsByFlight(expiredHolds);
+    for (const [flightID, seats] of grouped.entries()) {
+        await publishSeatUpdate({
+            eventType: "seat.released.expired",
+            flightID,
+            seats,
+            status: "available",
+            changedAt: new Date().toISOString(),
+        });
+    }
 }
 
 (async () => {
@@ -110,7 +183,7 @@ app.get("/seats/:flightID", async (req, res) => {
 app.post("/seats/hold", async (req, res) => {
 
     const { flightID, seatNumber, passengerID } = req.body;
-    const seatArray = String(seatNumber).split(',').map(s => s.trim());
+    const seatArray = toSeatArray(seatNumber);
     const placeholders = seatArray.map(() => '?').join(',');
 
     const checkQuery =
@@ -128,6 +201,14 @@ app.post("/seats/hold", async (req, res) => {
             `UPDATE seats SET Status='hold', PassengerID=?, HoldExpiresAt=DATE_ADD(UTC_TIMESTAMP(), INTERVAL 5 MINUTE) WHERE FlightID=? AND SeatNumber IN (${placeholders})`;
 
         await runQuery(holdQuery, [passengerID, flightID, ...seatArray]);
+        await publishSeatUpdate({
+            eventType: "seat.held",
+            flightID: Number(flightID),
+            seats: seatArray,
+            status: "hold",
+            holdMinutes: 5,
+            changedAt: new Date().toISOString(),
+        });
         res.json({ message: "Seats placed on hold for 5 minutes" });
     } catch (err) {
         res.status(503).json({ message: "Seats database unavailable", error: err.code || err.message });
@@ -137,7 +218,7 @@ app.post("/seats/hold", async (req, res) => {
 
 app.post("/seats/refresh-hold", async (req, res) => {
     const { flightID, seatNumber } = req.body;
-    const seatArray = String(seatNumber).split(',').map(s => s.trim()).filter(Boolean);
+    const seatArray = toSeatArray(seatNumber);
 
     if (!flightID || !seatArray.length) {
         return res.status(400).json({ message: "flightID and seatNumber are required" });
@@ -166,7 +247,7 @@ app.post("/seats/refresh-hold", async (req, res) => {
 app.post("/seats/confirm", async (req, res) => {
 
     const { flightID, seatNumber } = req.body;
-    const seatArray = String(seatNumber).split(',').map(s => s.trim());
+    const seatArray = toSeatArray(seatNumber);
     const placeholders = seatArray.map(() => '?').join(',');
 
     const query =
@@ -174,6 +255,13 @@ app.post("/seats/confirm", async (req, res) => {
 
     try {
         await runQuery(query, [flightID, ...seatArray]);
+        await publishSeatUpdate({
+            eventType: "seat.confirmed",
+            flightID: Number(flightID),
+            seats: seatArray,
+            status: "unavailable",
+            changedAt: new Date().toISOString(),
+        });
         res.json({ message: "Seat booking confirmed" });
     } catch (err) {
         res.status(503).json({ message: "Seats database unavailable", error: err.code || err.message });
@@ -184,7 +272,7 @@ app.post("/seats/confirm", async (req, res) => {
 app.post("/seats/release", async (req, res) => {
 
     const { flightID, seatNumber } = req.body;
-    const seatArray = String(seatNumber).split(',').map(s => s.trim());
+    const seatArray = toSeatArray(seatNumber);
     const placeholders = seatArray.map(() => '?').join(',');
 
     const query =
@@ -192,6 +280,13 @@ app.post("/seats/release", async (req, res) => {
 
     try {
         await runQuery(query, [flightID, ...seatArray]);
+        await publishSeatUpdate({
+            eventType: "seat.released",
+            flightID: Number(flightID),
+            seats: seatArray,
+            status: "available",
+            changedAt: new Date().toISOString(),
+        });
         res.json({ message: "Seats released" });
     } catch (err) {
         res.status(503).json({ message: "Seats database unavailable", error: err.code || err.message });
@@ -214,6 +309,8 @@ app.put('/seats/release/:flightID', async (req, res) => {
         `UPDATE seats SET Status="available", PassengerID=NULL, HoldExpiresAt=NULL WHERE FlightID=?`;
 
     try {
+        const existingSeats = await runQuery("SELECT SeatNumber FROM seats WHERE FlightID=?", [flightID]);
+        const seatNumbers = existingSeats.map(row => String(row.SeatNumber));
         const result = await runQuery(query, [flightID]);
         if (result.affectedRows === 0) {
             return res.status(404).json({ message: `No seats found for flight ${flightID}` });
@@ -223,6 +320,16 @@ app.put('/seats/release/:flightID', async (req, res) => {
             message: `All seats released for flight ${flightID}`,
             seatsReleased: result.affectedRows
         });
+
+        if (seatNumbers.length) {
+            await publishSeatUpdate({
+                eventType: "seat.released.bulk",
+                flightID: Number(flightID),
+                seats: seatNumbers,
+                status: "available",
+                changedAt: new Date().toISOString(),
+            });
+        }
     } catch (err) {
         return res.status(503).json({ message: "Seats database unavailable", error: err.code || err.message });
     }
@@ -270,10 +377,19 @@ app.put('/seats/:seatID/hold', async (req, res) => {
             return res.status(409).json({ message: `Seat ${seatID} is not available for hold` });
         }
 
-        const rows = await runQuery('SELECT SeatID, SeatNumber, Status FROM seats WHERE SeatID=?', [seatID]);
+        const rows = await runQuery('SELECT SeatID, FlightID, SeatNumber, Status FROM seats WHERE SeatID=?', [seatID]);
         if (!rows.length) {
             return res.status(404).json({ message: `Seat ${seatID} not found` });
         }
+
+        await publishSeatUpdate({
+            eventType: "seat.held.single",
+            flightID: Number(rows[0].FlightID),
+            seats: [String(rows[0].SeatNumber)],
+            status: "hold",
+            holdMinutes: 5,
+            changedAt: new Date().toISOString(),
+        });
 
         return res.json({
             SeatID: rows[0].SeatID,
@@ -296,6 +412,19 @@ app.put('/seats/cancel', async (req, res) => {
 
     try {
         const result = await runQuery(query, [flightID]);
+        const cancelledSeats = await runQuery('SELECT SeatNumber FROM seats WHERE FlightID=?', [flightID]);
+        const seatNumbers = cancelledSeats.map(row => String(row.SeatNumber));
+
+        if (seatNumbers.length) {
+            await publishSeatUpdate({
+                eventType: "seat.cancelled",
+                flightID: Number(flightID),
+                seats: seatNumbers,
+                status: "cancelled",
+                changedAt: new Date().toISOString(),
+            });
+        }
+
         res.json({
             FlightID: Number(flightID),
             SeatsCancelled: result.affectedRows
@@ -308,3 +437,12 @@ app.put('/seats/cancel', async (req, res) => {
 app.listen(PORT, () => {
     console.log(`Seats service running on port ${PORT}`);
 });
+
+// Background job: Release expired holds every minute
+setInterval(async () => {
+    try {
+        await releaseExpiredHolds();
+    } catch (err) {
+        console.error('Background hold expiry job failed:', err.message);
+    }
+}, 60000); // Run every 60 seconds
