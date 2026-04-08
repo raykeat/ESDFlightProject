@@ -23,7 +23,7 @@ const NOTIFICATION_SERVICE_URL = (process.env.NOTIFICATION_SERVICE_URL || 'http:
 const SEATS_SERVICE_URL = (process.env.SEATS_SERVICE_URL || 'http://seats-service:5003').replace(/\/$/, '');
 const RECORD_SERVICE_URL = (process.env.RECORD_SERVICE_URL || 'http://record-service:3000').replace(/\/$/, '');
 const OFFER_SERVICE_URL = (process.env.OFFER_SERVICE_URL || 'http://offer-service:5000').replace(/\/$/, '');
-const MILES_EARN_SERVICE_URL = (process.env.MILES_EARN_SERVICE_URL || 'http://miles-earn-service:5009').replace(/\/$/, '');
+const MILES_AWARDING_COMPOSITE_URL = (process.env.MILES_AWARDING_COMPOSITE_URL || 'http://miles-awarding-composite:5013').replace(/\/$/, '');
 const RABBITMQ_URL             = process.env.RABBITMQ_URL            || 'amqp://guest:guest@rabbitmq:5672';
 const STRIPE_MIN_AMOUNT        = 0.50;
 
@@ -203,122 +203,17 @@ function getNormalizedSeatNumber(record) {
 }
 
 async function awardMilesForBookingIfCompleted({ bookingID, force = false }) {
-  const bookingResponse = await axios.get(`${RECORD_SERVICE_URL}/records/${bookingID}`);
-  const booking = bookingResponse.data;
-
-  if (String(booking.status || '').toLowerCase() !== 'confirmed') {
-    return { awarded: false, reason: 'booking_not_confirmed' };
-  }
-
-  if (booking.milesAwardedAt) {
-    return {
-      awarded: false,
-      reason: 'already_awarded',
-      milesAwardedAt: booking.milesAwardedAt,
-      milesAwarded: booking.milesAwarded || null,
-      transactionID: booking.milesTransactionID || null,
-    };
-  }
-
-  const passengerID = Number(firstNonEmpty(booking.passengerID, booking.PassengerID));
-  if (!passengerID) {
-    return { awarded: false, reason: 'guest_or_missing_passenger' };
-  }
-
-  const flightID = Number(firstNonEmpty(booking.flightID, booking.FlightID));
-  const flightResponse = await axios.get(`${FLIGHT_SERVICE_URL}/flight/${flightID}`);
-  const flight = flightResponse.data || {};
-
-  if (String(flight.Status || '').toLowerCase() === 'cancelled') {
-    return { awarded: false, reason: 'flight_cancelled' };
-  }
-
-  const flightStatus = String(flight.Status || '').toLowerCase();
-  const hasCompleted = flightStatus === 'landed';
-
-  if (!force && !hasCompleted) {
-    return {
-      awarded: false,
-      reason: 'flight_not_landed',
-      flightStatus: flight.Status || null,
-    };
-  }
-
-  const amountPaid = Number(firstNonEmpty(booking.amountPaid, booking.amount, booking.AmountPaid));
-  const earnResponse = await axios.post(`${MILES_EARN_SERVICE_URL}/miles/earn`, {
-    passengerID,
-    flightCost: amountPaid,
-    bookingReference: `BK-${String(bookingID).padStart(5, '0')}`,
-    currency: 'SGD',
-    milesPerDollar: 1,
+  const response = await axios.post(`${MILES_AWARDING_COMPOSITE_URL}/award/booking/${bookingID}`, {
+    force,
   });
-
-  await axios.put(`${RECORD_SERVICE_URL}/records/${bookingID}/miles-awarded`, {
-    milesAwarded: earnResponse.data.earnedMiles,
-    transactionID: earnResponse.data.transactionID,
-  });
-
-  return {
-    awarded: true,
-    bookingID,
-    passengerID,
-    flightID,
-    earnedMiles: earnResponse.data.earnedMiles,
-    transactionID: earnResponse.data.transactionID,
-    newBalance: earnResponse.data.newBalance,
-    forced: force,
-  };
+  return response.data;
 }
 
 async function awardMilesForFlight(flightID, force = false) {
-  const bookingsResponse = await axios.get(`${RECORD_SERVICE_URL}/records`, {
-    params: {
-      FlightID: flightID,
-      bookingstatus: 'Confirmed',
-    },
+  const response = await axios.post(`${MILES_AWARDING_COMPOSITE_URL}/award/flight/${flightID}`, {
+    force,
   });
-
-  const bookings = Array.isArray(bookingsResponse.data) ? bookingsResponse.data : [];
-  const results = await Promise.allSettled(
-    bookings.map((booking) => awardMilesForBookingIfCompleted({
-      bookingID: Number(firstNonEmpty(booking.bookingID, booking.BookingID)),
-      force,
-    }))
-  );
-
-  const summary = {
-    flightID: Number(flightID),
-    totalBookings: bookings.length,
-    awarded: 0,
-    skipped: 0,
-    failed: 0,
-    details: [],
-  };
-
-  results.forEach((result, index) => {
-    const booking = bookings[index];
-    const bookingID = Number(firstNonEmpty(booking.bookingID, booking.BookingID));
-
-    if (result.status === 'fulfilled') {
-      const value = result.value || {};
-      if (value.awarded) {
-        summary.awarded += 1;
-      } else {
-        summary.skipped += 1;
-      }
-      summary.details.push({ bookingID, ...value });
-    } else {
-      summary.failed += 1;
-      summary.details.push({
-        bookingID,
-        awarded: false,
-        reason: 'error',
-        message: result.reason?.response?.data?.message || result.reason?.message || String(result.reason),
-      });
-    }
-  });
-
-  return summary;
+  return response.data;
 }
 
 function splitAmount(totalAmount, parts) {
