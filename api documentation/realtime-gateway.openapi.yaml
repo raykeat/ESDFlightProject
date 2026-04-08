@@ -1,0 +1,35 @@
+openapi: 3.0.3
+info:
+  title: Realtime Gateway API
+  version: 1.0.0
+  description: |
+    Broadcasts seat update events over WebSocket. Clients connect to `/ws`,
+    send a `join` message containing `flightID`, and receive `seat.update` events.
+servers:
+  - url: http://localhost:5012
+    description: Docker host mapping for HTTP health check
+tags:
+  - name: Health
+  - name: WebSocket
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+
+  /ws:
+    get:
+      tags: [WebSocket]
+      summary: WebSocket upgrade endpoint for seat updates
+      description: |
+        Upgrade this endpoint to WebSocket, then send:
+        `{"type":"join","flightID":"10001"}`
+        to subscribe to seat updates for a flight.
+      responses:
+        '101':
+          description: Switching Protocols
+

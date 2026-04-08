@@ -1,0 +1,82 @@
+openapi: 3.0.3
+info:
+  title: Flight Search Composite API
+  version: 1.0.0
+  description: |
+    Aggregates flight and seat availability data to return searchable flights
+    that satisfy passenger-count constraints.
+servers:
+  - url: http://localhost:5011
+    description: Docker host mapping (docker-compose)
+tags:
+  - name: Health
+  - name: Flight Search
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+
+  /flight-search/available:
+    get:
+      tags: [Flight Search]
+      summary: Search available flights by route, date window, and passenger count
+      parameters:
+        - in: query
+          name: origin
+          schema:
+            type: string
+        - in: query
+          name: dest
+          schema:
+            type: string
+        - in: query
+          name: dateFrom
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: dateTo
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: passengers
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+      responses:
+        '200':
+          description: Matching flights with available seat counts
+        '400':
+          description: Invalid passenger count
+        '502':
+          description: Downstream flight service error
+        '503':
+          description: Flight service unreachable
+
+  /flight-search/{flightID}:
+    get:
+      tags: [Flight Search]
+      summary: Get combined flight and seat data for a specific flight
+      parameters:
+        - in: path
+          name: flightID
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Combined flight and seat payload
+        '404':
+          description: Flight not found
+        '502':
+          description: Downstream service error
+        '503':
+          description: Downstream service unreachable
+
