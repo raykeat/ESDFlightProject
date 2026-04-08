@@ -5,7 +5,7 @@ info:
   description: |
     Manages rebooking offers created for disrupted passengers (Path A — alternative flight offered).
     Supports auto-expiry (24-hour TTL), soft delete, and concurrent-update protection via row locking.
-    Routes respond on both `/offer` and `/offers` aliases.
+    The service currently accepts both `/offer` and `/offers`, but this specification documents `/offer` as the canonical path.
 servers:
   - url: http://localhost:5002
     description: Docker host mapping (docker-compose)
@@ -35,7 +35,7 @@ paths:
                     type: string
                     example: offer-service
 
-  /offers:
+  /offer:
     get:
       tags: [Offers]
       summary: Get all offers (with optional filters)
@@ -173,7 +173,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
-  /offers/{offerID}:
+  /offer/{offerID}:
     get:
       tags: [Offers]
       summary: Get a specific offer by ID

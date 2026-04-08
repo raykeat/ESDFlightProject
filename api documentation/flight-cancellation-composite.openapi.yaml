@@ -1,0 +1,85 @@
+openapi: 3.0.3
+info:
+  title: Flight Cancellation Composite API
+  version: 1.0.0
+  description: |
+    Cancels a flight, cancels associated seats, counts affected passengers,
+    and publishes the cancellation event to the rebooking pipeline.
+servers:
+  - url: http://localhost:5010
+    description: Docker host mapping (docker-compose)
+tags:
+  - name: Health
+  - name: Flight Cancellation
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+
+  /cancellation:
+    post:
+      tags: [Flight Cancellation]
+      summary: Cancel a flight and publish the cancellation event
+      description: Also accessible via `/cancel`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelFlightRequest'
+      responses:
+        '200':
+          description: Flight successfully cancelled
+        '400':
+          description: Missing or invalid fields
+        '404':
+          description: Flight not found
+        '502':
+          description: Downstream flight or seat update failed
+        '503':
+          description: Downstream service unavailable or Kafka publish failed
+
+  /cancel:
+    post:
+      tags: [Flight Cancellation]
+      summary: Alias for flight cancellation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelFlightRequest'
+      responses:
+        '200':
+          description: Flight successfully cancelled
+        '400':
+          description: Missing or invalid fields
+        '404':
+          description: Flight not found
+        '502':
+          description: Downstream flight or seat update failed
+        '503':
+          description: Downstream service unavailable or Kafka publish failed
+
+components:
+  schemas:
+    CancelFlightRequest:
+      type: object
+      required: [FlightID, CancellationReason]
+      properties:
+        FlightID:
+          type: integer
+        flightID:
+          type: integer
+          nullable: true
+        CancellationReason:
+          type: string
+        cancellationReason:
+          type: string
+          nullable: true
+
