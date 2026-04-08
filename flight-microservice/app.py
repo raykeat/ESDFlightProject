@@ -3,6 +3,7 @@ import time
 import threading
 import json
 import urllib.request
+import pika
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
@@ -28,6 +29,10 @@ db = SQLAlchemy(app)
 AUTO_LAND_ENABLED = os.environ.get('AUTO_LAND_ENABLED', 'true').lower() == 'true'
 AUTO_LAND_INTERVAL_SECONDS = int(os.environ.get('AUTO_LAND_INTERVAL_SECONDS', '60'))
 BOOKING_COMPOSITE_URL = os.environ.get('BOOKING_COMPOSITE_URL', 'http://booking-composite-service:3001').rstrip('/')
+MILES_AWARDING_COMPOSITE_URL = os.environ.get('MILES_AWARDING_COMPOSITE_URL', 'http://miles-awarding-composite:5013').rstrip('/')
+RABBITMQ_URL = os.environ.get('RABBITMQ_URL', 'amqp://guest:guest@rabbitmq:5672')
+RABBITMQ_EXCHANGE = os.environ.get('RABBITMQ_EXCHANGE', 'airline_events')
+FLIGHT_LANDED_KEY = os.environ.get('FLIGHT_LANDED_KEY', 'flight.landed')
 
 DEMO_FLIGHT_ROWS = [
     (70001, 'BA701', 'Dubai', 'Edinburgh', '2026-04-02', '08:15:00', '08:00:00', '16:15:00', 780.00, 'available', '1 Hot Meal', 'Free-flow', True, '30kg'),
@@ -162,18 +167,41 @@ def start_auto_landed_scheduler():
 
 
 def trigger_miles_award_for_flight(flight_id):
+    published = False
+
+    try:
+        connection = pika.BlockingConnection(pika.URLParameters(RABBITMQ_URL))
+        channel = connection.channel()
+        channel.exchange_declare(exchange=RABBITMQ_EXCHANGE, exchange_type='topic', durable=True)
+        channel.basic_publish(
+            exchange=RABBITMQ_EXCHANGE,
+            routing_key=FLIGHT_LANDED_KEY,
+            body=json.dumps({"flightID": flight_id, "force": False}),
+            properties=pika.BasicProperties(delivery_mode=2),
+        )
+        channel.close()
+        connection.close()
+        published = True
+        print(f"Published flight.landed event for flight {flight_id}")
+    except Exception as e:
+        print(f"Miles award event publish warning for flight {flight_id}: {e}")
+
+    if published:
+        return
+
+    # Fallback path to avoid losing awards if RabbitMQ publish fails.
     try:
         request_obj = urllib.request.Request(
-            f"{BOOKING_COMPOSITE_URL}/api/flights/{flight_id}/award-miles",
+            f"{MILES_AWARDING_COMPOSITE_URL}/award/flight/{flight_id}",
             data=json.dumps({"force": False}).encode('utf-8'),
             headers={'Content-Type': 'application/json'},
             method='POST'
         )
         with urllib.request.urlopen(request_obj, timeout=30) as response:
             payload = json.loads(response.read().decode('utf-8') or '{}')
-            print(f"Award miles response for flight {flight_id}: {payload}")
+            print(f"Miles awarding fallback response for flight {flight_id}: {payload}")
     except Exception as e:
-        print(f"Miles award trigger warning for flight {flight_id}: {e}")
+        print(f"Miles award fallback warning for flight {flight_id}: {e}")
 
 
 @app.route('/health', methods=['GET'])

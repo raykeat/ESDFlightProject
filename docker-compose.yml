@@ -96,11 +96,17 @@ services:
       - DB_PASSWORD=rootpassword
       - DB_NAME=flightdb
       - BOOKING_COMPOSITE_URL=http://booking-composite-service:3001
+      - MILES_AWARDING_COMPOSITE_URL=http://miles-awarding-composite:5013
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - RABBITMQ_EXCHANGE=airline_events
+      - FLIGHT_LANDED_KEY=flight.landed
       - AUTO_LAND_ENABLED=true
       - AUTO_LAND_INTERVAL_SECONDS=60
     depends_on:
       flight-db:
         condition: service_healthy
+      rabbitmq:
+        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3000/health', timeout=5)"]
       interval: 10s
@@ -800,6 +806,41 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    mem_limit: 256m
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # ========== MILES AWARDING COMPOSITE ==========
+  miles-awarding-composite:
+    build: ./miles-awarding-composite
+    container_name: miles-awarding-composite
+    ports:
+      - "5013:5013"
+    environment:
+      - PORT=5013
+      - RECORD_SERVICE_URL=http://record-service:3000
+      - FLIGHT_SERVICE_URL=http://flight-service:3000
+      - MILES_EARN_SERVICE_URL=http://miles-earn-service:5009
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - RABBITMQ_EXCHANGE=airline_events
+      - FLIGHT_LANDED_KEY=flight.landed
+      - FLIGHT_LANDED_QUEUE=miles_awarding_flight_landed_queue
+    depends_on:
+      record-service:
+        condition: service_started
+      flight-service:
+        condition: service_started
+      miles-earn-service:
+        condition: service_started
+      rabbitmq:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5013/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     mem_limit: 256m
     networks:
       - app-network
