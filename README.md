@@ -13,3 +13,7 @@ Under the api documentation folder lies the YAML files of the microservices. to 
 
 FYI, this is the api document for passenger service (since its created on outsystems):
 https://personal-4whagfbm.outsystemscloud.com/Passenger_Srv/rest/PassengerAPI/#/
+
+Accessing Services
+Frontend: http://localhost:5173
+Kong Dashboard: http://localhost:8002
