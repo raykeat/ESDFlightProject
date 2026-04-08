@@ -11,6 +11,9 @@ amqp_port = int(os.environ.get("RABBITMQ_PORT", 5672))
 
 exchange_name = "airline_events"   # must match RABBITMQ_EXCHANGE in .env
 exchange_type = "topic"
+dead_letter_exchange = os.environ.get("RABBITMQ_DLX", "airline_events_dlx")
+dead_letter_queue = os.environ.get("RABBITMQ_DLQ", "notification_booking_dlq")
+dead_letter_routing_key = os.environ.get("RABBITMQ_DLQ_ROUTING_KEY", "notification.failed")
 
 queues = [
     {
@@ -52,9 +55,34 @@ def create_exchange(hostname, port, exchange_name, exchange_type):
 def create_queue(channel, exchange_name, queue_name, routing_key):
     print(f"Creating queue: {queue_name}")
     print(f"  Binding to exchange '{exchange_name}' with routing_key '{routing_key}'")
-    channel.queue_declare(queue=queue_name, durable=True)
+    channel.queue_declare(
+        queue=queue_name,
+        durable=True,
+        arguments={
+            "x-dead-letter-exchange": dead_letter_exchange,
+            "x-dead-letter-routing-key": dead_letter_routing_key,
+        },
+    )
     channel.queue_bind(
         exchange=exchange_name, queue=queue_name, routing_key=routing_key
+    )
+
+
+def create_dead_letter_queue(channel):
+    print(f"Creating dead-letter exchange: {dead_letter_exchange} (type=topic)")
+    channel.exchange_declare(
+        exchange=dead_letter_exchange, exchange_type="topic", durable=True
+    )
+    print(f"Creating dead-letter queue: {dead_letter_queue}")
+    print(
+        f"  Binding to dead-letter exchange '{dead_letter_exchange}' "
+        f"with routing_key '{dead_letter_routing_key}'"
+    )
+    channel.queue_declare(queue=dead_letter_queue, durable=True)
+    channel.queue_bind(
+        exchange=dead_letter_exchange,
+        queue=dead_letter_queue,
+        routing_key=dead_letter_routing_key,
     )
 
 
@@ -67,6 +95,7 @@ def main():
             exchange_name=exchange_name,
             exchange_type=exchange_type,
         )
+        create_dead_letter_queue(channel)
         for queue in queues:
             create_queue(
                 channel=channel,

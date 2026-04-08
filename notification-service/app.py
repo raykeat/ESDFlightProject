@@ -84,12 +84,12 @@ def send_email(to_email: str, to_name: str, subject: str, html: str, text: str, 
         with urllib.request.urlopen(req) as resp:
             message_id = resp.headers.get("X-Message-Id", "")
             logger.info("Email sent to %s | status=%s", to_email, resp.status)
-            return {"success": True, "message_id": message_id}
+            return {"success": True, "message_id": message_id, "status_code": resp.status}
 
     except urllib.error.HTTPError as e:
         error_body = e.read().decode("utf-8")
         logger.error("SendGrid HTTP error for %s: %s - %s", to_email, e.code, error_body)
-        return {"success": False, "error": error_body}
+        return {"success": False, "error": error_body, "status_code": e.code}
     except Exception as e:
         logger.error("SendGrid error for %s: %s", to_email, str(e))
         return {"success": False, "error": str(e)}
@@ -1464,6 +1464,9 @@ def notify_flight_cancelled_noalt(data: dict) -> dict:
 
 RABBITMQ_EXCHANGE = os.environ.get("RABBITMQ_EXCHANGE", "airline_events")
 RABBITMQ_QUEUE    = "notification_booking_queue"
+RABBITMQ_DLX      = os.environ.get("RABBITMQ_DLX", "airline_events_dlx")
+RABBITMQ_DLQ      = os.environ.get("RABBITMQ_DLQ", "notification_booking_dlq")
+RABBITMQ_DLQ_KEY  = os.environ.get("RABBITMQ_DLQ_ROUTING_KEY", "notification.failed")
 RABBITMQ_BINDINGS = [
     "booking.confirmed",       # Scenario 1
     "flight.cancelled.alt",    # Scenario 2 Path A
@@ -1474,6 +1477,65 @@ RABBITMQ_HANDLERS = {
     "flight.cancelled.alt":   notify_flight_cancelled_alt,
     "flight.cancelled.noalt": notify_flight_cancelled_noalt,
 }
+
+
+def _is_permanent_failure(result: dict) -> bool:
+    """Dead-letter malformed requests and 4xx SendGrid failures; retry transient errors."""
+    if not isinstance(result, dict):
+        return False
+
+    status_code = result.get("status_code")
+    if isinstance(status_code, int) and 400 <= status_code < 500:
+        return True
+
+    error = str(result.get("error", "")).lower()
+    permanent_markers = [
+        "missing",
+        "invalid",
+        "bad request",
+        "unauthorized",
+        "forbidden",
+    ]
+    return any(marker in error for marker in permanent_markers)
+
+
+def _dead_letter(channel, method, routing_key: str, reason: str):
+    logger.error(
+        "[RabbitMQ] Dead-lettering message | routing_key=%s queue=%s dlq=%s reason=%s",
+        routing_key,
+        RABBITMQ_QUEUE,
+        RABBITMQ_DLQ,
+        reason,
+    )
+    channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+
+
+def _declare_rabbitmq_topology(channel):
+    """Declare the main notification queue and its DLQ."""
+    channel.exchange_declare(
+        exchange=RABBITMQ_EXCHANGE,
+        exchange_type="topic",
+        durable=True,
+    )
+    channel.exchange_declare(
+        exchange=RABBITMQ_DLX,
+        exchange_type="topic",
+        durable=True,
+    )
+    channel.queue_declare(
+        queue=RABBITMQ_QUEUE,
+        durable=True,
+        arguments={
+            "x-dead-letter-exchange": RABBITMQ_DLX,
+            "x-dead-letter-routing-key": RABBITMQ_DLQ_KEY,
+        },
+    )
+    channel.queue_declare(queue=RABBITMQ_DLQ, durable=True)
+    channel.queue_bind(
+        queue=RABBITMQ_DLQ,
+        exchange=RABBITMQ_DLX,
+        routing_key=RABBITMQ_DLQ_KEY,
+    )
 
 
 def _get_rabbitmq_params():
@@ -1498,8 +1560,7 @@ def _on_message(channel, method, properties, body):
     try:
         data = json.loads(body)
     except json.JSONDecodeError:
-        logger.error("[RabbitMQ] Invalid JSON - rejected (no requeue)")
-        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+        _dead_letter(channel, method, routing_key, "invalid JSON payload")
         return
 
     handler = RABBITMQ_HANDLERS.get(routing_key)
@@ -1513,6 +1574,8 @@ def _on_message(channel, method, properties, body):
         if result.get("success"):
             logger.info("[RabbitMQ] Email sent for '%s'", routing_key)
             channel.basic_ack(delivery_tag=method.delivery_tag)
+        elif _is_permanent_failure(result):
+            _dead_letter(channel, method, routing_key, result.get("error", "permanent handler failure"))
         else:
             logger.error("[RabbitMQ] Email failed for '%s': %s - requeued", routing_key, result.get("error"))
             channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
@@ -1528,12 +1591,7 @@ def _consume():
             connection = pika.BlockingConnection(_get_rabbitmq_params())
             channel    = connection.channel()
 
-            channel.exchange_declare(
-                exchange=RABBITMQ_EXCHANGE,
-                exchange_type="topic",
-                durable=True
-            )
-            channel.queue_declare(queue=RABBITMQ_QUEUE, durable=True)
+            _declare_rabbitmq_topology(channel)
 
             for binding_key in RABBITMQ_BINDINGS:
                 channel.queue_bind(
@@ -1542,6 +1600,12 @@ def _consume():
                     routing_key=binding_key
                 )
                 logger.info("[RabbitMQ] Bound queue to routing key: %s", binding_key)
+            logger.info(
+                "[RabbitMQ] DLQ ready | dlx=%s dlq=%s routing_key=%s",
+                RABBITMQ_DLX,
+                RABBITMQ_DLQ,
+                RABBITMQ_DLQ_KEY,
+            )
 
             channel.basic_qos(prefetch_count=1)
             channel.basic_consume(queue=RABBITMQ_QUEUE, on_message_callback=_on_message)
