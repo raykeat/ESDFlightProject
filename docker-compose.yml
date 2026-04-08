@@ -57,7 +57,7 @@ services:
       - FLIGHT_SERVICE_URL=http://flight-service:3000
       - PAYMENT_SERVICE_URL=http://payment-service:5000
       - NOTIFICATION_SERVICE_URL=http://notification-service:3004
-      - MILES_EARN_SERVICE_URL=http://miles-earn-service:5009
+      - MILES_AWARDING_COMPOSITE_URL=http://miles-awarding-composite:5013
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
       - PASSENGER_SERVICE_URL=https://personal-4whagfbm.outsystemscloud.com/Passenger_Srv/rest/PassengerAPI/  # OutSystems
     depends_on:
@@ -69,7 +69,7 @@ services:
         condition: service_started
       notification-service:
         condition: service_started
-      miles-earn-service:
+      miles-awarding-composite:
         condition: service_started
       rabbitmq:
         condition: service_started
@@ -821,7 +821,8 @@ services:
       - PORT=5013
       - RECORD_SERVICE_URL=http://record-service:3000
       - FLIGHT_SERVICE_URL=http://flight-service:3000
-      - MILES_EARN_SERVICE_URL=http://miles-earn-service:5009
+      - MILES_BALANCE_URL=http://miles-balance-service:5006
+      - MILES_TRANSACTION_URL=http://miles-transaction-service:5007
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
       - RABBITMQ_EXCHANGE=airline_events
       - FLIGHT_LANDED_KEY=flight.landed
@@ -831,7 +832,9 @@ services:
         condition: service_started
       flight-service:
         condition: service_started
-      miles-earn-service:
+      miles-balance-service:
+        condition: service_started
+      miles-transaction-service:
         condition: service_started
       rabbitmq:
         condition: service_started

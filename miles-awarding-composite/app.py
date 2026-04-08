@@ -15,7 +15,8 @@ CORS(app)
 PORT = int(os.environ.get("PORT", "5013"))
 RECORD_SERVICE_URL = os.environ.get("RECORD_SERVICE_URL", "http://record-service:3000").rstrip("/")
 FLIGHT_SERVICE_URL = os.environ.get("FLIGHT_SERVICE_URL", "http://flight-service:3000").rstrip("/")
-MILES_EARN_SERVICE_URL = os.environ.get("MILES_EARN_SERVICE_URL", "http://miles-earn-service:5009").rstrip("/")
+MILES_BALANCE_URL = os.environ.get("MILES_BALANCE_URL", "http://miles-balance-service:5006").rstrip("/")
+MILES_TRANSACTION_URL = os.environ.get("MILES_TRANSACTION_URL", "http://miles-transaction-service:5007").rstrip("/")
 
 RABBITMQ_URL = os.environ.get("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672")
 RABBITMQ_EXCHANGE = os.environ.get("RABBITMQ_EXCHANGE", "airline_events")
@@ -41,6 +42,55 @@ def parse_positive_int(value):
     except Exception:
         return None
     return None
+
+
+def ensure_balance_record(passenger_id):
+    response = requests.get(
+        f"{MILES_BALANCE_URL}/miles-balance/{passenger_id}",
+        timeout=15,
+    )
+
+    if response.status_code == 404:
+        init_response = requests.post(
+            f"{MILES_BALANCE_URL}/miles-balance/{passenger_id}/initialize",
+            json={"welcomeBonus": 0},
+            timeout=15,
+        )
+        init_response.raise_for_status()
+        return init_response.json() or {}
+
+    response.raise_for_status()
+    return response.json() or {}
+
+
+def add_miles(passenger_id, amount):
+    response = requests.put(
+        f"{MILES_BALANCE_URL}/miles-balance/{passenger_id}/add",
+        json={"amount": amount},
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json() or {}
+
+
+def deduct_miles(passenger_id, amount):
+    response = requests.put(
+        f"{MILES_BALANCE_URL}/miles-balance/{passenger_id}/deduct",
+        json={"amount": amount},
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json() or {}
+
+
+def log_transaction(payload):
+    response = requests.post(
+        f"{MILES_TRANSACTION_URL}/transactions",
+        json=payload,
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json() or {}
 
 
 def award_booking_if_completed(booking_id, force=False):
@@ -92,38 +142,64 @@ def award_booking_if_completed(booking_id, force=False):
     except Exception:
         return {"awarded": False, "reason": "invalid_amount_paid"}
 
-    earn_response = requests.post(
-        f"{MILES_EARN_SERVICE_URL}/miles/earn",
-        json={
-            "passengerID": passenger_id,
-            "flightCost": amount_paid,
-            "bookingReference": f"BK-{str(booking_id).zfill(5)}",
-            "currency": "SGD",
-            "milesPerDollar": 1,
-        },
-        timeout=20,
-    )
-    earn_response.raise_for_status()
-    earn_data = earn_response.json() or {}
+    earned_miles = int(amount_paid)
+    if earned_miles <= 0:
+        return {"awarded": False, "reason": "invalid_earned_miles"}
 
-    mark_response = requests.put(
-        f"{RECORD_SERVICE_URL}/records/{booking_id}/miles-awarded",
-        json={
-            "milesAwarded": earn_data.get("earnedMiles"),
-            "transactionID": earn_data.get("transactionID"),
-        },
-        timeout=15,
-    )
-    mark_response.raise_for_status()
+    balance_added = False
+    transaction_id = None
+
+    try:
+        ensure_balance_record(passenger_id)
+        add_miles(passenger_id, earned_miles)
+        balance_added = True
+
+        transaction_payload = {
+            "passengerID": passenger_id,
+            "milesDelta": earned_miles,
+            "transactionType": "EARNED",
+            "description": f"Earned {earned_miles} miles from flight spend {amount_paid:.2f} SGD",
+            "referenceID": f"BK-{str(booking_id).zfill(5)}",
+        }
+        transaction_response = log_transaction(transaction_payload)
+        transaction_id = transaction_response.get("transactionID")
+
+        mark_response = requests.put(
+            f"{RECORD_SERVICE_URL}/records/{booking_id}/miles-awarded",
+            json={
+                "milesAwarded": earned_miles,
+                "transactionID": transaction_id,
+            },
+            timeout=15,
+        )
+        mark_response.raise_for_status()
+    except Exception:
+        if balance_added:
+            try:
+                deduct_miles(passenger_id, earned_miles)
+            except Exception as rollback_error:
+                print(f"Miles rollback warning for booking {booking_id}: {rollback_error}")
+
+        if transaction_id:
+            try:
+                log_transaction({
+                    "passengerID": passenger_id,
+                    "milesDelta": -earned_miles,
+                    "transactionType": "ROLLBACK",
+                    "description": f"Rollback of failed miles award for booking BK-{str(booking_id).zfill(5)}",
+                    "originalTransactionID": transaction_id,
+                })
+            except Exception as rollback_error:
+                print(f"Mileage rollback transaction warning for booking {booking_id}: {rollback_error}")
+        raise
 
     return {
         "awarded": True,
         "bookingID": booking_id,
         "passengerID": passenger_id,
         "flightID": flight_id,
-        "earnedMiles": earn_data.get("earnedMiles"),
-        "transactionID": earn_data.get("transactionID"),
-        "newBalance": earn_data.get("newBalance"),
+        "earnedMiles": earned_miles,
+        "transactionID": transaction_id,
         "forced": bool(force),
     }
 
