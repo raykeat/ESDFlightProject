@@ -1,0 +1,161 @@
+openapi: 3.0.3
+info:
+  title: Loyalty Composite Service API
+  version: 1.0.0
+  description: |
+    Orchestrates miles balance, voucher generation, transaction logging, and notifications
+    for loyalty conversion flows.
+servers:
+  - url: http://localhost:5008
+    description: Docker host mapping (docker-compose)
+tags:
+  - name: Health
+  - name: Loyalty
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+
+  /api/loyalty/balance/{passengerID}:
+    get:
+      tags: [Loyalty]
+      summary: Get passenger miles balance with recent activity and active vouchers
+      parameters:
+        - in: path
+          name: passengerID
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Loyalty dashboard payload
+
+  /api/loyalty/convert:
+    post:
+      tags: [Loyalty]
+      summary: Convert miles into a single voucher
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConvertRequest'
+      responses:
+        '200':
+          description: Voucher generated successfully
+        '400':
+          description: Validation failure or insufficient miles
+        '500':
+          description: Conversion failed
+
+  /api/loyalty/convert-bundle:
+    post:
+      tags: [Loyalty]
+      summary: Convert miles into multiple vouchers in one bundle operation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConvertBundleRequest'
+      responses:
+        '200':
+          description: Bundle converted successfully
+        '400':
+          description: Validation failure or insufficient miles
+        '500':
+          description: Conversion failed
+
+  /api/loyalty/vouchers/{passengerID}:
+    get:
+      tags: [Loyalty]
+      summary: Get vouchers for a passenger
+      parameters:
+        - in: path
+          name: passengerID
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: status
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Voucher list
+
+  /api/loyalty/transactions/{passengerID}:
+    get:
+      tags: [Loyalty]
+      summary: Get loyalty transactions for a passenger
+      parameters:
+        - in: path
+          name: passengerID
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 200
+      responses:
+        '200':
+          description: Transaction history
+
+components:
+  schemas:
+    ConvertRequest:
+      type: object
+      required: [passengerID, voucherType]
+      properties:
+        passengerID:
+          type: integer
+        voucherType:
+          type: string
+          enum: [IN_FLIGHT_PERKS, TRAVEL_CREDIT]
+        milesToConvert:
+          type: integer
+          nullable: true
+          description: Required for TRAVEL_CREDIT
+        passengerEmail:
+          type: string
+          nullable: true
+        passengerName:
+          type: string
+          nullable: true
+
+    ConvertBundleRequest:
+      type: object
+      required: [passengerID, items]
+      properties:
+        passengerID:
+          type: integer
+        passengerEmail:
+          type: string
+          nullable: true
+        passengerName:
+          type: string
+          nullable: true
+        items:
+          type: array
+          items:
+            type: object
+            required: [voucherType]
+            properties:
+              voucherType:
+                type: string
+                enum: [IN_FLIGHT_PERKS, TRAVEL_CREDIT]
+              milesToConvert:
+                type: integer
+                nullable: true
+

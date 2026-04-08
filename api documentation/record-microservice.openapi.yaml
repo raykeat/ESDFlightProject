@@ -147,6 +147,41 @@ paths:
               schema:
                 $ref: '#/components/schemas/SimpleError'
 
+  /records/pending/expired:
+    get:
+      tags: [Records]
+      summary: Get pending booking records older than a threshold
+      parameters:
+        - in: query
+          name: minutes
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 5
+          example: 5
+      responses:
+        '200':
+          description: List of expired pending bookings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PendingBooking'
+        '400':
+          description: Invalid minutes value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleError'
+
   /records/{bookingID}:
     get:
       tags: [Records]
@@ -611,7 +646,7 @@ components:
           example: 299.99
         status:
           type: string
-          enum: [Pending, Confirmed, Cancelled]
+          enum: [Pending, Confirmed, Cancelled, Failed, Refund Failed]
           example: Confirmed
         travelCreditVoucherID:
           type: integer
@@ -765,3 +800,55 @@ components:
         error:
           type: string
           example: Booking not found
+
+    PendingBooking:
+      type: object
+      properties:
+        bookingID:
+          type: integer
+          example: 12
+        BookingID:
+          type: integer
+          example: 12
+        flightID:
+          type: integer
+          example: 201
+        FlightID:
+          type: integer
+          example: 201
+        seatNumber:
+          type: string
+          nullable: true
+          example: 12A
+        SeatNumber:
+          type: string
+          nullable: true
+          example: 12A
+        passengerID:
+          type: integer
+          nullable: true
+          example: 101
+        PassengerID:
+          type: integer
+          nullable: true
+          example: 101
+        bookedByPassengerID:
+          type: integer
+          example: 101
+        BookedByPassengerID:
+          type: integer
+          example: 101
+        status:
+          type: string
+          enum: [Pending]
+          example: Pending
+        bookingstatus:
+          type: string
+          enum: [Pending]
+          example: Pending
+        createdAt:
+          type: string
+          example: '2026-04-08 12:30:00'
+        CreatedTime:
+          type: string
+          example: '2026-04-08 12:30:00'

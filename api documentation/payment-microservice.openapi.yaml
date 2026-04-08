@@ -296,6 +296,73 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
+  /payments/refund:
+    post:
+      tags: [Refunds]
+      summary: Alias for full or partial refund processing
+      description: Same behavior and payload as `POST /payment/refund`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRefundRequest'
+      responses:
+        '200':
+          description: Refund completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateRefundResponse'
+        '400':
+          description: Invalid request payload or refund business rule failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Passenger mismatch with original payment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Original payment or Stripe charge not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Duplicate refund for booking
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorEnvelope'
+                  - type: object
+                    properties:
+                      refundID:
+                        type: string
+                        example: re_3QhABxKXe2tR
+        '502':
+          description: Stripe gateway error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Circuit breaker open for Stripe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
   /payment/refund/{refundID}:
     get:
       tags: [Refunds]

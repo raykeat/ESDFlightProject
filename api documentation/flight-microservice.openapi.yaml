@@ -4,7 +4,7 @@ info:
   version: 1.0.0
   description: |
     API for managing flights — status, availability, and automatic landing.
-    Routes respond on both `/flight` and `/flights` aliases.
+    The service currently accepts both `/flight` and `/flights`, but this specification documents `/flight` as the canonical path.
 servers:
   - url: http://localhost:3003
     description: Docker host mapping (docker-compose)
@@ -34,11 +34,11 @@ paths:
                     type: string
                     example: flight-service
 
-  /flights:
+  /flight:
     get:
       tags: [Flights]
       summary: Get all flights (with optional filters)
-      description: Also accessible via `/flight`. Supports filtering by origin, destination, date, and status.
+      description: Also accessible via `/flights`. Supports filtering by origin, destination, date, and status.
       parameters:
         - in: query
           name: origin
@@ -121,11 +121,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/MessageError'
 
-  /flights/{flightID}:
+  /flight/{flightID}:
     get:
       tags: [Flights]
       summary: Get flight by ID
-      description: Also accessible via `/flight/{flightID}`.
+      description: Also accessible via `/flights/{flightID}`.
       parameters:
         - in: path
           name: flightID
@@ -155,7 +155,7 @@ paths:
     put:
       tags: [Flights]
       summary: Update flight status (full update)
-      description: Also accessible via `/flight/{flightID}`. Accepts `Status` or `status` field. Setting status to `landed` automatically triggers miles award via booking-composite.
+      description: Also accessible via `/flights/{flightID}`. Accepts `Status` or `status` field. Setting status to `landed` automatically triggers miles award via booking-composite.
       parameters:
         - in: path
           name: flightID

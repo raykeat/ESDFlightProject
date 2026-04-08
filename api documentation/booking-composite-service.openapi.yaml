@@ -1,0 +1,479 @@
+openapi: 3.0.3
+info:
+  title: Booking Composite Service API
+  version: 1.0.0
+  description: |
+    Orchestrates booking creation, payment finalization, rebooking decisions, voucher release,
+    and miles award flows across the underlying microservices.
+servers:
+  - url: http://localhost:3001
+    description: Docker host mapping (docker-compose)
+tags:
+  - name: Health
+  - name: Bookings
+  - name: Rebooking
+  - name: Miles
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+
+  /api/bookings:
+    post:
+      tags: [Bookings]
+      summary: Start a booking flow and create pending records plus Stripe checkout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBookingRequest'
+      responses:
+        '200':
+          description: Pending booking created and payment session returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateBookingResponse'
+        '400':
+          description: Validation failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/bookings/finalize:
+    post:
+      tags: [Bookings]
+      summary: Finalize booking after successful payment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FinalizeBookingRequest'
+      responses:
+        '200':
+          description: Booking finalized
+        '202':
+          description: Payment not completed yet
+        '400':
+          description: Validation or payment mismatch error
+        '500':
+          description: Finalization failure
+
+  /api/bookings/{bookingID}:
+    get:
+      tags: [Bookings]
+      summary: Get a booking by booking ID
+      parameters:
+        - in: path
+          name: bookingID
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Booking found
+        '500':
+          description: Failed to fetch booking
+
+  /api/bookings/passenger/{passengerID}:
+    get:
+      tags: [Bookings]
+      summary: Get bookings for a passenger
+      parameters:
+        - in: path
+          name: passengerID
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Passenger bookings
+        '500':
+          description: Failed to fetch bookings
+
+  /api/bookings/{bookingID}/in-flight-perks:
+    post:
+      tags: [Bookings]
+      summary: Attach an in-flight perks voucher to a booking
+      parameters:
+        - in: path
+          name: bookingID
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PerksAttachRequest'
+      responses:
+        '200':
+          description: Voucher attached
+        '400':
+          description: Missing required fields
+        '403':
+          description: Booking does not belong to passenger
+
+  /api/bookings/{bookingID}/travel-credit/release:
+    post:
+      tags: [Bookings]
+      summary: Release the travel credit voucher associated with a booking
+      parameters:
+        - in: path
+          name: bookingID
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TravelCreditReleaseRequest'
+      responses:
+        '200':
+          description: Travel credit released
+        '403':
+          description: Booking does not belong to passenger
+        '404':
+          description: No travel credit attached
+
+  /api/rebooking/accept:
+    post:
+      tags: [Rebooking]
+      summary: Accept a rebooking offer and confirm replacement seats
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RebookingAcceptRequest'
+      responses:
+        '200':
+          description: Offer accepted and bookings rebooked
+        '400':
+          description: Invalid payload
+        '409':
+          description: Offer can no longer be accepted
+
+  /api/rebooking/reject:
+    post:
+      tags: [Rebooking]
+      summary: Reject a rebooking offer and optionally trigger refund flow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [offerID]
+              properties:
+                offerID:
+                  type: integer
+      responses:
+        '200':
+          description: Offer rejected
+        '400':
+          description: Missing offerID
+        '409':
+          description: Offer can no longer be rejected
+
+  /api/bookings/resume-payment:
+    post:
+      tags: [Bookings]
+      summary: Resume payment for an existing pending booking group
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bookingID]
+              properties:
+                bookingID:
+                  type: integer
+                frontendBaseUrl:
+                  type: string
+                  nullable: true
+      responses:
+        '200':
+          description: Payment session recreated
+        '404':
+          description: No pending booking group found
+        '409':
+          description: Booking is no longer pending
+        '410':
+          description: Payment hold expired
+
+  /api/bookings/cancel-pending:
+    post:
+      tags: [Bookings]
+      summary: Cancel pending booking records after payment cancellation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelPendingRequest'
+      responses:
+        '200':
+          description: Pending bookings cleaned up
+        '400':
+          description: Missing bookingID
+
+  /api/bookings/{bookingID}/award-miles:
+    post:
+      tags: [Miles]
+      summary: Award miles for a single booking
+      parameters:
+        - in: path
+          name: bookingID
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: Miles awarded or already awarded
+        '409':
+          description: Flight not landed or booking not confirmed
+
+  /api/flights/{flightID}/award-miles:
+    post:
+      tags: [Miles]
+      summary: Award miles for all confirmed bookings on a flight
+      parameters:
+        - in: path
+          name: flightID
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: Miles award summary returned
+
+components:
+  schemas:
+    CreateBookingRequest:
+      type: object
+      required: [passengerID, flightID, seatNumber]
+      properties:
+        passengerID:
+          type: integer
+        flightID:
+          type: integer
+        seatNumber:
+          type: string
+          description: Comma-separated seats for outbound leg
+        returnFlightID:
+          type: integer
+          nullable: true
+        returnSeatNumber:
+          type: string
+          nullable: true
+        amount:
+          type: number
+          format: double
+        outboundAmount:
+          type: number
+          format: double
+          nullable: true
+        returnAmount:
+          type: number
+          format: double
+          nullable: true
+        flightNumber:
+          type: string
+          nullable: true
+        cancelUrl:
+          type: string
+          nullable: true
+        frontendBaseUrl:
+          type: string
+          nullable: true
+        travelers:
+          type: array
+          items:
+            type: object
+        selectedPerksVoucherID:
+          type: integer
+          nullable: true
+        selectedPerksVoucherCode:
+          type: string
+          nullable: true
+        selectedPerksVoucherType:
+          type: string
+          nullable: true
+        selectedTravelCreditVoucherID:
+          type: integer
+          nullable: true
+        selectedTravelCreditVoucherCode:
+          type: string
+          nullable: true
+        selectedTravelCreditVoucherType:
+          type: string
+          nullable: true
+        requestedPaymentAmount:
+          type: number
+          format: double
+          nullable: true
+
+    CreateBookingResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        bookingID:
+          type: integer
+        returnBookingID:
+          type: integer
+          nullable: true
+        bookingIDs:
+          type: array
+          items:
+            type: integer
+        sessionUrl:
+          type: string
+        stripeSessionID:
+          type: string
+
+    FinalizeBookingRequest:
+      type: object
+      required: [bookingID, sessionID, flightID, seatNumber]
+      properties:
+        bookingID:
+          type: integer
+        returnBookingID:
+          type: integer
+          nullable: true
+        groupBookingIDs:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: integer
+        returnGroupBookingIDs:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: integer
+        sessionID:
+          type: string
+        flightID:
+          type: integer
+        seatNumber:
+          type: string
+        returnFlightID:
+          type: integer
+          nullable: true
+        returnSeatNumber:
+          type: string
+          nullable: true
+        selectedPerksVoucherID:
+          type: integer
+          nullable: true
+        selectedPerksVoucherCode:
+          type: string
+          nullable: true
+        selectedPerksVoucherType:
+          type: string
+          nullable: true
+
+    PerksAttachRequest:
+      type: object
+      required: [passengerID, voucherID, voucherCode]
+      properties:
+        passengerID:
+          type: integer
+        voucherID:
+          type: integer
+        voucherCode:
+          type: string
+
+    TravelCreditReleaseRequest:
+      type: object
+      properties:
+        passengerID:
+          type: integer
+        voucherID:
+          type: integer
+        voucherCode:
+          type: string
+
+    RebookingAcceptRequest:
+      type: object
+      required: [offerID, bookingIDs, seatAssignments]
+      properties:
+        offerID:
+          type: integer
+        bookingIDs:
+          type: array
+          items:
+            type: integer
+        seatAssignments:
+          type: array
+          items:
+            type: string
+        frontendBaseUrl:
+          type: string
+          nullable: true
+
+    CancelPendingRequest:
+      type: object
+      required: [bookingID]
+      properties:
+        bookingID:
+          type: integer
+        returnBookingID:
+          type: integer
+          nullable: true
+        groupBookingIDs:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: integer
+        returnGroupBookingIDs:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: integer
+
+    ErrorEnvelope:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+
