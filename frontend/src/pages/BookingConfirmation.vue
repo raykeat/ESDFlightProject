@@ -427,7 +427,7 @@ async function releaseSeatOnExit() {
   // Release outbound seats if any
   if (seatsToReleaseOnExit.outbound.flightID && seatsToReleaseOnExit.outbound.seats.length) {
     releasePromises.push(
-      axios.post(apiUrl('/seats/release'), {
+      axios.post(apiUrl('/api/seats/release'), {
         flightID: seatsToReleaseOnExit.outbound.flightID,
         seatNumber: seatsToReleaseOnExit.outbound.seats.join(','),
       }).catch(err => {
@@ -439,7 +439,7 @@ async function releaseSeatOnExit() {
   // Release return seats if any
   if (seatsToReleaseOnExit.return.flightID && seatsToReleaseOnExit.return.seats.length) {
     releasePromises.push(
-      axios.post(apiUrl('/seats/release'), {
+      axios.post(apiUrl('/api/seats/release'), {
         flightID: seatsToReleaseOnExit.return.flightID,
         seatNumber: seatsToReleaseOnExit.return.seats.join(','),
       }).catch(err => {

@@ -7,10 +7,14 @@ export default defineConfig({
   plugins: [vue(), tailwindcss()],
   server: {
     proxy: {
-      '/api/passenger': {
-        target: 'https://personal-4whagfbm.outsystemscloud.com',
+      '/api': {
+        target: 'http://localhost:8000',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/passenger/, '/Passenger_Srv/rest/PassengerAPI'),
+      },
+      '/ws': {
+        target: 'ws://localhost:8000',
+        ws: true,
+        changeOrigin: true,
       },
     },
   },

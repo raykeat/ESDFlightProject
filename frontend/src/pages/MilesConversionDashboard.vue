@@ -116,17 +116,17 @@ function getTransactionCreatedAt(transaction) {
 }
 
 function getStatusClass(status) {
-  if (status === 'ACTIVE') return 'bg-emerald-100 text-emerald-800'
-  if (status === 'USED') return 'bg-slate-200 text-slate-700'
-  if (status === 'EXPIRED') return 'bg-rose-100 text-rose-700'
-  return 'bg-sky-100 text-sky-700'
+  if (status === 'ACTIVE') return 'bg-emerald-100 text-emerald-700'
+  if (status === 'USED') return 'bg-gray-100 text-gray-700'
+  if (status === 'EXPIRED') return 'bg-red-100 text-red-700'
+  return 'bg-blue-100 text-blue-700'
 }
 
 function getTypeBadgeClass(type) {
-  if (type === 'TRAVEL_CREDIT') return 'bg-[#102a43] text-white'
-  if (type === 'IN_FLIGHT_PERKS') return 'bg-[#0f766e] text-white'
-  if (type === 'PARTNER_GIFT') return 'bg-[#9a3412] text-white'
-  return 'bg-[#334155] text-white'
+  if (type === 'TRAVEL_CREDIT') return 'bg-[#1d1d1f]/10 text-[#1d1d1f]'
+  if (type === 'IN_FLIGHT_PERKS') return 'bg-emerald-100 text-emerald-700'
+  if (type === 'PARTNER_GIFT') return 'bg-amber-100 text-amber-800'
+  return 'bg-[#f5f5f7] text-[#6e6e73]'
 }
 
 function getTypeLabel(type) {
@@ -202,8 +202,8 @@ function getTransactionTypeClass(type) {
   const normalized = String(type || '').toUpperCase()
   if (normalized === 'EARNED') return 'bg-emerald-100 text-emerald-700'
   if (normalized === 'REDEEMED') return 'bg-amber-100 text-amber-800'
-  if (normalized === 'ROLLBACK') return 'bg-slate-200 text-slate-700'
-  return 'bg-sky-100 text-sky-700'
+  if (normalized === 'ROLLBACK') return 'bg-gray-100 text-gray-700'
+  return 'bg-blue-100 text-blue-700'
 }
 
 function formatMiles(value) {
@@ -323,17 +323,17 @@ function clearFilters() {
 </script>
 
 <template>
-  <main class="min-h-screen overflow-hidden px-6 pb-10 pt-8 md:px-10 lg:px-16">
+  <main class="relative min-h-screen overflow-hidden bg-gradient-to-br from-[#fdf6f3] via-[#f3f7fb] to-[#eef7f2] px-6 pb-10 pt-8 md:px-10 lg:px-16">
+    <div class="pointer-events-none absolute -left-24 top-24 h-72 w-72 rounded-full bg-[#f43f5e]/12 blur-3xl"></div>
+    <div class="pointer-events-none absolute right-0 top-0 h-80 w-80 rounded-full bg-[#38bdf8]/12 blur-3xl"></div>
+    <div class="pointer-events-none absolute bottom-0 left-1/3 h-72 w-72 rounded-full bg-[#22c55e]/10 blur-3xl"></div>
     <section class="mx-auto max-w-[1260px]">
-      <div class="relative overflow-hidden rounded-[34px] border border-[#0f172a]/10 bg-gradient-to-br from-[#0b1729] via-[#102a43] to-[#1f3b57] p-8 text-white shadow-[0_28px_80px_rgba(8,15,28,0.32)] md:p-10">
-        <div class="pointer-events-none absolute -left-12 top-1/2 h-52 w-52 -translate-y-1/2 rounded-full bg-[#38bdf8]/20 blur-2xl"></div>
-        <div class="pointer-events-none absolute -right-16 top-0 h-56 w-56 rounded-full bg-[#22d3ee]/15 blur-2xl"></div>
-
-        <div class="relative flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+      <div class="animate__animated animate__fadeInUp rounded-[34px] border border-black/5 bg-gradient-to-br from-white/90 via-white/80 to-[#fff1f1]/80 p-8 shadow-[0_22px_52px_rgba(15,23,42,0.08)] backdrop-blur-2xl md:p-10">
+        <div class="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
           <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.18em] text-[#a5d8ff]">Loyalty Analytics</p>
-            <h1 class="mt-3 text-3xl font-semibold tracking-[-0.02em] md:text-5xl">Loyalty Activity Dashboard</h1>
-            <p class="mt-3 max-w-2xl text-sm text-[#d4e7ff] md:text-base">
+            <p class="text-xs font-semibold uppercase tracking-[0.14em] text-[#6e6e73]">Loyalty Analytics</p>
+            <h1 class="mt-3 text-4xl font-semibold tracking-[-0.03em] text-[#1d1d1f] md:text-5xl">Loyalty Activity Dashboard</h1>
+            <p class="mt-3 max-w-2xl text-sm text-[#6e6e73] md:text-base">
               A complete ledger of miles earned from completed flights and miles converted into vouchers.
             </p>
           </div>
@@ -341,13 +341,13 @@ function clearFilters() {
           <div class="grid gap-2 sm:grid-cols-2">
             <button
               @click="goToConvertMiles"
-              class="rounded-2xl border border-white/25 bg-white/10 px-5 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-white transition hover:bg-white/18"
+              class="rounded-2xl border border-black/10 bg-white px-5 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#1d1d1f] transition hover:bg-[#f5f5f7]"
             >
               Convert Miles
             </button>
             <button
               @click="goToVouchers"
-              class="rounded-2xl bg-white px-5 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#0b1729] transition hover:bg-[#f8fbff]"
+              class="rounded-2xl bg-gradient-to-r from-[#e63946] to-[#f43f5e] px-5 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-white transition hover:shadow-[0_8px_30px_rgba(230,57,70,0.35)]"
             >
               View Vouchers
             </button>
@@ -356,68 +356,68 @@ function clearFilters() {
       </div>
 
       <div class="mt-7 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <article class="rounded-2xl border border-black/8 bg-white p-5 shadow-[0_12px_34px_rgba(2,6,23,0.08)]">
-          <p class="text-xs font-semibold uppercase tracking-[0.12em] text-[#64748b]">Total Conversions</p>
-          <p class="mt-3 text-3xl font-semibold text-[#0f172a]">{{ totalVouchers.toLocaleString() }}</p>
-          <p class="mt-2 text-xs text-[#64748b]">All vouchers ever generated by miles redemption.</p>
+        <article class="rounded-2xl border border-black/8 bg-gradient-to-br from-white to-[#fff4f4] p-5 shadow-[0_12px_34px_rgba(15,23,42,0.08)]">
+          <p class="text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">Total Conversions</p>
+          <p class="mt-3 text-3xl font-semibold text-[#1d1d1f]">{{ totalVouchers.toLocaleString() }}</p>
+          <p class="mt-2 text-xs text-[#6e6e73]">All vouchers ever generated by miles redemption.</p>
         </article>
 
-        <article class="rounded-2xl border border-black/8 bg-white p-5 shadow-[0_12px_34px_rgba(2,6,23,0.08)]">
-          <p class="text-xs font-semibold uppercase tracking-[0.12em] text-[#64748b]">Miles Converted</p>
-          <p class="mt-3 text-3xl font-semibold text-[#0f172a]">{{ totalMilesConverted.toLocaleString() }}</p>
-          <p class="mt-2 text-xs text-[#64748b]">Cumulative miles moved into voucher rewards.</p>
+        <article class="rounded-2xl border border-black/8 bg-gradient-to-br from-white to-[#f4f9ff] p-5 shadow-[0_12px_34px_rgba(15,23,42,0.08)]">
+          <p class="text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">Miles Converted</p>
+          <p class="mt-3 text-3xl font-semibold text-[#1d1d1f]">{{ totalMilesConverted.toLocaleString() }}</p>
+          <p class="mt-2 text-xs text-[#6e6e73]">Cumulative miles moved into voucher rewards.</p>
         </article>
 
-        <article class="rounded-2xl border border-black/8 bg-white p-5 shadow-[0_12px_34px_rgba(2,6,23,0.08)]">
-          <p class="text-xs font-semibold uppercase tracking-[0.12em] text-[#64748b]">Issued Value</p>
-          <p class="mt-3 text-3xl font-semibold text-[#0f172a]">{{ formatMoney(totalMonetaryValue) }}</p>
-          <p class="mt-2 text-xs text-[#64748b]">Includes approximate values for non-cash vouchers (100 miles ~= $1).</p>
+        <article class="rounded-2xl border border-black/8 bg-gradient-to-br from-white to-[#f6f9f6] p-5 shadow-[0_12px_34px_rgba(15,23,42,0.08)]">
+          <p class="text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">Issued Value</p>
+          <p class="mt-3 text-3xl font-semibold text-[#1d1d1f]">{{ formatMoney(totalMonetaryValue) }}</p>
+          <p class="mt-2 text-xs text-[#6e6e73]">Includes approximate values for non-cash vouchers (100 miles ~= $1).</p>
         </article>
 
-        <article class="rounded-2xl border border-black/8 bg-white p-5 shadow-[0_12px_34px_rgba(2,6,23,0.08)]">
-          <p class="text-xs font-semibold uppercase tracking-[0.12em] text-[#64748b]">Miles Earned (Flights)</p>
-          <p class="mt-3 text-3xl font-semibold text-[#0f172a]">{{ totalMilesEarnedFromFlights.toLocaleString() }}</p>
-          <p class="mt-2 text-xs text-[#64748b]">Latest activity: {{ formatDateTime(lastLoyaltyActivityAt) }}</p>
+        <article class="rounded-2xl border border-black/8 bg-gradient-to-br from-[#e63946]/5 via-transparent to-[#ff6b6b]/5 p-5 shadow-[0_12px_34px_rgba(15,23,42,0.08)]">
+          <p class="text-xs font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">Miles Earned (Flights)</p>
+          <p class="mt-3 text-3xl font-semibold text-[#1d1d1f]">{{ totalMilesEarnedFromFlights.toLocaleString() }}</p>
+          <p class="mt-2 text-xs text-[#6e6e73]">Latest activity: {{ formatDateTime(lastLoyaltyActivityAt) }}</p>
         </article>
       </div>
 
-      <section class="mt-7 rounded-3xl border border-black/8 bg-white p-5 shadow-[0_20px_52px_rgba(2,6,23,0.10)] md:p-6">
+      <section class="mt-7 rounded-3xl border border-black/8 bg-gradient-to-br from-white/90 to-[#f7f8fb]/90 p-5 shadow-[0_20px_52px_rgba(15,23,42,0.10)] backdrop-blur md:p-6">
         <div class="grid gap-3 lg:grid-cols-[1.2fr_repeat(3,minmax(0,1fr))_auto]">
           <label class="block">
-            <span class="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[#64748b]">Search</span>
+            <span class="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">Search</span>
             <input
               v-model="searchQuery"
               type="text"
               placeholder="Code, type, miles..."
-              class="w-full rounded-xl border border-black/10 bg-[#f8fafc] px-3 py-2.5 text-sm text-[#0f172a] outline-none transition focus:border-[#0ea5e9] focus:ring-2 focus:ring-[#0ea5e9]/20"
+              class="w-full rounded-xl border border-black/10 bg-[#f5f5f7] px-3 py-2.5 text-sm text-[#1d1d1f] outline-none transition focus:border-[#e63946]/65 focus:ring-2 focus:ring-[#e63946]/20"
             />
           </label>
 
           <label class="block">
-            <span class="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[#64748b]">Status</span>
+            <span class="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">Status</span>
             <select
               v-model="statusFilter"
-              class="w-full rounded-xl border border-black/10 bg-[#f8fafc] px-3 py-2.5 text-sm text-[#0f172a] outline-none transition focus:border-[#0ea5e9] focus:ring-2 focus:ring-[#0ea5e9]/20"
+              class="w-full rounded-xl border border-black/10 bg-[#f5f5f7] px-3 py-2.5 text-sm text-[#1d1d1f] outline-none transition focus:border-[#e63946]/65 focus:ring-2 focus:ring-[#e63946]/20"
             >
               <option v-for="status in statusOptions" :key="status" :value="status">{{ status }}</option>
             </select>
           </label>
 
           <label class="block">
-            <span class="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[#64748b]">Voucher Type</span>
+            <span class="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">Voucher Type</span>
             <select
               v-model="typeFilter"
-              class="w-full rounded-xl border border-black/10 bg-[#f8fafc] px-3 py-2.5 text-sm text-[#0f172a] outline-none transition focus:border-[#0ea5e9] focus:ring-2 focus:ring-[#0ea5e9]/20"
+              class="w-full rounded-xl border border-black/10 bg-[#f5f5f7] px-3 py-2.5 text-sm text-[#1d1d1f] outline-none transition focus:border-[#e63946]/65 focus:ring-2 focus:ring-[#e63946]/20"
             >
               <option v-for="type in typeOptions" :key="type" :value="type">{{ type }}</option>
             </select>
           </label>
 
           <label class="block">
-            <span class="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[#64748b]">Date Window</span>
+            <span class="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">Date Window</span>
             <select
               v-model="dateFilter"
-              class="w-full rounded-xl border border-black/10 bg-[#f8fafc] px-3 py-2.5 text-sm text-[#0f172a] outline-none transition focus:border-[#0ea5e9] focus:ring-2 focus:ring-[#0ea5e9]/20"
+              class="w-full rounded-xl border border-black/10 bg-[#f5f5f7] px-3 py-2.5 text-sm text-[#1d1d1f] outline-none transition focus:border-[#e63946]/65 focus:ring-2 focus:ring-[#e63946]/20"
             >
               <option value="ALL">ALL</option>
               <option value="7D">LAST 7 DAYS</option>
@@ -428,20 +428,20 @@ function clearFilters() {
 
           <button
             @click="clearFilters"
-            class="self-end rounded-xl border border-black/10 bg-white px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.12em] text-[#0f172a] transition hover:bg-[#f8fafc]"
+            class="self-end rounded-xl border border-black/10 bg-white px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.12em] text-[#1d1d1f] transition hover:bg-[#f5f5f7]"
           >
             Reset
           </button>
         </div>
       </section>
 
-      <section class="mt-6 overflow-hidden rounded-3xl border border-black/8 bg-white shadow-[0_20px_60px_rgba(2,6,23,0.10)]">
-        <div class="border-b border-black/8 bg-gradient-to-r from-[#f8fbff] to-[#eef6ff] px-6 py-4">
-          <h2 class="text-lg font-semibold text-[#0f172a]">Conversion Transactions</h2>
-          <p class="mt-1 text-xs text-[#64748b]">Showing {{ filteredVouchers.length }} of {{ vouchers.length }} records</p>
+      <section class="mt-6 overflow-hidden rounded-3xl border border-black/8 bg-gradient-to-br from-white/95 to-[#fff7f7]/90 shadow-[0_20px_60px_rgba(15,23,42,0.10)]">
+        <div class="border-b border-black/8 bg-gradient-to-r from-[#fff5f5] to-[#fff0f1] px-6 py-4">
+          <h2 class="text-lg font-semibold text-[#1d1d1f]">Conversion Transactions</h2>
+          <p class="mt-1 text-xs text-[#6e6e73]">Showing {{ filteredVouchers.length }} of {{ vouchers.length }} records</p>
         </div>
 
-        <div v-if="loading" class="px-6 py-16 text-center text-sm text-[#64748b]">
+        <div v-if="loading" class="px-6 py-16 text-center text-sm text-[#6e6e73]">
           Loading conversion history...
         </div>
 
@@ -451,11 +451,11 @@ function clearFilters() {
 
         <div v-else-if="filteredVouchers.length === 0" class="px-6 py-16 text-center">
           <p class="text-5xl">🧾</p>
-          <p class="mt-3 text-lg font-semibold text-[#0f172a]">No conversion records match this filter</p>
-          <p class="mt-2 text-sm text-[#64748b]">Try resetting filters or convert miles to generate your first voucher transaction.</p>
+          <p class="mt-3 text-lg font-semibold text-[#1d1d1f]">No conversion records match this filter</p>
+          <p class="mt-2 text-sm text-[#6e6e73]">Try resetting filters or convert miles to generate your first voucher transaction.</p>
           <button
             @click="goToConvertMiles"
-            class="mt-5 rounded-xl bg-[#0f172a] px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.12em] text-white transition hover:bg-[#1e293b]"
+            class="mt-5 rounded-xl bg-gradient-to-r from-[#e63946] to-[#f43f5e] px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.12em] text-white transition hover:shadow-[0_8px_20px_rgba(230,57,70,0.35)]"
           >
             Convert Miles
           </button>
@@ -464,7 +464,7 @@ function clearFilters() {
         <div v-else class="overflow-x-auto">
           <table class="min-w-[980px] w-full">
             <thead>
-              <tr class="bg-[#f8fafc] text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#64748b]">
+              <tr class="bg-[#f5f5f7] text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">
                 <th class="px-6 py-3">Date</th>
                 <th class="px-6 py-3">Voucher Code</th>
                 <th class="px-6 py-3">Type</th>
@@ -478,18 +478,18 @@ function clearFilters() {
               <tr
                 v-for="voucher in filteredVouchers"
                 :key="voucher.voucherID || getVoucherCode(voucher)"
-                class="border-t border-black/5 text-sm transition hover:bg-[#fbfdff]"
+                class="border-t border-black/5 text-sm transition hover:bg-[#fff8f8]"
               >
-                <td class="px-6 py-4 font-medium text-[#0f172a]">{{ formatDateTime(getCreatedAt(voucher)) }}</td>
-                <td class="px-6 py-4 font-mono text-xs text-[#0f172a]">{{ getVoucherCode(voucher) }}</td>
+                <td class="px-6 py-4 font-medium text-[#1d1d1f]">{{ formatDateTime(getCreatedAt(voucher)) }}</td>
+                <td class="px-6 py-4 font-mono text-xs text-[#1d1d1f]">{{ getVoucherCode(voucher) }}</td>
                 <td class="px-6 py-4">
                   <span :class="['inline-flex rounded-lg px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.1em]', getTypeBadgeClass(getVoucherType(voucher))]">
                     {{ getTypeLabel(getVoucherType(voucher)) }}
                   </span>
                 </td>
-                <td class="px-6 py-4 font-semibold text-[#0f172a]">{{ getMilesRedeemed(voucher).toLocaleString() }}</td>
-                <td class="px-6 py-4 font-semibold text-[#0f172a]">{{ formatVoucherDisplayValue(voucher) }}</td>
-                <td class="px-6 py-4 text-[#334155]">{{ formatDate(voucher.expiryDate) }}</td>
+                <td class="px-6 py-4 font-semibold text-[#1d1d1f]">{{ getMilesRedeemed(voucher).toLocaleString() }}</td>
+                <td class="px-6 py-4 font-semibold text-[#1d1d1f]">{{ formatVoucherDisplayValue(voucher) }}</td>
+                <td class="px-6 py-4 text-[#6e6e73]">{{ formatDate(voucher.expiryDate) }}</td>
                 <td class="px-6 py-4">
                   <span :class="['inline-flex rounded-lg px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.1em]', getStatusClass(voucher.status)]">
                     {{ voucher.status || 'UNKNOWN' }}
@@ -501,13 +501,13 @@ function clearFilters() {
         </div>
       </section>
 
-      <section class="mt-6 overflow-hidden rounded-3xl border border-black/8 bg-white shadow-[0_20px_60px_rgba(2,6,23,0.10)]">
-        <div class="border-b border-black/8 bg-gradient-to-r from-[#f4fffb] to-[#e8fff7] px-6 py-4">
-          <h2 class="text-lg font-semibold text-[#0f172a]">Miles Earned From Completed Flights</h2>
-          <p class="mt-1 text-xs text-[#64748b]">Showing {{ filteredEarnedTransactions.length }} of {{ earnedFlightTransactions.length }} records</p>
+      <section class="mt-6 overflow-hidden rounded-3xl border border-black/8 bg-gradient-to-br from-white/95 to-[#f5f8fb]/90 shadow-[0_20px_60px_rgba(15,23,42,0.10)]">
+        <div class="border-b border-black/8 bg-gradient-to-r from-[#f5f5f7] to-[#efefef] px-6 py-4">
+          <h2 class="text-lg font-semibold text-[#1d1d1f]">Miles Earned From Completed Flights</h2>
+          <p class="mt-1 text-xs text-[#6e6e73]">Showing {{ filteredEarnedTransactions.length }} of {{ earnedFlightTransactions.length }} records</p>
         </div>
 
-        <div v-if="loading" class="px-6 py-16 text-center text-sm text-[#64748b]">
+        <div v-if="loading" class="px-6 py-16 text-center text-sm text-[#6e6e73]">
           Loading earned miles history...
         </div>
 
@@ -517,14 +517,14 @@ function clearFilters() {
 
         <div v-else-if="filteredEarnedTransactions.length === 0" class="px-6 py-16 text-center">
           <p class="text-5xl">🛬</p>
-          <p class="mt-3 text-lg font-semibold text-[#0f172a]">No earned miles records in this filter</p>
-          <p class="mt-2 text-sm text-[#64748b]">Miles appear here after bookings are confirmed and flights are marked as landed.</p>
+          <p class="mt-3 text-lg font-semibold text-[#1d1d1f]">No earned miles records in this filter</p>
+          <p class="mt-2 text-sm text-[#6e6e73]">Miles appear here after bookings are confirmed and flights are marked as landed.</p>
         </div>
 
         <div v-else class="overflow-x-auto">
           <table class="min-w-[920px] w-full">
             <thead>
-              <tr class="bg-[#f8fafc] text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#64748b]">
+              <tr class="bg-[#f5f5f7] text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6e6e73]">
                 <th class="px-6 py-3">Date</th>
                 <th class="px-6 py-3">Booking Ref</th>
                 <th class="px-6 py-3">Type</th>
@@ -536,17 +536,17 @@ function clearFilters() {
               <tr
                 v-for="entry in filteredEarnedTransactions"
                 :key="entry.transactionID"
-                class="border-t border-black/5 text-sm transition hover:bg-[#fbfdff]"
+                class="border-t border-black/5 text-sm transition hover:bg-[#fff8f8]"
               >
-                <td class="px-6 py-4 font-medium text-[#0f172a]">{{ formatDateTime(getTransactionCreatedAt(entry)) }}</td>
-                <td class="px-6 py-4 font-mono text-xs text-[#0f172a]">{{ entry.referenceID || 'N/A' }}</td>
+                <td class="px-6 py-4 font-medium text-[#1d1d1f]">{{ formatDateTime(getTransactionCreatedAt(entry)) }}</td>
+                <td class="px-6 py-4 font-mono text-xs text-[#1d1d1f]">{{ entry.referenceID || 'N/A' }}</td>
                 <td class="px-6 py-4">
                   <span :class="['inline-flex rounded-lg px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.1em]', getTransactionTypeClass(entry.transactionType)]">
                     {{ getTransactionTypeLabel(entry.transactionType) }}
                   </span>
                 </td>
                 <td class="px-6 py-4 font-semibold text-emerald-700">{{ formatMiles(entry.milesDelta) }}</td>
-                <td class="px-6 py-4 text-[#334155]">{{ entry.description || 'N/A' }}</td>
+                <td class="px-6 py-4 text-[#6e6e73]">{{ entry.description || 'N/A' }}</td>
               </tr>
             </tbody>
           </table>
